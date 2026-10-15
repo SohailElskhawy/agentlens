@@ -1,4 +1,5 @@
 import { existsSync, globSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readLines } from '../jsonl.ts';
 import { hash } from '../util.ts';
@@ -6,7 +7,8 @@ import type { Adapter, NormalizedEvent, SessionInfo } from '../types.ts';
 
 export const claude: Adapter = {
   agent: 'claude',
-  root: (home) => join(process.env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'), 'projects'),
+  // The env override only applies to the real home; a custom source home (AGENTLENS_SOURCE_HOME, tests) is honored as given.
+  root: (home) => join(home === homedir() && process.env.CLAUDE_CONFIG_DIR ? process.env.CLAUDE_CONFIG_DIR : join(home, '.claude'), 'projects'),
   discover: (root) => existsSync(root)
     ? [...globSync('*/*.jsonl', { cwd: root }), ...globSync('*/*/subagents/*.jsonl', { cwd: root })].map((p) => join(root, p))
     : [],
@@ -19,6 +21,7 @@ export const claude: Adapter = {
     const offset = readLines(path, cursor.offset, (line) => {
       let r: any;
       try { r = JSON.parse(line); } catch { errors++; return; }
+      if (!r || typeof r !== 'object') { errors++; return; }
       if (r.type !== 'user' && r.type !== 'assistant') return;
       // Subagent records keep the parent's id in sessionId and their own in agentId.
       const sub = r.isSidechain && r.agentId;
@@ -41,7 +44,7 @@ export const claude: Adapter = {
           });
         }
         for (const b of Array.isArray(content) ? content : []) {
-          if (b.type === 'tool_use') events.push({ ...base, id: `claude:${b.id}`, kind: 'tool_call', tool: b.name, argsHash: hash(JSON.stringify(b.input ?? {})) });
+          if (b?.type === 'tool_use') events.push({ ...base, id: `claude:${b.id}`, kind: 'tool_call', tool: b.name, argsHash: hash(JSON.stringify(b.input ?? {})) });
         }
         return;
       }
@@ -52,10 +55,10 @@ export const claude: Adapter = {
         return;
       }
       if (!Array.isArray(content)) return;
-      const text = content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+      const text = content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('\n');
       if (text) events.push({ ...base, id: `claude:${r.uuid}`, kind: 'user', textHash: hash(text), textLen: text.length });
       for (const b of content) {
-        if (b.type !== 'tool_result') continue;
+        if (b?.type !== 'tool_result') continue;
         const body = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '');
         events.push({ ...base, id: `claude:${b.tool_use_id}:result`, kind: 'tool_result', resultBytes: Buffer.byteLength(body), isError: !!b.is_error });
       }

@@ -1,4 +1,5 @@
 import { existsSync, globSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { readLines } from '../jsonl.ts';
 import { hash } from '../util.ts';
@@ -8,7 +9,8 @@ const WINDOWS: Record<number, '5h' | '7d'> = { 300: '5h', 10080: '7d' };
 
 export const codex: Adapter = {
   agent: 'codex',
-  root: (home) => join(process.env.CODEX_HOME ?? join(home, '.codex'), 'sessions'),
+  // The env override only applies to the real home; a custom source home (AGENTLENS_SOURCE_HOME, tests) is honored as given.
+  root: (home) => join(home === homedir() && process.env.CODEX_HOME ? process.env.CODEX_HOME : join(home, '.codex'), 'sessions'),
   discover: (root) => existsSync(root) ? globSync('**/rollout-*.jsonl', { cwd: root }).map((p) => join(root, p)) : [],
 
   read(path, cursor) {
@@ -23,6 +25,7 @@ export const codex: Adapter = {
     const offset = readLines(path, cursor.offset, (line) => {
       let r: any;
       try { r = JSON.parse(line); } catch { errors++; return; }
+      if (!r || typeof r !== 'object') { errors++; return; }
       const p = r.payload ?? {};
       const ts = Date.parse(r.timestamp);
       if (Number.isNaN(ts)) return;

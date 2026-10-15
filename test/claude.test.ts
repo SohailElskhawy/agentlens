@@ -70,3 +70,32 @@ test('discover finds main session files and subagent files', () => {
   assert.deepEqual(claude.discover(claude.root(home)).sort(), [file, sub].sort());
   assert.deepEqual(claude.discover(join(home, 'missing')), []);
 });
+
+test('root ignores an ambient CLAUDE_CONFIG_DIR unless home is the real home', () => {
+  const home = tmp();
+  const prev = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = '/nonexistent/cc';
+  try {
+    assert.equal(claude.root(home), join(home, '.claude', 'projects'));
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prev;
+  }
+});
+
+test('a non-object JSON line is counted and skipped, and a null content block does not abort the read', () => {
+  const home = tmp();
+  const file = put(join(home, '.claude/projects/-p/s1.jsonl'),
+    jsonl(cAssistant({ msg: 'a1', req: 'ra' }))
+    + 'null\n'
+    + jsonl(
+      cAssistant({ msg: 'b1', req: 'rb', content: [null, { type: 'tool_use', id: 'toolu_9', name: 'Read', input: {} }] }),
+      cUser({ uuid: 'u9', content: [null, { type: 'text', text: 'hi' }] }),
+    ));
+  const r = claude.read(file, { offset: 0, state: {} });
+  assert.equal(r.errors, 1);
+  assert.ok(r.events.some((e) => e.id === 'claude:a1:ra'));
+  assert.ok(r.events.some((e) => e.id === 'claude:b1:rb'));
+  assert.ok(r.events.some((e) => e.id === 'claude:toolu_9'));
+  assert.ok(r.events.some((e) => e.id === 'claude:u9'));
+  assert.equal(r.cursor.offset, statSync(file).size);
+});

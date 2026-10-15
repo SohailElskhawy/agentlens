@@ -58,3 +58,24 @@ test('codex discover walks the dated session tree', () => {
   put(join(home, '.codex/sessions/2026/10/15/notes.txt'), '');
   assert.deepEqual(codex.discover(codex.root(home)), [f]);
 });
+
+test('codex root ignores an ambient CODEX_HOME unless home is the real home', () => {
+  const home = tmp();
+  const prev = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = '/nonexistent/cx';
+  try {
+    assert.equal(codex.root(home), join(home, '.codex', 'sessions'));
+  } finally {
+    if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+  }
+});
+
+test('codex: a non-object JSON line is counted and skipped; later records still ingest', () => {
+  const home = tmp();
+  const file = put(join(home, `.codex/sessions/2026/10/15/rollout-2026-10-15T10-00-00-${ID}.jsonl`),
+    jsonl(head[0]) + 'null\n' + jsonl(head[1], rest[2], rest[3]));
+  const r = codex.read(file, { offset: 0, state: {} });
+  assert.equal(r.errors, 1);
+  assert.deepEqual(r.events.map((e) => e.id), ['codex:c1', 'codex:c1:result']);
+  assert.equal(r.sessions[0].cwd, '/work/app');
+});
