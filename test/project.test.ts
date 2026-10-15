@@ -7,7 +7,7 @@ import { tmp, put } from './helpers.ts';
 
 test('a subdirectory of a repo maps to the repo root', () => {
   const repo = join(tmp(), 'app');
-  mkdirSync(join(repo, '.git'), { recursive: true });
+  put(join(repo, '.git/HEAD'), 'ref: refs/heads/main\n');
   mkdirSync(join(repo, 'src/deep'), { recursive: true });
   assert.equal(projectRoot(join(repo, 'src/deep')), repo);
   assert.equal(projectName(repo), 'app');
@@ -27,4 +27,12 @@ test('a directory outside any repo, or one that no longer exists, is its own pro
   assert.equal(projectRoot(plain), plain);
   const gone = join(tmp(), 'deleted/long/ago');
   assert.equal(projectRoot(gone), gone);
+});
+
+test('an empty .git directory (no HEAD) is not a repository', () => {
+  const base = tmp();
+  mkdirSync(join(base, '.git'));
+  const child = join(base, 'x');
+  mkdirSync(child);
+  assert.equal(projectRoot(child), child);
 });

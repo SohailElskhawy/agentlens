@@ -14,8 +14,8 @@ export function projectRoot(cwd: string): string {
   for (let dir = cwd; ; dir = dirname(dir)) {
     const git = join(dir, '.git');
     if (existsSync(git)) {
-      root = statSync(git).isFile() ? (worktreeMain(git) ?? dir) : dir;
-      break;
+      if (statSync(git).isFile()) { root = worktreeMain(git) ?? dir; break; }
+      if (existsSync(join(git, 'HEAD'))) { root = dir; break; } // git ignores a .git dir without HEAD
     }
     if (dirname(dir) === dir) break;
   }
