@@ -1,1 +1,47 @@
-<!doctype html><title>agentlens</title>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agentlens</title>
+  <link rel="stylesheet" href="vendor/uPlot.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="#/overview">agentlens</a>
+    <nav aria-label="Pages">
+      <a href="#/overview">Overview</a>
+      <a href="#/projects">Projects</a>
+      <a href="#/sessions">Sessions</a>
+      <a href="#/quota">Quota</a>
+      <a href="#/health">Health</a>
+    </nav>
+    <form class="filters" onsubmit="return false">
+      <label>Range
+        <select id="f-range">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="0">All time</option>
+        </select>
+      </label>
+      <label>Agent
+        <select id="f-agent">
+          <option value="">All agents</option>
+          <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
+          <option value="opencode">OpenCode</option>
+          <option value="antigravity">Antigravity</option>
+        </select>
+      </label>
+      <label>Project
+        <select id="f-project"><option value="">All projects</option></select>
+      </label>
+    </form>
+  </header>
+  <main id="main"></main>
+  <script src="vendor/uPlot.iife.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
