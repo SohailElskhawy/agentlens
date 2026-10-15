@@ -30,15 +30,21 @@ export async function ingest(db: DB, home: string, adapters = ADAPTERS): Promise
         stats.errors++;
         continue;
       }
-      tx(db, () => {
-        upsertEvents(db, r.events);
-        upsertSessions(db, r.sessions.map((s) => {
-          const root = s.cwd ? projectRoot(s.cwd) : undefined;
-          return { ...s, projectId: root ? upsertProject(db, root, projectName(root)) : null };
-        }));
-        insertQuotas(db, r.quotas);
-        setCursor(db, path, a.agent, r.cursor, r.errors);
-      });
+      try {
+        tx(db, () => {
+          upsertEvents(db, r.events);
+          upsertSessions(db, r.sessions.map((s) => {
+            const root = typeof s.cwd === 'string' && s.cwd ? projectRoot(s.cwd) : undefined; // logs are untrusted: cwd may not be a string (or may be empty)
+            return { ...s, projectId: root ? upsertProject(db, root, projectName(root)) : null };
+          }));
+          insertQuotas(db, r.quotas);
+          setCursor(db, path, a.agent, r.cursor, r.errors);
+        });
+      } catch (e) { // one bad file must not wedge every later file and adapter
+        console.error(`agentlens: could not ingest ${path}: ${(e as Error).message}`);
+        stats.errors++;
+        continue;
+      }
       stats.read++;
       stats.events += r.events.length;
       stats.errors += r.errors;
