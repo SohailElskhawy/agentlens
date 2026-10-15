@@ -63,6 +63,7 @@ function quotaTiles(latest) {
   return ['claude', 'codex'].flatMap((agent) => ['5h', '7d'].map((win) => {
     const q = latest.find((l) => l.agent === agent && l.win === win);
     const name = `${AGENTS[agent]} ${win}`;
+    if (state.agent && state.agent !== agent) return tile('Quota used (reported by agent)', 'n/a', `${name}: hidden by the Agent filter`);
     if (!q) return tile('Quota used (reported by agent)', 'n/a', `${name}: not reported yet`);
     if (q.resetsAt < Date.now()) return tile('Quota used (reported by agent)', 'n/a', `${name}: window reset since the last report`);
     return tile('Quota used (reported by agent)', `${Math.round(q.usedPct)}%`, `${name} · resets ${fmtTime(q.resetsAt)}`);
@@ -173,7 +174,7 @@ async function render() {
   if (name === 'project') {
     state.project = arg;
     $('#f-project').value = arg;
-    location.hash = '#/overview';
+    location.replace('#/overview'); // replace, not assign: assigning would leave #/project/<id> in history and trap the Back button
     return;
   }
   document.querySelectorAll('nav a').forEach((a) => {
