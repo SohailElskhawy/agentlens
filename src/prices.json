@@ -1,0 +1,1637 @@
+{
+ "asOf": "2026-10-15",
+ "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+ "models": {
+  "claude-haiku-4-5-20251001": {
+   "input": 0.000001,
+   "output": 0.000005,
+   "cacheRead": 1e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.000002
+  },
+  "claude-haiku-4-5": {
+   "input": 0.000001,
+   "output": 0.000005,
+   "cacheRead": 1e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.000002
+  },
+  "claude-sonnet-4-5": {
+   "input": 0.000003,
+   "output": 0.000015,
+   "cacheRead": 3e-7,
+   "cacheWrite": 0.00000375,
+   "cacheWrite1h": 0.000006
+  },
+  "claude-sonnet-4-5-20250929": {
+   "input": 0.000003,
+   "output": 0.000015,
+   "cacheRead": 3e-7,
+   "cacheWrite": 0.00000375,
+   "cacheWrite1h": 0.000006
+  },
+  "claude-sonnet-5": {
+   "input": 0.000002,
+   "output": 0.00001,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.000004
+  },
+  "claude-sonnet-5-5": {
+   "input": 0.000002,
+   "output": 0.00001,
+   "cacheRead": 1e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.000004
+  },
+  "claude-sonnet-4-6": {
+   "input": 0.000003,
+   "output": 0.000015,
+   "cacheRead": 3e-7,
+   "cacheWrite": 0.00000375,
+   "cacheWrite1h": 0.000006
+  },
+  "claude-sonnet-4-5-20250929-v1:0": {
+   "input": 0.000003,
+   "output": 0.000015,
+   "cacheRead": 3e-7,
+   "cacheWrite": 0.00000375,
+   "cacheWrite1h": 0.000006
+  },
+  "claude-opus-4-5-20251101": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.00000625,
+   "cacheWrite1h": 0.00001
+  },
+  "claude-opus-4-5": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.00000625,
+   "cacheWrite1h": 0.00001
+  },
+  "claude-opus-4-6": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.00000625,
+   "cacheWrite1h": 0.00001
+  },
+  "claude-opus-4-6-20260205": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.00000625,
+   "cacheWrite1h": 0.00001
+  },
+  "claude-opus-4-7": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.00000625,
+   "cacheWrite1h": 0.00001
+  },
+  "claude-opus-4-7-20260416": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.00000625,
+   "cacheWrite1h": 0.00001
+  },
+  "claude-fable-5": {
+   "input": 0.00001,
+   "output": 0.00005,
+   "cacheRead": 0.000001,
+   "cacheWrite": 0.0000125,
+   "cacheWrite1h": 0.00002
+  },
+  "claude-fable-5-1": {
+   "input": 0.00001,
+   "output": 0.00005,
+   "cacheRead": 2.5e-7,
+   "cacheWrite": 0.0000125,
+   "cacheWrite1h": 0.00002
+  },
+  "claude-opus-5-5": {
+   "input": 0.000004,
+   "output": 0.00002,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000008
+  },
+  "claude-opus-5": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.00000625,
+   "cacheWrite1h": 0.00001
+  },
+  "claude-opus-4-8": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.00000625,
+   "cacheWrite1h": 0.00001
+  },
+  "deepseek-chat": {
+   "input": 2.8e-7,
+   "output": 4.2e-7,
+   "cacheRead": 2.8e-8,
+   "cacheWrite": 2.8e-7,
+   "cacheWrite1h": 2.8e-7
+  },
+  "deepseek-reasoner": {
+   "input": 2.8e-7,
+   "output": 4.2e-7,
+   "cacheRead": 2.8e-8,
+   "cacheWrite": 2.8e-7,
+   "cacheWrite1h": 2.8e-7
+  },
+  "qwencloud/deepseek-v4-flash": {
+   "input": 2e-7,
+   "output": 4e-7,
+   "cacheRead": 4e-8,
+   "cacheWrite": 2e-7,
+   "cacheWrite1h": 2e-7
+  },
+  "qwencloud/deepseek-v4-flash-0731": {
+   "input": 2e-7,
+   "output": 4e-7,
+   "cacheRead": 4e-8,
+   "cacheWrite": 2e-7,
+   "cacheWrite1h": 2e-7
+  },
+  "qwencloud/deepseek-v4-pro": {
+   "input": 0.0000024,
+   "output": 0.0000048,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.0000024,
+   "cacheWrite1h": 0.0000024
+  },
+  "qwencloud/glm-5.1": {
+   "input": 0.0000014,
+   "output": 0.0000044,
+   "cacheRead": 2.6e-7,
+   "cacheWrite": 0.0000014,
+   "cacheWrite1h": 0.0000014
+  },
+  "qwencloud/glm-5.2": {
+   "input": 0.0000014,
+   "output": 0.0000044,
+   "cacheRead": 2.8e-7,
+   "cacheWrite": 0.0000014,
+   "cacheWrite1h": 0.0000014
+  },
+  "qwencloud/kimi-k2.7-code": {
+   "input": 9.5e-7,
+   "output": 0.000004,
+   "cacheRead": 1.9e-7,
+   "cacheWrite": 9.5e-7,
+   "cacheWrite1h": 9.5e-7
+  },
+  "qwencloud/qwen-coder": {
+   "input": 3e-7,
+   "output": 0.0000015,
+   "cacheRead": 3e-7,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
+  "qwencloud/qwen-max": {
+   "input": 0.0000016,
+   "output": 0.0000064,
+   "cacheRead": 0.0000016,
+   "cacheWrite": 0.0000016,
+   "cacheWrite1h": 0.0000016
+  },
+  "qwencloud/qwen-plus": {
+   "input": 4e-7,
+   "output": 0.0000012,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwencloud/qwen-plus-2025-01-25": {
+   "input": 4e-7,
+   "output": 0.0000012,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwencloud/qwen-plus-2025-04-28": {
+   "input": 4e-7,
+   "output": 0.0000012,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwencloud/qwen-plus-2025-07-14": {
+   "input": 4e-7,
+   "output": 0.0000012,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwencloud/qwen-turbo": {
+   "input": 5e-8,
+   "output": 2e-7,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "qwencloud/qwen-turbo-2024-11-01": {
+   "input": 5e-8,
+   "output": 2e-7,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "qwencloud/qwen-turbo-2025-04-28": {
+   "input": 5e-8,
+   "output": 2e-7,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "qwencloud/qwen-turbo-latest": {
+   "input": 5e-8,
+   "output": 2e-7,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "qwencloud/qwen3-next-80b-a3b-instruct": {
+   "input": 1.5e-7,
+   "output": 0.0000012,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "qwencloud/qwen3-next-80b-a3b-thinking": {
+   "input": 1.5e-7,
+   "output": 0.0000012,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "qwencloud/qwen3-vl-235b-a22b-instruct": {
+   "input": 4e-7,
+   "output": 0.0000016,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwencloud/qwen3-vl-235b-a22b-thinking": {
+   "input": 4e-7,
+   "output": 0.000004,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwencloud/qwen3-vl-32b-instruct": {
+   "input": 1.6e-7,
+   "output": 6.4e-7,
+   "cacheRead": 1.6e-7,
+   "cacheWrite": 1.6e-7,
+   "cacheWrite1h": 1.6e-7
+  },
+  "qwencloud/qwen3-vl-32b-thinking": {
+   "input": 1.6e-7,
+   "output": 0.00000287,
+   "cacheRead": 1.6e-7,
+   "cacheWrite": 1.6e-7,
+   "cacheWrite1h": 1.6e-7
+  },
+  "qwencloud/qwen3.7-max": {
+   "input": 0.0000025,
+   "output": 0.0000075,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "qwencloud/qwen3.8-max": {
+   "input": 0.000002,
+   "output": 0.000006,
+   "cacheRead": 2.5e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "qwencloud/qwq-plus": {
+   "input": 8e-7,
+   "output": 0.0000024,
+   "cacheRead": 8e-7,
+   "cacheWrite": 8e-7,
+   "cacheWrite1h": 8e-7
+  },
+  "qwen_ai_platform/deepseek-v4-flash": {
+   "input": 2e-7,
+   "output": 4e-7,
+   "cacheRead": 4e-8,
+   "cacheWrite": 2e-7,
+   "cacheWrite1h": 2e-7
+  },
+  "qwen_ai_platform/deepseek-v4-flash-0731": {
+   "input": 2e-7,
+   "output": 4e-7,
+   "cacheRead": 4e-8,
+   "cacheWrite": 2e-7,
+   "cacheWrite1h": 2e-7
+  },
+  "qwen_ai_platform/deepseek-v4-pro": {
+   "input": 0.0000024,
+   "output": 0.0000048,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.0000024,
+   "cacheWrite1h": 0.0000024
+  },
+  "qwen_ai_platform/glm-5.1": {
+   "input": 0.0000014,
+   "output": 0.0000044,
+   "cacheRead": 2.6e-7,
+   "cacheWrite": 0.0000014,
+   "cacheWrite1h": 0.0000014
+  },
+  "qwen_ai_platform/glm-5.2": {
+   "input": 0.0000014,
+   "output": 0.0000044,
+   "cacheRead": 2.8e-7,
+   "cacheWrite": 0.0000014,
+   "cacheWrite1h": 0.0000014
+  },
+  "qwen_ai_platform/kimi-k2.7-code": {
+   "input": 9.5e-7,
+   "output": 0.000004,
+   "cacheRead": 1.9e-7,
+   "cacheWrite": 9.5e-7,
+   "cacheWrite1h": 9.5e-7
+  },
+  "qwen_ai_platform/qwen-coder": {
+   "input": 3e-7,
+   "output": 0.0000015,
+   "cacheRead": 3e-7,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
+  "qwen_ai_platform/qwen-max": {
+   "input": 0.0000016,
+   "output": 0.0000064,
+   "cacheRead": 0.0000016,
+   "cacheWrite": 0.0000016,
+   "cacheWrite1h": 0.0000016
+  },
+  "qwen_ai_platform/qwen-plus": {
+   "input": 4e-7,
+   "output": 0.0000012,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwen_ai_platform/qwen-plus-2025-01-25": {
+   "input": 4e-7,
+   "output": 0.0000012,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwen_ai_platform/qwen-plus-2025-04-28": {
+   "input": 4e-7,
+   "output": 0.0000012,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwen_ai_platform/qwen-plus-2025-07-14": {
+   "input": 4e-7,
+   "output": 0.0000012,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwen_ai_platform/qwen-turbo": {
+   "input": 5e-8,
+   "output": 2e-7,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "qwen_ai_platform/qwen-turbo-2024-11-01": {
+   "input": 5e-8,
+   "output": 2e-7,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "qwen_ai_platform/qwen-turbo-2025-04-28": {
+   "input": 5e-8,
+   "output": 2e-7,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "qwen_ai_platform/qwen-turbo-latest": {
+   "input": 5e-8,
+   "output": 2e-7,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "qwen_ai_platform/qwen3-next-80b-a3b-instruct": {
+   "input": 1.5e-7,
+   "output": 0.0000012,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "qwen_ai_platform/qwen3-next-80b-a3b-thinking": {
+   "input": 1.5e-7,
+   "output": 0.0000012,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "qwen_ai_platform/qwen3-vl-235b-a22b-instruct": {
+   "input": 4e-7,
+   "output": 0.0000016,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwen_ai_platform/qwen3-vl-235b-a22b-thinking": {
+   "input": 4e-7,
+   "output": 0.000004,
+   "cacheRead": 4e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "qwen_ai_platform/qwen3-vl-32b-instruct": {
+   "input": 1.6e-7,
+   "output": 6.4e-7,
+   "cacheRead": 1.6e-7,
+   "cacheWrite": 1.6e-7,
+   "cacheWrite1h": 1.6e-7
+  },
+  "qwen_ai_platform/qwen3-vl-32b-thinking": {
+   "input": 1.6e-7,
+   "output": 0.00000287,
+   "cacheRead": 1.6e-7,
+   "cacheWrite": 1.6e-7,
+   "cacheWrite1h": 1.6e-7
+  },
+  "qwen_ai_platform/qwen3.7-max": {
+   "input": 0.0000025,
+   "output": 0.0000075,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "qwen_ai_platform/qwen3.8-max": {
+   "input": 0.000002,
+   "output": 0.000006,
+   "cacheRead": 2.5e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "qwen_ai_platform/qwen3.8-flash": {
+   "input": 1.5e-7,
+   "output": 4.7e-7,
+   "cacheRead": 1.6e-8,
+   "cacheWrite": 2e-7,
+   "cacheWrite1h": 2e-7
+  },
+  "qwen_ai_platform/qwen3.8-omni-flash": {
+   "input": 1.5e-7,
+   "output": 4.7e-7,
+   "cacheRead": 1.6e-8,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "qwen_ai_platform/qwq-plus": {
+   "input": 8e-7,
+   "output": 0.0000024,
+   "cacheRead": 8e-7,
+   "cacheWrite": 8e-7,
+   "cacheWrite1h": 8e-7
+  },
+  "deepseek/deepseek-chat": {
+   "input": 2.8e-7,
+   "output": 4.2e-7,
+   "cacheRead": 2.8e-8,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek/deepseek-coder": {
+   "input": 1.4e-7,
+   "output": 2.8e-7,
+   "cacheRead": 1.4e-8,
+   "cacheWrite": 1.4e-7,
+   "cacheWrite1h": 1.4e-7
+  },
+  "deepseek/deepseek-r1": {
+   "input": 5.5e-7,
+   "output": 0.00000219,
+   "cacheRead": 1.4e-7,
+   "cacheWrite": 5.5e-7,
+   "cacheWrite1h": 5.5e-7
+  },
+  "deepseek/deepseek-reasoner": {
+   "input": 2.8e-7,
+   "output": 4.2e-7,
+   "cacheRead": 2.8e-8,
+   "cacheWrite": 2.8e-7,
+   "cacheWrite1h": 2.8e-7
+  },
+  "deepseek/deepseek-v3": {
+   "input": 2.7e-7,
+   "output": 0.0000011,
+   "cacheRead": 7e-8,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek/deepseek-v3.2": {
+   "input": 2.8e-7,
+   "output": 4e-7,
+   "cacheRead": 2.8e-8,
+   "cacheWrite": 2.8e-7,
+   "cacheWrite1h": 2.8e-7
+  },
+  "deepseek.v3-v1:0": {
+   "input": 5.8e-7,
+   "output": 0.00000168,
+   "cacheRead": 5.8e-7,
+   "cacheWrite": 5.8e-7,
+   "cacheWrite1h": 5.8e-7
+  },
+  "deepseek.v3.2": {
+   "input": 6.2e-7,
+   "output": 0.00000185,
+   "cacheRead": 6.2e-7,
+   "cacheWrite": 6.2e-7,
+   "cacheWrite1h": 6.2e-7
+  },
+  "deepseek-v3-2-251201": {
+   "input": 0,
+   "output": 0,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "glm-4-7-251222": {
+   "input": 0,
+   "output": 0,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "kimi-k2-thinking-251104": {
+   "input": 0,
+   "output": 0,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "gemini-2.5-flash": {
+   "input": 3e-7,
+   "output": 0.0000025,
+   "cacheRead": 3e-8,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
+  "gemini-3.1-flash-lite-preview": {
+   "input": 2.5e-7,
+   "output": 0.0000015,
+   "cacheRead": 2.5e-8,
+   "cacheWrite": 2.5e-7,
+   "cacheWrite1h": 2.5e-7
+  },
+  "gemini-3.1-flash-lite": {
+   "input": 2.5e-7,
+   "output": 0.0000015,
+   "cacheRead": 2.5e-8,
+   "cacheWrite": 2.5e-7,
+   "cacheWrite1h": 2.5e-7
+  },
+  "gemini-3.5-flash-lite": {
+   "input": 3e-7,
+   "output": 0.0000025,
+   "cacheRead": 3e-8,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
+  "gemini-2.5-flash-lite": {
+   "input": 1e-7,
+   "output": 4e-7,
+   "cacheRead": 1e-8,
+   "cacheWrite": 1e-7,
+   "cacheWrite1h": 1e-7
+  },
+  "gemini-2.5-flash-lite-preview-09-2025": {
+   "input": 1e-7,
+   "output": 4e-7,
+   "cacheRead": 1e-8,
+   "cacheWrite": 1e-7,
+   "cacheWrite1h": 1e-7
+  },
+  "gemini-2.5-flash-preview-09-2025": {
+   "input": 3e-7,
+   "output": 0.0000025,
+   "cacheRead": 3e-8,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
+  "gemini-2.5-pro": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gemini-3.1-pro-preview": {
+   "input": 0.000002,
+   "output": 0.000012,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "gemini-3.1-pro-preview-customtools": {
+   "input": 0.000002,
+   "output": 0.000012,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "gemini-2.5-pro-preview-tts": {
+   "input": 0.000001,
+   "output": 0.00002,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.000001,
+   "cacheWrite1h": 0.000001
+  },
+  "gemini-robotics-er-1.5-preview": {
+   "input": 3e-7,
+   "output": 0.0000025,
+   "cacheRead": 0,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
+  "gemini-2.5-computer-use-preview-10-2025": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gemini-3-flash-preview": {
+   "input": 5e-7,
+   "output": 0.000003,
+   "cacheRead": 5e-8,
+   "cacheWrite": 5e-7,
+   "cacheWrite1h": 5e-7
+  },
+  "gemini-omni-flash-preview": {
+   "input": 0.0000015,
+   "output": 0.000009,
+   "cacheRead": 0.0000015,
+   "cacheWrite": 0.0000015,
+   "cacheWrite1h": 0.0000015
+  },
+  "gemini-3.5-flash": {
+   "input": 0.0000015,
+   "output": 0.000009,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 0.0000015,
+   "cacheWrite1h": 0.0000015
+  },
+  "gemini-3.6-flash": {
+   "input": 7.5e-7,
+   "output": 0.00000375,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 7.5e-7,
+   "cacheWrite1h": 7.5e-7
+  },
+  "gemini-3.7-flash": {
+   "input": 7.5e-7,
+   "output": 0.00000375,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 7.5e-7,
+   "cacheWrite1h": 7.5e-7
+  },
+  "gemini-3.8-flash": {
+   "input": 7.5e-7,
+   "output": 0.00000375,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 7.5e-7,
+   "cacheWrite1h": 7.5e-7
+  },
+  "gemini-3.8-flash-cyber": {
+   "input": 0.0000015,
+   "output": 0.0000075,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 0.0000015,
+   "cacheWrite1h": 0.0000015
+  },
+  "gpt-3.5-turbo": {
+   "input": 5e-7,
+   "output": 0.0000015,
+   "cacheRead": 5e-7,
+   "cacheWrite": 5e-7,
+   "cacheWrite1h": 5e-7
+  },
+  "gpt-3.5-turbo-0125": {
+   "input": 5e-7,
+   "output": 0.0000015,
+   "cacheRead": 5e-7,
+   "cacheWrite": 5e-7,
+   "cacheWrite1h": 5e-7
+  },
+  "gpt-3.5-turbo-1106": {
+   "input": 0.000001,
+   "output": 0.000002,
+   "cacheRead": 0.000001,
+   "cacheWrite": 0.000001,
+   "cacheWrite1h": 0.000001
+  },
+  "gpt-3.5-turbo-16k": {
+   "input": 0.000003,
+   "output": 0.000004,
+   "cacheRead": 0.000003,
+   "cacheWrite": 0.000003,
+   "cacheWrite1h": 0.000003
+  },
+  "gpt-4": {
+   "input": 0.00003,
+   "output": 0.00006,
+   "cacheRead": 0.00003,
+   "cacheWrite": 0.00003,
+   "cacheWrite1h": 0.00003
+  },
+  "gpt-4-0613": {
+   "input": 0.00003,
+   "output": 0.00006,
+   "cacheRead": 0.00003,
+   "cacheWrite": 0.00003,
+   "cacheWrite1h": 0.00003
+  },
+  "gpt-4-1106-preview": {
+   "input": 0.00001,
+   "output": 0.00003,
+   "cacheRead": 0.00001,
+   "cacheWrite": 0.00001,
+   "cacheWrite1h": 0.00001
+  },
+  "gpt-4-turbo": {
+   "input": 0.00001,
+   "output": 0.00003,
+   "cacheRead": 0.00001,
+   "cacheWrite": 0.00001,
+   "cacheWrite1h": 0.00001
+  },
+  "gpt-4-turbo-2024-04-09": {
+   "input": 0.00001,
+   "output": 0.00003,
+   "cacheRead": 0.00001,
+   "cacheWrite": 0.00001,
+   "cacheWrite1h": 0.00001
+  },
+  "gpt-4.1": {
+   "input": 0.000002,
+   "output": 0.000008,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "gpt-4.1-2025-04-14": {
+   "input": 0.000002,
+   "output": 0.000008,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "gpt-4.1-mini": {
+   "input": 4e-7,
+   "output": 0.0000016,
+   "cacheRead": 1e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "gpt-4.1-mini-2025-04-14": {
+   "input": 4e-7,
+   "output": 0.0000016,
+   "cacheRead": 1e-7,
+   "cacheWrite": 4e-7,
+   "cacheWrite1h": 4e-7
+  },
+  "gpt-4.1-nano": {
+   "input": 1e-7,
+   "output": 4e-7,
+   "cacheRead": 2.5e-8,
+   "cacheWrite": 1e-7,
+   "cacheWrite1h": 1e-7
+  },
+  "gpt-4.1-nano-2025-04-14": {
+   "input": 1e-7,
+   "output": 4e-7,
+   "cacheRead": 2.5e-8,
+   "cacheWrite": 1e-7,
+   "cacheWrite1h": 1e-7
+  },
+  "gpt-4o": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-4o-2024-05-13": {
+   "input": 0.000005,
+   "output": 0.000015,
+   "cacheRead": 0.000005,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000005
+  },
+  "gpt-4o-2024-08-06": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-4o-2024-11-20": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-4o-audio-preview-2024-12-17": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.0000025,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-4o-audio-preview-2025-06-03": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.0000025,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-audio": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.0000025,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-audio-1.5": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.0000025,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-audio-2025-08-28": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.0000025,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-audio-mini": {
+   "input": 6e-7,
+   "output": 0.0000024,
+   "cacheRead": 6e-7,
+   "cacheWrite": 6e-7,
+   "cacheWrite1h": 6e-7
+  },
+  "gpt-audio-mini-2025-10-06": {
+   "input": 6e-7,
+   "output": 0.0000024,
+   "cacheRead": 6e-7,
+   "cacheWrite": 6e-7,
+   "cacheWrite1h": 6e-7
+  },
+  "gpt-audio-mini-2025-12-15": {
+   "input": 6e-7,
+   "output": 0.0000024,
+   "cacheRead": 6e-7,
+   "cacheWrite": 6e-7,
+   "cacheWrite1h": 6e-7
+  },
+  "gpt-4o-mini": {
+   "input": 1.5e-7,
+   "output": 6e-7,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "gpt-4o-mini-2024-07-18": {
+   "input": 1.5e-7,
+   "output": 6e-7,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "gpt-4o-mini-audio-preview-2024-12-17": {
+   "input": 1.5e-7,
+   "output": 6e-7,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "gpt-4o-mini-search-preview": {
+   "input": 1.5e-7,
+   "output": 6e-7,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "gpt-4o-mini-search-preview-2025-03-11": {
+   "input": 1.5e-7,
+   "output": 6e-7,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "gpt-4o-search-preview": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-4o-search-preview-2025-03-11": {
+   "input": 0.0000025,
+   "output": 0.00001,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-5": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5-codex": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5.1": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5.1-codex-mini": {
+   "input": 2.5e-7,
+   "output": 0.000002,
+   "cacheRead": 2.5e-8,
+   "cacheWrite": 2.5e-7,
+   "cacheWrite1h": 2.5e-7
+  },
+  "gpt-5.1-codex-max": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5.1-codex": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5.1-chat-latest": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5.1-2025-11-13": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5.2": {
+   "input": 0.00000175,
+   "output": 0.000014,
+   "cacheRead": 1.75e-7,
+   "cacheWrite": 0.00000175,
+   "cacheWrite1h": 0.00000175
+  },
+  "gpt-5.2-codex": {
+   "input": 0.00000175,
+   "output": 0.000014,
+   "cacheRead": 1.75e-7,
+   "cacheWrite": 0.00000175,
+   "cacheWrite1h": 0.00000175
+  },
+  "gpt-5.2-chat-latest": {
+   "input": 0.00000175,
+   "output": 0.000014,
+   "cacheRead": 1.75e-7,
+   "cacheWrite": 0.00000175,
+   "cacheWrite1h": 0.00000175
+  },
+  "gpt-5.2-2025-12-11": {
+   "input": 0.00000175,
+   "output": 0.000014,
+   "cacheRead": 1.75e-7,
+   "cacheWrite": 0.00000175,
+   "cacheWrite1h": 0.00000175
+  },
+  "gpt-5.2-pro": {
+   "input": 0.000021,
+   "output": 0.000168,
+   "cacheRead": 0.000021,
+   "cacheWrite": 0.000021,
+   "cacheWrite1h": 0.000021
+  },
+  "gpt-5.2-pro-2025-12-11": {
+   "input": 0.000021,
+   "output": 0.000168,
+   "cacheRead": 0.000021,
+   "cacheWrite": 0.000021,
+   "cacheWrite1h": 0.000021
+  },
+  "gpt-6-astra": {
+   "input": 0.00001,
+   "output": 0.00005,
+   "cacheRead": 0.000001,
+   "cacheWrite": 0.0000125,
+   "cacheWrite1h": 0.0000125
+  },
+  "gpt-6-sol": {
+   "input": 0.000002,
+   "output": 0.00001,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-6-luna": {
+   "input": 1e-7,
+   "output": 5e-7,
+   "cacheRead": 1e-8,
+   "cacheWrite": 1.25e-7,
+   "cacheWrite1h": 1.25e-7
+  },
+  "gpt-5.6": {
+   "input": 0.000004,
+   "output": 0.00002,
+   "cacheRead": 4e-7,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000005
+  },
+  "gpt-5.6-sol": {
+   "input": 0.000004,
+   "output": 0.00002,
+   "cacheRead": 4e-7,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000005
+  },
+  "gpt-5.6-terra": {
+   "input": 0.000002,
+   "output": 0.000012,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-5.6-luna": {
+   "input": 2e-7,
+   "output": 0.0000012,
+   "cacheRead": 2e-8,
+   "cacheWrite": 2.5e-7,
+   "cacheWrite1h": 2.5e-7
+  },
+  "gpt-5.6-cyber": {
+   "input": 0.0000125,
+   "output": 0.000075,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.000015625,
+   "cacheWrite1h": 0.000015625
+  },
+  "gpt-daybreak-red-latest": {
+   "input": 0.0000125,
+   "output": 0.000075,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.000015625,
+   "cacheWrite1h": 0.000015625
+  },
+  "gpt-daybreak-blue-latest": {
+   "input": 0.000004,
+   "output": 0.00002,
+   "cacheRead": 4e-7,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000005
+  },
+  "gpt-5.5": {
+   "input": 0.000005,
+   "output": 0.00003,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000005
+  },
+  "gpt-5.5-2026-04-23": {
+   "input": 0.000005,
+   "output": 0.00003,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000005
+  },
+  "gpt-5.5-pro": {
+   "input": 0.00003,
+   "output": 0.00018,
+   "cacheRead": 0.00003,
+   "cacheWrite": 0.00003,
+   "cacheWrite1h": 0.00003
+  },
+  "gpt-5.5-pro-2026-04-23": {
+   "input": 0.00003,
+   "output": 0.00018,
+   "cacheRead": 0.00003,
+   "cacheWrite": 0.00003,
+   "cacheWrite1h": 0.00003
+  },
+  "gpt-5.4": {
+   "input": 0.0000025,
+   "output": 0.000015,
+   "cacheRead": 2.5e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-5.4-2026-03-05": {
+   "input": 0.0000025,
+   "output": 0.000015,
+   "cacheRead": 2.5e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "gpt-5.4-pro": {
+   "input": 0.00003,
+   "output": 0.00018,
+   "cacheRead": 0.00003,
+   "cacheWrite": 0.00003,
+   "cacheWrite1h": 0.00003
+  },
+  "gpt-5.4-pro-2026-03-05": {
+   "input": 0.00003,
+   "output": 0.00018,
+   "cacheRead": 0.00003,
+   "cacheWrite": 0.00003,
+   "cacheWrite1h": 0.00003
+  },
+  "gpt-5.4-mini": {
+   "input": 7.5e-7,
+   "output": 0.0000045,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 7.5e-7,
+   "cacheWrite1h": 7.5e-7
+  },
+  "gpt-5.4-mini-2026-03-17": {
+   "input": 7.5e-7,
+   "output": 0.0000045,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 7.5e-7,
+   "cacheWrite1h": 7.5e-7
+  },
+  "gpt-5.4-nano": {
+   "input": 2e-7,
+   "output": 0.00000125,
+   "cacheRead": 2e-8,
+   "cacheWrite": 2e-7,
+   "cacheWrite1h": 2e-7
+  },
+  "gpt-5.4-nano-2026-03-17": {
+   "input": 2e-7,
+   "output": 0.00000125,
+   "cacheRead": 2e-8,
+   "cacheWrite": 2e-7,
+   "cacheWrite1h": 2e-7
+  },
+  "gpt-5-pro": {
+   "input": 0.000015,
+   "output": 0.00012,
+   "cacheRead": 0.000015,
+   "cacheWrite": 0.000015,
+   "cacheWrite1h": 0.000015
+  },
+  "gpt-5-pro-2025-10-06": {
+   "input": 0.000015,
+   "output": 0.00012,
+   "cacheRead": 0.000015,
+   "cacheWrite": 0.000015,
+   "cacheWrite1h": 0.000015
+  },
+  "gpt-5-2025-08-07": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5-chat": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5-chat-latest": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5.3-codex": {
+   "input": 0.00000175,
+   "output": 0.000014,
+   "cacheRead": 1.75e-7,
+   "cacheWrite": 0.00000175,
+   "cacheWrite1h": 0.00000175
+  },
+  "gpt-5.3-chat-latest": {
+   "input": 0.00000175,
+   "output": 0.000014,
+   "cacheRead": 1.75e-7,
+   "cacheWrite": 0.00000175,
+   "cacheWrite1h": 0.00000175
+  },
+  "gpt-5-mini": {
+   "input": 2.5e-7,
+   "output": 0.000002,
+   "cacheRead": 2.5e-8,
+   "cacheWrite": 2.5e-7,
+   "cacheWrite1h": 2.5e-7
+  },
+  "gpt-5-mini-2025-08-07": {
+   "input": 2.5e-7,
+   "output": 0.000002,
+   "cacheRead": 2.5e-8,
+   "cacheWrite": 2.5e-7,
+   "cacheWrite1h": 2.5e-7
+  },
+  "gpt-5-nano": {
+   "input": 5e-8,
+   "output": 4e-7,
+   "cacheRead": 5e-9,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "gpt-5-nano-2025-08-07": {
+   "input": 5e-8,
+   "output": 4e-7,
+   "cacheRead": 5e-9,
+   "cacheWrite": 5e-8,
+   "cacheWrite1h": 5e-8
+  },
+  "o1": {
+   "input": 0.000015,
+   "output": 0.00006,
+   "cacheRead": 0.0000075,
+   "cacheWrite": 0.000015,
+   "cacheWrite1h": 0.000015
+  },
+  "o1-2024-12-17": {
+   "input": 0.000015,
+   "output": 0.00006,
+   "cacheRead": 0.0000075,
+   "cacheWrite": 0.000015,
+   "cacheWrite1h": 0.000015
+  },
+  "o1-pro": {
+   "input": 0.00015,
+   "output": 0.0006,
+   "cacheRead": 0.00015,
+   "cacheWrite": 0.00015,
+   "cacheWrite1h": 0.00015
+  },
+  "o1-pro-2025-03-19": {
+   "input": 0.00015,
+   "output": 0.0006,
+   "cacheRead": 0.00015,
+   "cacheWrite": 0.00015,
+   "cacheWrite1h": 0.00015
+  },
+  "o3": {
+   "input": 0.000002,
+   "output": 0.000008,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "o3-deep-research": {
+   "input": 0.00001,
+   "output": 0.00004,
+   "cacheRead": 0.0000025,
+   "cacheWrite": 0.00001,
+   "cacheWrite1h": 0.00001
+  },
+  "o3-deep-research-2025-06-26": {
+   "input": 0.00001,
+   "output": 0.00004,
+   "cacheRead": 0.0000025,
+   "cacheWrite": 0.00001,
+   "cacheWrite1h": 0.00001
+  },
+  "o3-2025-04-16": {
+   "input": 0.000002,
+   "output": 0.000008,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "o3-mini": {
+   "input": 0.0000011,
+   "output": 0.0000044,
+   "cacheRead": 5.5e-7,
+   "cacheWrite": 0.0000011,
+   "cacheWrite1h": 0.0000011
+  },
+  "o3-mini-2025-01-31": {
+   "input": 0.0000011,
+   "output": 0.0000044,
+   "cacheRead": 5.5e-7,
+   "cacheWrite": 0.0000011,
+   "cacheWrite1h": 0.0000011
+  },
+  "o3-pro": {
+   "input": 0.00002,
+   "output": 0.00008,
+   "cacheRead": 0.00002,
+   "cacheWrite": 0.00002,
+   "cacheWrite1h": 0.00002
+  },
+  "o3-pro-2025-06-10": {
+   "input": 0.00002,
+   "output": 0.00008,
+   "cacheRead": 0.00002,
+   "cacheWrite": 0.00002,
+   "cacheWrite1h": 0.00002
+  },
+  "o4-mini": {
+   "input": 0.0000011,
+   "output": 0.0000044,
+   "cacheRead": 2.75e-7,
+   "cacheWrite": 0.0000011,
+   "cacheWrite1h": 0.0000011
+  },
+  "o4-mini-deep-research": {
+   "input": 0.000002,
+   "output": 0.000008,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "o4-mini-deep-research-2025-06-26": {
+   "input": 0.000002,
+   "output": 0.000008,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "o4-mini-2025-04-16": {
+   "input": 0.0000011,
+   "output": 0.0000044,
+   "cacheRead": 2.75e-7,
+   "cacheWrite": 0.0000011,
+   "cacheWrite1h": 0.0000011
+  },
+  "qwen.qwen3-coder-480b-a35b-v1:0": {
+   "input": 4.5e-7,
+   "output": 0.0000018,
+   "cacheRead": 4.5e-7,
+   "cacheWrite": 4.5e-7,
+   "cacheWrite1h": 4.5e-7
+  },
+  "qwen.qwen3-235b-a22b-2507-v1:0": {
+   "input": 2.2e-7,
+   "output": 8.8e-7,
+   "cacheRead": 2.2e-7,
+   "cacheWrite": 2.2e-7,
+   "cacheWrite1h": 2.2e-7
+  },
+  "qwen.qwen3-coder-30b-a3b-v1:0": {
+   "input": 1.5e-7,
+   "output": 6e-7,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "qwen.qwen3-32b-v1:0": {
+   "input": 1.5e-7,
+   "output": 6e-7,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "qwen.qwen3-next-80b-a3b": {
+   "input": 1.5e-7,
+   "output": 0.0000012,
+   "cacheRead": 1.5e-7,
+   "cacheWrite": 1.5e-7,
+   "cacheWrite1h": 1.5e-7
+  },
+  "qwen.qwen3-vl-235b-a22b": {
+   "input": 5.3e-7,
+   "output": 0.00000266,
+   "cacheRead": 5.3e-7,
+   "cacheWrite": 5.3e-7,
+   "cacheWrite1h": 5.3e-7
+  },
+  "qwen.qwen3-coder-next": {
+   "input": 5e-7,
+   "output": 0.0000012,
+   "cacheRead": 5e-7,
+   "cacheWrite": 5e-7,
+   "cacheWrite1h": 5e-7
+  },
+  "gpt-5-search-api": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gpt-5-search-api-2025-10-14": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 1.25e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gemini-flash-latest": {
+   "input": 7.5e-7,
+   "output": 0.00000375,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 7.5e-7,
+   "cacheWrite1h": 7.5e-7
+  },
+  "gemini-flash-lite-latest": {
+   "input": 3e-7,
+   "output": 0.0000025,
+   "cacheRead": 3e-8,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
+  "gemini-pro-latest": {
+   "input": 0.000002,
+   "output": 0.000012,
+   "cacheRead": 2e-7,
+   "cacheWrite": 0.000002,
+   "cacheWrite1h": 0.000002
+  },
+  "gemini-exp-1206": {
+   "input": 3e-7,
+   "output": 0.0000025,
+   "cacheRead": 3e-8,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
+  "deepseek-flash": {
+   "input": 3e-7,
+   "output": 0.0000012,
+   "cacheRead": 6e-9,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek-v4-flash": {
+   "input": 3e-7,
+   "output": 0.0000012,
+   "cacheRead": 6e-9,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek-v4-flash-vision-exp": {
+   "input": 3e-7,
+   "output": 0.0000012,
+   "cacheRead": 6e-9,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek-v4-pro": {
+   "input": 0.00000132,
+   "output": 0.00000396,
+   "cacheRead": 4.4e-8,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek/deepseek-flash": {
+   "input": 3e-7,
+   "output": 0.0000012,
+   "cacheRead": 6e-9,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek/deepseek-v4-flash": {
+   "input": 3e-7,
+   "output": 0.0000012,
+   "cacheRead": 6e-9,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek/deepseek-v4-flash-vision-exp": {
+   "input": 3e-7,
+   "output": 0.0000012,
+   "cacheRead": 6e-9,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "deepseek/deepseek-v4-pro": {
+   "input": 0.00000132,
+   "output": 0.00000396,
+   "cacheRead": 4.4e-8,
+   "cacheWrite": 0,
+   "cacheWrite1h": 0
+  },
+  "claude-mythos-5": {
+   "input": 0.00001,
+   "output": 0.00005,
+   "cacheRead": 0.000001,
+   "cacheWrite": 0.0000125,
+   "cacheWrite1h": 0.00002
+  },
+  "claude-mythos-5-1": {
+   "input": 0.00001,
+   "output": 0.00005,
+   "cacheRead": 2.5e-7,
+   "cacheWrite": 0.0000125,
+   "cacheWrite1h": 0.00002
+  },
+  "claude-mythos-preview": {
+   "input": 0.00001,
+   "output": 0.00005,
+   "cacheRead": 0.000001,
+   "cacheWrite": 0.0000125,
+   "cacheWrite1h": 0.00002
+  },
+  "gpt-5.5-cyber": {
+   "input": 0.0000125,
+   "output": 0.000075,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.0000125,
+   "cacheWrite1h": 0.0000125
+  },
+  "gpt-5.5-cyber-preview": {
+   "input": 0.0000125,
+   "output": 0.000075,
+   "cacheRead": 0.00000125,
+   "cacheWrite": 0.0000125,
+   "cacheWrite1h": 0.0000125
+  },
+  "gpt-rosalind-research": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000005
+  },
+  "deepseek.r1-v1:0": {
+   "input": 0.00000135,
+   "output": 0.0000054,
+   "cacheRead": 0.00000135,
+   "cacheWrite": 0.00000135,
+   "cacheWrite1h": 0.00000135
+  },
+  "gpt-6.1-sol": {
+   "input": 0.000002,
+   "output": 0.00001,
+   "cacheRead": 1e-7,
+   "cacheWrite": 0.0000025,
+   "cacheWrite1h": 0.0000025
+  },
+  "claude-haiku-5-5": {
+   "input": 1e-7,
+   "output": 5e-7,
+   "cacheRead": 1e-8,
+   "cacheWrite": 1.25e-7,
+   "cacheWrite1h": 2e-7
+  },
+  "gpt-rosalind-discovery": {
+   "input": 0.000005,
+   "output": 0.000025,
+   "cacheRead": 5e-7,
+   "cacheWrite": 0.000005,
+   "cacheWrite1h": 0.000005
+  },
+  "gemini-robotics-er-2-preview": {
+   "input": 0.000001,
+   "output": 0.000005,
+   "cacheRead": 1e-7,
+   "cacheWrite": 0.000001,
+   "cacheWrite1h": 0.000001
+  }
+ }
+}
