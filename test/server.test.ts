@@ -31,6 +31,18 @@ test('API endpoints answer with JSON, even on an empty database', async () => {
 
 test('invalid numeric params are ignored, not errors', async () => {
   assert.equal((await get('/api/summary?from=abc&project=&limit=-5')).status, 200);
+  for (const qs of ['limit=2.5', 'project=%20', 'from=0x10']) assert.equal((await get(`/api/sessions?${qs}`)).status, 200, qs);
+});
+
+test('malformed request targets get 400 and the server keeps serving', async () => {
+  for (const p of ['//', '//x:99999/']) assert.equal((await get(p)).status, 400, p);
+  assert.equal((await get('/api/health')).status, 200);
+});
+
+test('listen failure rejects instead of hanging', async () => {
+  const db = openDb(':memory:');
+  await assert.rejects(startServer(db, port), { code: 'EADDRINUSE' });
+  db.close();
 });
 
 test('serves the dashboard and blocks path traversal', async () => {

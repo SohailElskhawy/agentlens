@@ -13,10 +13,10 @@ const TYPES: Record<string, string> = {
 const LOCAL_HOST = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
 
 function num(sp: URLSearchParams, k: string): number | undefined {
-  const v = sp.get(k);
-  if (v == null || v === '') return undefined;
+  const v = sp.get(k)?.trim();
+  if (v == null || !/^-?\d+$/.test(v)) return undefined; // integers only: SQLite LIMIT rejects 2.5, and hex/blank would coerce oddly
   const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
+  return Number.isSafeInteger(n) ? n : undefined;
 }
 
 const filterOf = (sp: URLSearchParams): Filter => ({ from: num(sp, 'from'), to: num(sp, 'to'), agent: sp.get('agent') || undefined, projectId: num(sp, 'project') });
@@ -41,7 +41,12 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
   const server = createServer((req, res) => {
     // Bound to loopback, but a malicious page could still reach it via DNS rebinding; the Host check stops that.
     if (!LOCAL_HOST.test(req.headers.host ?? '')) return send(res, 403, 'text/plain', 'forbidden host');
-    const url = new URL(req.url ?? '/', 'http://localhost');
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/', 'http://localhost');
+    } catch {
+      return send(res, 400, 'text/plain', 'bad request'); // e.g. `GET //` is an invalid URL; must not escape the listener
+    }
     try {
       const handler = api[url.pathname];
       if (handler) return send(res, 200, 'application/json', JSON.stringify(handler(filterOf(url.searchParams), url.searchParams)));
@@ -52,5 +57,11 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       send(res, 500, 'application/json', JSON.stringify({ error: (e as Error).message }));
     }
   });
-  return new Promise((resolve) => server.listen(port, host, () => resolve(server)));
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => {
+      server.off('error', reject);
+      resolve(server);
+    });
+  });
 }
