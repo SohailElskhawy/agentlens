@@ -1,0 +1,16 @@
+{
+  "name": "agentlens",
+  "version": "0.1.0",
+  "description": "Local-first, read-only usage and workflow optimizer for AI coding agents",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.18" },
+  "bin": { "agentlens": "src/cli.ts" },
+  "scripts": {
+    "test": "node --no-warnings=ExperimentalWarning --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc",
+    "start": "node --no-warnings=ExperimentalWarning src/cli.ts serve",
+    "update-prices": "node scripts/update-prices.ts"
+  },
+  "devDependencies": { "typescript": "5.9.3", "@types/node": "24.10.1" }
+}
