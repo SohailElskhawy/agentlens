@@ -5,14 +5,34 @@ import type { DB } from './db.ts';
 import { generateWeeklyReport, getIsoWeekString } from './report.ts';
 import { getPlatformPaths } from './paths.ts';
 
-export function sendDesktopNotification(title: string, body: string): boolean {
+export function sendDesktopNotification(
+  title: string,
+  body: string,
+  platform: NodeJS.Platform = process.platform,
+  spawnFn: typeof spawn = spawn
+): boolean {
   try {
-    const p = spawn('notify-send', [title, body], {
-      stdio: 'ignore',
-      detached: true,
-    });
-    p.on('error', () => {});
-    p.unref();
+    let p;
+    if (platform === 'darwin') {
+      const script = `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`;
+      p = spawnFn('osascript', ['-e', script], {
+        stdio: 'ignore',
+        detached: true,
+      });
+    } else if (platform === 'win32') {
+      const script = `Add-Type -AssemblyName System.Windows.Forms; $notify = New-Object System.Windows.Forms.NotifyIcon; $notify.Icon = [System.Drawing.SystemIcons]::Information; $notify.BalloonTipTitle = ${JSON.stringify(title)}; $notify.BalloonTipText = ${JSON.stringify(body)}; $notify.Visible = $true; $notify.ShowBalloonTip(5000);`;
+      p = spawnFn('powershell', ['-NoProfile', '-Command', script], {
+        stdio: 'ignore',
+        detached: true,
+      });
+    } else {
+      p = spawnFn('notify-send', [title, body], {
+        stdio: 'ignore',
+        detached: true,
+      });
+    }
+    p?.on?.('error', () => {});
+    p?.unref?.();
     return true;
   } catch {
     return false;
