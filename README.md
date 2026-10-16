@@ -166,13 +166,19 @@ launchctl load -w ~/Library/LaunchAgents/com.agentlens.plist
 - **To unload / stop:** `launchctl unload -w ~/Library/LaunchAgents/com.agentlens.plist`
 
 #### Windows (Task Scheduler / `schtasks`)
-Creates `%LOCALAPPDATA%\agentlens\agentlens-service.cmd` and registers an `onlogon` task via `schtasks`:
+Creates `%LOCALAPPDATA%\agentlens\agentlens-service.cmd` and outputs the `schtasks` registration command to register an `onlogon` task:
 ```cmd
-agentlens install-service
+:: 1. Generate helper script and display the exact registration command
+agentlens.cmd install-service
+
+:: 2. Register the logon task (execute the schtasks command output by install-service)
+schtasks /create /tn "agentlens" /tr "\"%ProgramFiles%\nodejs\node.exe\" --no-warnings=ExperimentalWarning \"%USERPROFILE%\agentlens\src\cli.ts\" serve" /sc onlogon /f
+
+:: 3. Start the service immediately without logging out/in
 schtasks /run /tn "agentlens"
 ```
 - **To stop:** `schtasks /end /tn "agentlens"`
-- **To run or inspect manually:** `%LOCALAPPDATA%\agentlens\agentlens-service.cmd`
+- **Manual inspection & testing:** `%LOCALAPPDATA%\agentlens\agentlens-service.cmd` is available to execute or inspect directly in Command Prompt / PowerShell for debugging.
 
 ### 5. Claude Code Live Statusline
 Configure Claude Code to display real-time token usage and quota status in your prompt bar (< 10ms latency).
