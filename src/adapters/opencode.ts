@@ -1,17 +1,51 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { getOpenCodeDataRoots } from '../paths.ts';
 import type { Adapter, Cursor, NormalizedEvent, ReadResult, SessionInfo } from '../types.ts';
 import { hash } from '../util.ts';
+
+function inferHomeFromRoot(root: string): string | undefined {
+  const normalized = root.replace(/\\/g, '/').replace(/\/+$/, '');
+  const candidateSuffixes = [
+    '/.local/share/opencode',
+    '/Library/Application Support/opencode',
+    '/AppData/Roaming/opencode',
+    '/AppData/Local/opencode',
+  ];
+  for (const suffix of candidateSuffixes) {
+    if (normalized.endsWith(suffix)) {
+      return normalized.slice(0, -suffix.length);
+    }
+  }
+  return undefined;
+}
 
 export const opencode: Adapter = {
   agent: 'opencode',
   root(home: string): string {
-    return join(home, '.local/share/opencode');
+    const candidates = getOpenCodeDataRoots(home);
+    for (const candidate of candidates) {
+      if (existsSync(join(candidate, 'opencode.db'))) {
+        return candidate;
+      }
+    }
+    return candidates[0] ?? join(home, '.local/share/opencode');
   },
   discover(root: string): string[] {
     const dbPath = join(root, 'opencode.db');
-    return existsSync(dbPath) ? [dbPath] : [];
+    if (existsSync(dbPath)) {
+      return [dbPath];
+    }
+    const targetHome = inferHomeFromRoot(root) ?? root;
+    const candidates = getOpenCodeDataRoots(targetHome);
+    for (const candidate of candidates) {
+      const candidateDb = join(candidate, 'opencode.db');
+      if (existsSync(candidateDb)) {
+        return [candidateDb];
+      }
+    }
+    return [];
   },
   read(path: string, cursor: Cursor): ReadResult {
     let errors = 0;

@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { getOpenCodeConfigRoots } from '../../paths.ts';
 import { CHARS_PER_TOKEN } from '../constants.ts';
 import type { RawConfigItem } from '../../types.ts';
 
@@ -104,9 +106,19 @@ export function parseTomlMcpServers(content: string): Record<string, Record<stri
 }
 
 export function scanMcp(
-  home: string,
-  projects: { id: number; root: string; name: string }[]
+  arg1: string | { id: number; root: string; name: string }[],
+  arg2?: string | { id: number; root: string; name: string }[]
 ): RawConfigItem[] {
+  let home: string;
+  let projects: { id: number; root: string; name: string }[];
+  if (typeof arg1 === 'string') {
+    home = arg1;
+    projects = Array.isArray(arg2) ? arg2 : [];
+  } else {
+    projects = Array.isArray(arg1) ? arg1 : [];
+    home = typeof arg2 === 'string' ? arg2 : homedir();
+  }
+
   const items: RawConfigItem[] = [];
 
   // 1. Claude Code (.claude.json global + .mcp.json project)
@@ -152,28 +164,34 @@ export function scanMcp(
     }
   } catch {}
 
-  // 3. OpenCode opencode.json
-  const opencodePath = join(home, '.config/opencode/opencode.json');
-  try {
-    if (existsSync(opencodePath)) {
-      const data = JSON.parse(readFileSync(opencodePath, 'utf-8'));
-      const mcpObj = data.mcp || data.mcpServers;
-      if (mcpObj && typeof mcpObj === 'object') {
-        for (const [name, cfg] of Object.entries(mcpObj)) {
-          const cfgStr = JSON.stringify(cfg);
-          items.push({
-            agent: 'opencode',
-            projectId: null,
-            kind: 'mcp',
-            name,
-            sourcePath: opencodePath,
-            tokens: Math.ceil(cfgStr.length / CHARS_PER_TOKEN),
-            details: cfg as any,
-          });
+  // 3. OpenCode opencode.json across candidate config roots
+  const opencodeRoots = getOpenCodeConfigRoots(home);
+  const seenOpenCodeMcp = new Set<string>();
+  for (const root of opencodeRoots) {
+    const opencodePath = join(root, 'opencode.json');
+    try {
+      if (existsSync(opencodePath)) {
+        const data = JSON.parse(readFileSync(opencodePath, 'utf-8'));
+        const mcpObj = data.mcp || data.mcpServers;
+        if (mcpObj && typeof mcpObj === 'object') {
+          for (const [name, cfg] of Object.entries(mcpObj)) {
+            if (seenOpenCodeMcp.has(name)) continue;
+            seenOpenCodeMcp.add(name);
+            const cfgStr = JSON.stringify(cfg);
+            items.push({
+              agent: 'opencode',
+              projectId: null,
+              kind: 'mcp',
+              name,
+              sourcePath: opencodePath,
+              tokens: Math.ceil(cfgStr.length / CHARS_PER_TOKEN),
+              details: cfg as any,
+            });
+          }
         }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   // 4. Antigravity MCP directory
   const antigravityDirs = [
@@ -240,3 +258,6 @@ export function scanMcp(
 
   return items;
 }
+
+export const scanMcpConfigs = scanMcp;
+

@@ -1,14 +1,18 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { getOpenCodeConfigRoots } from '../../paths.ts';
 import { CHARS_PER_TOKEN } from '../constants.ts';
 import type { Agent, RawConfigItem } from '../../types.ts';
+
+export type InstructionItem = RawConfigItem & { path: string };
 
 function fileItem(
   agent: Agent | 'all',
   projectId: number | null,
   filePath: string,
   customName?: string
-): RawConfigItem | null {
+): InstructionItem | null {
   try {
     if (!existsSync(filePath) || !statSync(filePath).isFile()) return null;
     const content = readFileSync(filePath, 'utf-8');
@@ -19,6 +23,7 @@ function fileItem(
       kind: 'instruction',
       name: customName ?? basename(filePath),
       sourcePath: filePath,
+      path: filePath,
       tokens,
       details: {
         chars: content.length,
@@ -35,8 +40,8 @@ function scanDirMarkdown(
   agent: Agent | 'all',
   projectId: number | null,
   isDoc = false
-): RawConfigItem[] {
-  const items: RawConfigItem[] = [];
+): InstructionItem[] {
+  const items: InstructionItem[] = [];
   try {
     if (!existsSync(dir) || !statSync(dir).isDirectory()) return items;
     for (const name of readdirSync(dir)) {
@@ -53,22 +58,42 @@ function scanDirMarkdown(
 }
 
 export function scanInstructions(
-  home: string,
-  projects: { id: number; root: string; name: string }[]
-): RawConfigItem[] {
-  const items: RawConfigItem[] = [];
+  arg1: string | { id: number; root: string; name: string }[],
+  arg2?: string | { id: number; root: string; name: string }[]
+): InstructionItem[] {
+  let home: string;
+  let projects: { id: number; root: string; name: string }[];
+  if (typeof arg1 === 'string') {
+    home = arg1;
+    projects = Array.isArray(arg2) ? arg2 : [];
+  } else {
+    projects = Array.isArray(arg1) ? arg1 : [];
+    home = typeof arg2 === 'string' ? arg2 : homedir();
+  }
+
+  const items: InstructionItem[] = [];
 
   // Global instructions
   const globalTargets: [Agent, string][] = [
     ['claude', join(home, '.claude/CLAUDE.md')],
     ['codex', join(home, '.codex/AGENTS.md')],
-    ['opencode', join(home, '.config/opencode/AGENTS.md')],
     ['antigravity', join(home, '.gemini/GEMINI.md')],
   ];
 
   for (const [agent, path] of globalTargets) {
     const item = fileItem(agent, null, path);
     if (item) items.push(item);
+  }
+
+  // OpenCode AGENTS.md across candidate config roots
+  const opencodeRoots = getOpenCodeConfigRoots(home);
+  for (const root of opencodeRoots) {
+    const agentsPath = join(root, 'AGENTS.md');
+    const item = fileItem('opencode', null, agentsPath);
+    if (item) {
+      items.push(item);
+      break;
+    }
   }
 
   // Global Claude rules

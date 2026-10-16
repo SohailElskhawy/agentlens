@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { getOpenCodeConfigRoots } from '../../paths.ts';
 import { CHARS_PER_TOKEN } from '../constants.ts';
 import type { Agent, RawConfigItem } from '../../types.ts';
 
@@ -56,15 +58,38 @@ function scanSkillDir(
 }
 
 export function scanSkills(
-  home: string,
-  projects: { id: number; root: string; name: string }[]
+  arg1: string | { id: number; root: string; name: string }[],
+  arg2?: string | { id: number; root: string; name: string }[]
 ): RawConfigItem[] {
+  let home: string;
+  let projects: { id: number; root: string; name: string }[];
+  if (typeof arg1 === 'string') {
+    home = arg1;
+    projects = Array.isArray(arg2) ? arg2 : [];
+  } else {
+    projects = Array.isArray(arg1) ? arg1 : [];
+    home = typeof arg2 === 'string' ? arg2 : homedir();
+  }
+
   const items: RawConfigItem[] = [];
 
   // Global skills
   items.push(...scanSkillDir(join(home, '.claude/skills'), 'claude', null));
   items.push(...scanSkillDir(join(home, '.codex/skills'), 'codex', null));
-  items.push(...scanSkillDir(join(home, '.config/opencode/skills'), 'opencode', null));
+
+  // OpenCode skills across candidate config roots
+  const opencodeRoots = getOpenCodeConfigRoots(home);
+  const seenSkillNames = new Set<string>();
+  for (const root of opencodeRoots) {
+    const skillsDir = join(root, 'skills');
+    const skills = scanSkillDir(skillsDir, 'opencode', null);
+    for (const skill of skills) {
+      if (seenSkillNames.has(skill.name)) continue;
+      seenSkillNames.add(skill.name);
+      items.push(skill);
+    }
+  }
+
   items.push(...scanSkillDir(join(home, '.gemini/config/skills'), 'antigravity', null));
   items.push(...scanSkillDir(join(home, '.gemini/config/plugins/superpowers/skills'), 'antigravity', null));
 
@@ -77,3 +102,6 @@ export function scanSkills(
 
   return items;
 }
+
+export const scanSkillConfigs = scanSkills;
+
