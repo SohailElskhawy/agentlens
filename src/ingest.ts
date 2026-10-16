@@ -29,7 +29,9 @@ export async function ingest(db: DB, home: string, adapters = ADAPTERS): Promise
       } catch { continue; } // deleted between discover and read
       let cursor: Cursor = getCursor(db, path) ?? { offset: 0, state: {} };
       if (size === cursor.offset) continue;
-      if (size < cursor.offset) cursor = { offset: 0, state: {} };
+      if (size < cursor.offset) {
+        cursor = path.endsWith('.db') ? { offset: 0, state: cursor.state } : { offset: 0, state: {} };
+      }
 
       let r: ReadResult;
       try { r = a.read(path, cursor); } catch (e) {

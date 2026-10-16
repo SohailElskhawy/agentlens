@@ -7,9 +7,9 @@ import type { Adapter, Cursor, NormalizedEvent, ReadResult, SessionInfo } from '
 
 function runCcusageSession(): any {
   try {
-    const raw = execFileSync('npx', ['-y', 'ccusage@latest', 'antigravity', 'session', '--json'], {
+    const raw = execFileSync('ccusage', ['antigravity', 'session', '--json'], {
       encoding: 'utf8',
-      timeout: 10_000,
+      timeout: 5000,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     return JSON.parse(raw);

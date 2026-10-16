@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, truncateSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DB } from './db.ts';
 import { insertQuotas, tx } from './db.ts';
@@ -66,8 +66,8 @@ export function spoolQuota(spoolPath: string, stdinJson: string): void {
       });
     }
 
-    for (const s of snapshots) {
-      appendFileSync(spoolPath, JSON.stringify(s) + '\n');
+    if (snapshots.length > 0) {
+      appendFileSync(spoolPath, snapshots.map((s) => JSON.stringify(s) + '\n').join(''));
     }
   } catch {
     // Malformed JSON or invalid rate_limits payload ignored safely
@@ -76,13 +76,24 @@ export function spoolQuota(spoolPath: string, stdinJson: string): void {
 
 export function drainQuotaSpool(db: DB, spoolPath: string): void {
   if (!existsSync(spoolPath)) return;
-  let content = '';
+  const stagingPath = `${spoolPath}.drain.${process.pid}.${Date.now()}`;
   try {
-    content = readFileSync(spoolPath, 'utf8');
+    renameSync(spoolPath, stagingPath);
   } catch {
     return;
   }
-  if (!content.trim()) return;
+
+  let content = '';
+  try {
+    content = readFileSync(stagingPath, 'utf8');
+  } catch {
+    try { unlinkSync(stagingPath); } catch {}
+    return;
+  }
+  if (!content.trim()) {
+    try { unlinkSync(stagingPath); } catch {}
+    return;
+  }
 
   const snapshots: QuotaSnapshot[] = [];
   const lines = content.split('\n');
@@ -98,12 +109,8 @@ export function drainQuotaSpool(db: DB, spoolPath: string): void {
   }
 
   try {
-    truncateSync(spoolPath, 0);
-  } catch {
-    try {
-      writeFileSync(spoolPath, '');
-    } catch {}
-  }
+    unlinkSync(stagingPath);
+  } catch {}
 }
 
 export function writeSummary(db: DB, targetPath: string): void {
@@ -158,7 +165,9 @@ export function writeSummary(db: DB, targetPath: string): void {
   };
 
   mkdirSync(dirname(targetPath), { recursive: true });
-  writeFileSync(targetPath, JSON.stringify(data));
+  const tmpPath = `${targetPath}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmpPath, JSON.stringify(data));
+  renameSync(tmpPath, targetPath);
 }
 
 export function formatStatusline(summaryPath: string, projectCwd: string): string {

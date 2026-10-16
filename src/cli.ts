@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, watch, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
@@ -148,7 +149,7 @@ const commands: Record<string, () => unknown> = {
       return;
     }
 
-    const db = openDb(DB_PATH);
+    const db = new DatabaseSync(DB_PATH, { readOnly: true });
     const proj = db.prepare('SELECT id FROM projects WHERE root = ?').get(root) as { id: number } | undefined;
     const projId = proj?.id;
 
@@ -158,9 +159,8 @@ const commands: Record<string, () => unknown> = {
     const sevenDaysTs = Date.now() - 7 * 86400_000;
 
     function getUsage(fromTs: number) {
-      const sql =
-        projId != null
-          ? `SELECT e.model,
+      if (projId == null) return { tokens: 0, cost: 0 };
+      const sql = `SELECT e.model,
                     coalesce(sum(e.input), 0) AS input,
                     coalesce(sum(e.output), 0) AS output,
                     coalesce(sum(e.cache_read), 0) AS cacheRead,
@@ -169,17 +169,8 @@ const commands: Record<string, () => unknown> = {
              FROM events e
              JOIN sessions s ON s.id = e.session_id
              WHERE s.project_id = ? AND e.ts >= ?
-             GROUP BY e.model`
-          : `SELECT e.model,
-                    coalesce(sum(e.input), 0) AS input,
-                    coalesce(sum(e.output), 0) AS output,
-                    coalesce(sum(e.cache_read), 0) AS cacheRead,
-                    coalesce(sum(e.cache_write), 0) AS cacheWrite,
-                    coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
-             FROM events e
-             WHERE e.ts >= ?
              GROUP BY e.model`;
-      const rows = (projId != null ? db.prepare(sql).all(projId, fromTs) : db.prepare(sql).all(fromTs)) as {
+      const rows = db.prepare(sql).all(projId, fromTs) as {
         model: string | null;
         input: number;
         output: number;

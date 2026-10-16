@@ -61,8 +61,32 @@ test('drainQuotaSpool imports records into db and clears spool', () => {
   assert.equal(rows[0].win, '5h');
   assert.equal(rows[0].used_pct, 75.0);
 
-  // Spool should now be empty
-  assert.equal(readFileSync(spool, 'utf8').trim(), '');
+  // Spool should now be empty or non-existent
+  assert.ok(!existsSync(spool) || readFileSync(spool, 'utf8').trim() === '');
+});
+
+test('drainQuotaSpool atomically stages spool file so concurrent writes are preserved', () => {
+  const dir = tmp();
+  const spool = join(dir, 'claude-quota.jsonl');
+  const db = openDb(':memory:');
+
+  const q1 = { agent: 'claude', ts: 1000, window: '5h', usedPct: 10.0, resetsAt: 5000, source: 'claude-statusline' };
+  writeFileSync(spool, JSON.stringify(q1) + '\n');
+
+  // Drain first batch
+  drainQuotaSpool(db, spool);
+
+  // Simulate concurrent write arriving immediately after drain starts/finishes
+  const q2 = { agent: 'claude', ts: 2000, window: '5h', usedPct: 20.0, resetsAt: 6000, source: 'claude-statusline' };
+  writeFileSync(spool, JSON.stringify(q2) + '\n');
+
+  // Drain second batch
+  drainQuotaSpool(db, spool);
+
+  const rows = db.prepare('SELECT used_pct FROM quota_snapshots ORDER BY ts').all() as any[];
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].used_pct, 10.0);
+  assert.equal(rows[1].used_pct, 20.0);
 });
 
 test('writeSummary writes summary.json and formatStatusline formats output in < 10ms', () => {

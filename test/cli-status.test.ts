@@ -64,3 +64,29 @@ test('agentlens status prints project usage, estimated cost, and active quota', 
   assert.match(out, /Claude 5h: 45%/);
   assert.match(out, /Codex 5h: 20%/);
 });
+
+test('agentlens status for unknown project reports 0 tokens, not global machine total', () => {
+  const dataDir = tmp();
+  const dbPath = join(dataDir, 'agentlens.db');
+  const db = openDb(dbPath);
+
+  const pId = upsertProject(db, '/work/known-app', 'known-app');
+  upsertSessions(db, [{ id: 's1', agent: 'claude', cwd: '/work/known-app', projectId: pId }]);
+  upsertEvents(db, [
+    {
+      id: 'e1',
+      agent: 'claude',
+      sessionId: 's1',
+      ts: Date.now(),
+      kind: 'assistant',
+      input: 50_000,
+      output: 50_000,
+    },
+  ]);
+  db.close();
+
+  const out = run(['status', '--project', '/work/unknown-brand-new-dir'], { AGENTLENS_DATA_DIR: dataDir });
+  assert.match(out, /unknown-brand-new-dir/);
+  assert.match(out, /Today: 0 tokens/);
+  assert.match(out, /7-day: 0 tokens/);
+});

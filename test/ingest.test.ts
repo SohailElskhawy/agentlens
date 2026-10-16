@@ -97,3 +97,41 @@ test('a file whose write fails is rolled back, counted, and does not stop the ot
   assert.equal(log.mock.callCount(), 1);
   assert.match(String(log.mock.calls[0].arguments[0]), /agentlens: could not ingest .*bad\.jsonl: /);
 });
+
+test('sqlite database files shrinking resets offset to 0 but preserves cursor state', async () => {
+  const home = tmp();
+  const dbFile = join(home, 'test.db');
+  writeFileSync(dbFile, 'x'.repeat(100));
+
+  const db = openDb(':memory:');
+  const seenCursors: any[] = [];
+  const dbAdapter: Adapter = {
+    agent: 'opencode',
+    root: () => home,
+    discover: () => [dbFile],
+    read: (path, cursor) => {
+      seenCursors.push({ ...cursor });
+      return {
+        events: [],
+        sessions: [],
+        quotas: [],
+        cursor: { offset: 100, state: { lastMessageTs: '9999' } },
+        errors: 0,
+        skipped: 0,
+      };
+    },
+  };
+
+  // First ingest: offset 0
+  await ingest(db, home, [dbAdapter]);
+  assert.equal(seenCursors.length, 1);
+  assert.deepEqual(seenCursors[0], { offset: 0, state: {} });
+
+  // Simulate WAL checkpoint: db file size shrinks from 100 to 50
+  writeFileSync(dbFile, 'x'.repeat(50));
+  await ingest(db, home, [dbAdapter]);
+  assert.equal(seenCursors.length, 2);
+  assert.equal(seenCursors[1].offset, 0);
+  assert.deepEqual(seenCursors[1].state, { lastMessageTs: '9999' });
+});
+

@@ -2,6 +2,7 @@
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const fmtTok = (n) => { n = n ?? 0; return n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n)); };
+const fmtInt = (n) => (n ?? 0).toLocaleString();
 const fmtUsd = (n) => `$${(n ?? 0).toFixed(2)}`;
 const fmtTime = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 const AGENTS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', antigravity: 'Antigravity' };
@@ -31,7 +32,7 @@ function table(cols, rows, href) {
   if (!rows.length) return '<p class="empty">Nothing in this range. Widen the range above, or open Health if you expected data.</p>';
   const head = cols.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.label)}</th>`).join('');
   const body = rows.map((r) => `<tr${href ? ` data-href="${esc(href(r))}" tabindex="0"` : ''}>${
-    cols.map((c) => `<td${c.num ? ' class="num"' : ''}>${esc(c.get(r))}</td>`).join('')}</tr>`).join('');
+    cols.map((c) => `<td${c.num ? ' class="num"' : ''}>${c.html ? c.get(r) : esc(c.get(r))}</td>`).join('')}</tr>`).join('');
   return `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -185,6 +186,7 @@ async function healthPage() {
              { label: 'Variance', num: true, get: (r) => `${r.diffPct}%` },
              {
                label: 'Status',
+               html: true,
                get: (r) =>
                  r.warning
                    ? '<span style="color:#ef4444;font-weight:600">Drift &gt; 5%</span>'
@@ -193,7 +195,8 @@ async function healthPage() {
            ],
            h.crossCheck,
          )}`
-      : '';
+      : `<h2>ccusage Cross-Check</h2>
+         <p class="hint">${h.ccusageAvailable === false ? 'ccusage binary was not detected in PATH. Install ccusage (<code>npm i -g ccusage</code>) to enable automatic daily cross-checking.' : 'No cross-check data available for the last 7 days.'}</p>`;
 
   return {
     html: `<h1>Health ${statusBadge}</h1>

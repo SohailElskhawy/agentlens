@@ -62,5 +62,29 @@ test('checkHealth detects crossCheck drift against ccusage daily totals', () => 
   assert.equal(match.agentlensTokens, 100_000);
   assert.equal(match.ccusageTokens, 80_000);
   assert.equal(match.warning, true);
+  assert.equal(h.ccusageAvailable, true);
   assert.ok(h.warnings.some((w) => w.includes('drift') && w.includes('20.0%')));
 });
+
+test('checkHealth reports ccusageAvailable: false when ccusage runner returns null', () => {
+  const db = openDb(':memory:');
+  const now = Date.now();
+  upsertEvents(db, [
+    {
+      id: 'e1',
+      agent: 'claude',
+      sessionId: 's1',
+      ts: now,
+      kind: 'assistant',
+      input: 50_000,
+      output: 50_000,
+    },
+  ]);
+
+  const nullRunner = () => null;
+  const h = checkHealth(db, nullRunner);
+  assert.equal(h.status, 'healthy');
+  assert.equal(h.ccusageAvailable, false);
+  assert.deepEqual(h.crossCheck, []);
+});
+
