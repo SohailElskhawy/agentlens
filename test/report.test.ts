@@ -120,6 +120,8 @@ test('generateWeeklyReport produces data, Markdown, and HTML with all 6 sections
     assert.ok(report.html.includes('<!DOCTYPE html>'));
     assert.ok(report.html.includes('2026-W42'));
     assert.ok(report.html.includes('prefers-color-scheme'));
+    assert.ok(report.html.includes('<h2>5. Tool Picks & Optimizations</h2>'));
+    assert.ok(report.html.includes('<h2>6. Top Three Actions for Next Week</h2>'));
 
     // Files written to disk
     assert.ok(existsSync(report.filePathMd));
@@ -128,4 +130,97 @@ test('generateWeeklyReport produces data, Markdown, and HTML with all 6 sections
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('generateWeeklyReport deduplicates topActions when multiple findings share rule', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'agentlens-report-dedup-test-'));
+  try {
+    const db = openDb(':memory:');
+    const projId = upsertProject(db, '/test/proj', 'test-proj');
+
+    // Multiple findings with rule 'context_growth'
+    upsertFindings(db, [
+      {
+        id: 'f1',
+        rule: 'context_growth',
+        projectId: projId,
+        sessionId: 's1',
+        evidence: '{}',
+        confidence: 'high',
+        confidenceReason: 'test',
+        estTokensWeek: 50_000,
+        firstSeen: 1_700_000_000_000,
+        lastSeen: 1_700_000_000_000,
+      },
+      {
+        id: 'f2',
+        rule: 'context_growth',
+        projectId: projId,
+        sessionId: 's2',
+        evidence: '{}',
+        confidence: 'high',
+        confidenceReason: 'test',
+        estTokensWeek: 40_000,
+        firstSeen: 1_700_000_000_000,
+        lastSeen: 1_700_000_000_000,
+      },
+      {
+        id: 'f3',
+        rule: 'context_growth',
+        projectId: projId,
+        sessionId: 's3',
+        evidence: '{}',
+        confidence: 'high',
+        confidenceReason: 'test',
+        estTokensWeek: 30_000,
+        firstSeen: 1_700_000_000_000,
+        lastSeen: 1_700_000_000_000,
+      },
+    ]);
+
+    upsertRecommendations(db, [
+      {
+        id: 'r1',
+        findingRule: 'context_growth',
+        projectId: projId,
+        action: 'improve',
+        title: 'Compact context',
+        body: 'Run /compact',
+        status: 'open',
+        score: 100,
+      },
+      {
+        id: 'r2',
+        findingRule: 'retry_loop',
+        projectId: projId,
+        action: 'remove',
+        title: 'Fix tool error loop',
+        body: 'Check tool errors',
+        status: 'open',
+        score: 80,
+      },
+      {
+        id: 'r3',
+        findingRule: 'hot_files',
+        projectId: projId,
+        action: 'improve',
+        title: 'Extract hot files',
+        body: 'Extract repetitive files',
+        status: 'open',
+        score: 60,
+      },
+    ]);
+
+    const report = generateWeeklyReport(db, '2026-W42', tmp);
+    assert.equal(report.data.topActions.length, 3);
+    const titles = report.data.topActions.map((a) => a.title);
+    assert.deepEqual(titles, ['Compact context', 'Fix tool error loop', 'Extract hot files']);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('getIsoWeekBounds throws on invalid week numbers (< 1 or > 53)', () => {
+  assert.throws(() => getIsoWeekBounds('2026-W00'), /Invalid ISO week number/);
+  assert.throws(() => getIsoWeekBounds('2026-W54'), /Invalid ISO week number/);
 });

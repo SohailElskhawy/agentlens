@@ -547,6 +547,7 @@ async function reportsPage() {
     </div>
   `;
 
+  const mode = state.reportMode || 'preview';
   return {
     html: `
       <h1>Weekly Usage Reports</h1>
@@ -554,11 +555,19 @@ async function reportsPage() {
       ${selector}
       ${tiles}
       <div class="report-viewer">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <h2 style="margin:0">Report: ${esc(d.week)} (${esc(d.startDate)} to ${esc(d.endDate)})</h2>
-          <a href="/api/reports/${encodeURIComponent(d.week)}" target="_blank" class="btn btn-sm btn-outline">View Raw JSON</a>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button id="btn-toggle-mode" class="btn btn-sm btn-outline">${mode === 'preview' ? 'View Markdown' : 'View Rendered HTML'}</button>
+            <button id="btn-copy-md" class="btn btn-sm btn-outline">Copy Markdown</button>
+            <a href="data:text/html;charset=utf-8,${encodeURIComponent(reportDetail.html)}" download="${esc(d.week)}.html" class="btn btn-sm btn-outline">Download HTML</a>
+            <a href="/api/reports/${encodeURIComponent(d.week)}" target="_blank" class="btn btn-sm btn-outline">View Raw JSON</a>
+          </div>
         </div>
-        <pre><code>${esc(reportDetail.markdown)}</code></pre>
+        ${mode === 'preview'
+          ? `<iframe srcdoc="${esc(reportDetail.html)}" style="width:100%;min-height:600px;border:1px solid var(--border);border-radius:6px;background:var(--bg)"></iframe>`
+          : `<pre><code>${esc(reportDetail.markdown)}</code></pre>`
+        }
       </div>
     `,
     after: () => {
@@ -572,6 +581,19 @@ async function reportsPage() {
         btn.textContent = 'Generating...';
         await fetch('/api/reports/generate', { method: 'POST' });
         render();
+      });
+      $('#btn-toggle-mode')?.addEventListener('click', () => {
+        state.reportMode = mode === 'preview' ? 'markdown' : 'preview';
+        render();
+      });
+      $('#btn-copy-md')?.addEventListener('click', async (e) => {
+        const btn = e.target;
+        try {
+          await navigator.clipboard.writeText(reportDetail.markdown);
+          const orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = orig; }, 2000);
+        } catch {}
       });
     },
   };

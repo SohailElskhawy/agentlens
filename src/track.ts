@@ -117,18 +117,25 @@ function computeMetrics(db: DB, projectId: number | null, startTs: number, endTs
       ? Number((totalInput / (totalInput + totalCacheRead)).toFixed(4))
       : 0,
     toolErrorRate: totalToolCalls > 0 ? Number((errorToolCalls / toolCalls).toFixed(4)) : 0,
+    // Privacy-first note: prompt text is not stored; correction rate is a reserved
+    // metric for future heuristic tracking (e.g., rapid consecutive user prompt turns)
     correctionRate: 0,
     avgTurnsPerSession: Number((totalTurns / sessionCount).toFixed(2)),
   };
 }
 
 export function evaluateRecommendations(db: DB, now = Date.now()): Recommendation[] {
-  // Find recommendations in 'accepted' or 'measuring' state
+  const cutoff = now - TRACKING_WINDOW_MS;
+  // Select recommendations in 'accepted' or 'measuring' state, OR any recommendations whose 14-day tracking window is still active
   const candidates = db.prepare(`
     SELECT id, finding_rule AS findingRule, project_id AS projectId, action, title, body, action_snippet AS actionSnippet, catalog_ref AS catalogRef, status, accepted_at AS acceptedAt, result, score
     FROM recommendations
-    WHERE status IN ('accepted', 'measuring') AND accepted_at IS NOT NULL
-  `).all() as any[];
+    WHERE accepted_at IS NOT NULL
+      AND (
+        status IN ('accepted', 'measuring')
+        OR (status IN ('verified', 'no_effect', 'regressed') AND accepted_at >= ?)
+      )
+  `).all(cutoff) as any[];
 
   const updatedRecs: Recommendation[] = [];
 
@@ -183,7 +190,7 @@ export function evaluateRecommendations(db: DB, now = Date.now()): Recommendatio
 
     const deltaPct = baselineVal > 0
       ? Number((((currentVal - baselineVal) / baselineVal) * 100).toFixed(1))
-      : 0;
+      : (currentVal > 0 ? 100 : 0);
 
     // Quality guardrails check: error rates or turns must not worsen by > 10%
     const toolErrorRateDelta = Number(((current.toolErrorRate - baseline.toolErrorRate) * 100).toFixed(1));
@@ -194,7 +201,7 @@ export function evaluateRecommendations(db: DB, now = Date.now()): Recommendatio
 
     const toolErrorOk = current.toolErrorRate <= Math.max(0.05, baseline.toolErrorRate * 1.10);
     const correctionOk = current.correctionRate <= Math.max(0.05, baseline.correctionRate * 1.10);
-    const turnsOk = current.avgTurnsPerSession <= Math.max(1, baseline.avgTurnsPerSession * 1.25);
+    const turnsOk = current.avgTurnsPerSession <= Math.max(1, baseline.avgTurnsPerSession * 1.10);
     const guardrailsPassed = toolErrorOk && correctionOk && turnsOk;
 
     let verdict: 'insufficient_data' | 'verified' | 'no_effect' | 'regressed' = 'insufficient_data';

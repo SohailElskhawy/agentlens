@@ -254,3 +254,164 @@ test('evaluateRecommendations: declares regressed when guardrail breaks (> 10% t
   assert.equal(evaluated[0].result?.verdict, 'regressed');
   assert.equal(evaluated[0].result?.guardrails.passed, false);
 });
+
+test('evaluateRecommendations: continues evaluation across 14-day tracking window', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/test/proj', 'test-proj');
+  const acceptedAt = 1_700_000_000_000;
+
+  const rec: Recommendation = {
+    id: 'rec_5',
+    findingRule: 'context_growth',
+    projectId: projId,
+    action: 'improve',
+    title: 'Compact context',
+    body: 'Reduce runaway tokens',
+    status: 'accepted',
+    acceptedAt,
+  };
+  upsertRecommendations(db, [rec]);
+
+  // Initial 5 sessions before & after: verified reduction
+  createMockSessionsAndEvents(db, projId, acceptedAt, 5, 5, {
+    beforeTokens: 10_000,
+    afterTokens: 4_000,
+  });
+
+  const eval1 = evaluateRecommendations(db, acceptedAt + 86400_000 * 2);
+  assert.equal(eval1.length, 1);
+  assert.equal(eval1[0].status, 'verified');
+  assert.equal(eval1[0].result?.sampleAfter, 5);
+
+  // 3 days later, 3 more sessions occur within tracking window
+  const sessions: (SessionInfo & { projectId: number | null })[] = [];
+  const events: NormalizedEvent[] = [];
+  for (let i = 5; i < 8; i++) {
+    const sId = `s_after_extra_${i}`;
+    const ts = acceptedAt + 86400_000 * 3 + (i - 5) * 3600_000;
+    sessions.push({ id: sId, agent: 'claude', projectId: projId, cwd: '/test/proj' });
+    events.push({
+      id: `e_extra_${i}_u`,
+      agent: 'claude',
+      sessionId: sId,
+      ts: ts + 10_000,
+      kind: 'user',
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+    events.push({
+      id: `e_extra_${i}_a`,
+      agent: 'claude',
+      sessionId: sId,
+      ts: ts + 20_000,
+      kind: 'assistant',
+      input: 2_000,
+      output: 2_000,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+  }
+  upsertSessions(db, sessions);
+  upsertEvents(db, events);
+
+  // Next evaluation run should NOT ignore the verified recommendation while in the 14-day window!
+  const eval2 = evaluateRecommendations(db, acceptedAt + 86400_000 * 5);
+  assert.equal(eval2.length, 1);
+  assert.equal(eval2[0].result?.sampleAfter, 8);
+});
+
+test('evaluateRecommendations: turns-per-session guardrail fails when turns regress by > 10% (e.g. +15%)', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/test/proj', 'test-proj');
+  const acceptedAt = 1_700_000_000_000;
+
+  const rec: Recommendation = {
+    id: 'rec_6',
+    findingRule: 'context_growth',
+    projectId: projId,
+    action: 'improve',
+    title: 'Compact context',
+    body: 'Reduce runaway tokens',
+    status: 'accepted',
+    acceptedAt,
+  };
+  upsertRecommendations(db, [rec]);
+
+  const sessions: (SessionInfo & { projectId: number | null })[] = [];
+  const events: NormalizedEvent[] = [];
+
+  // Before: 5 sessions, exactly 2 user turns per session (avgTurns = 2.0)
+  for (let i = 0; i < 5; i++) {
+    const sId = `s_b_${i}`;
+    const ts = acceptedAt - (5 - i) * 3600_000;
+    sessions.push({ id: sId, agent: 'claude', projectId: projId, cwd: '/test/proj' });
+    for (let t = 0; t < 2; t++) {
+      events.push({
+        id: `e_b_${i}_${t}_u`,
+        agent: 'claude',
+        sessionId: sId,
+        ts: ts + t * 2000,
+        kind: 'user',
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+      events.push({
+        id: `e_b_${i}_${t}_a`,
+        agent: 'claude',
+        sessionId: sId,
+        ts: ts + t * 2000 + 1000,
+        kind: 'assistant',
+        input: 2_500,
+        output: 2_500,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+    }
+  }
+
+  // After: 5 sessions with 2.4 user turns average (+20% increase, exceeding 10% limit)
+  // 3 sessions with 2 turns, 2 sessions with 3 turns = 12 turns / 5 sessions = 2.4 turns/session (+20%)
+  for (let i = 0; i < 5; i++) {
+    const sId = `s_a_${i}`;
+    const ts = acceptedAt + (i + 1) * 3600_000;
+    sessions.push({ id: sId, agent: 'claude', projectId: projId, cwd: '/test/proj' });
+    const turnCount = i < 2 ? 3 : 2;
+    for (let t = 0; t < turnCount; t++) {
+      events.push({
+        id: `e_a_${i}_${t}_u`,
+        agent: 'claude',
+        sessionId: sId,
+        ts: ts + t * 2000,
+        kind: 'user',
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+      events.push({
+        id: `e_a_${i}_${t}_a`,
+        agent: 'claude',
+        sessionId: sId,
+        ts: ts + t * 2000 + 1000,
+        kind: 'assistant',
+        input: 1_000,
+        output: 1_000,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+    }
+  }
+
+  upsertSessions(db, sessions);
+  upsertEvents(db, events);
+
+  const evaluated = evaluateRecommendations(db, acceptedAt + 86400_000 * 2);
+  assert.equal(evaluated.length, 1);
+  // Token reduction was > 50%, but turns/session increased by 20% (> 10%), so guardrail fails
+  assert.equal(evaluated[0].status, 'regressed');
+  assert.equal(evaluated[0].result?.guardrails.passed, false);
+});

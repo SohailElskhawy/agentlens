@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { DB } from './db.ts';
 import { costOf } from './pricing.ts';
 
-const HOME = process.env.AGENTLENS_HOME || homedir();
+const HOME = process.env.AGENTLENS_SOURCE_HOME || process.env.AGENTLENS_HOME || homedir();
 
 export interface WeeklyReportData {
   week: string; // e.g. "2026-W42"
@@ -89,6 +89,7 @@ export function getIsoWeekBounds(weekStr?: string): {
     if (!match) throw new Error(`Invalid ISO week format: ${weekStr}. Expected YYYY-Www (e.g. 2026-W42)`);
     year = Number.parseInt(match[1], 10);
     week = Number.parseInt(match[2], 10);
+    if (week < 1 || week > 53) throw new Error(`Invalid ISO week number: ${week}. Must be between 1 and 53.`);
   } else {
     // Current or previous week based on current date
     const now = new Date();
@@ -331,10 +332,11 @@ export function generateWeeklyReport(
 
   // 5. Top 3 Actions for Next Week
   const topActionRows = db.prepare(`
-    SELECT r.title, r.action, r.action_snippet as actionSnippet, f.est_tokens_week as estSavingsTokens
+    SELECT r.title, r.action, r.action_snippet as actionSnippet, coalesce(max(f.est_tokens_week), 0) as estSavingsTokens
     FROM recommendations r
     LEFT JOIN findings f ON f.rule = r.finding_rule
     WHERE r.status = 'open'
+    GROUP BY r.id
     ORDER BY r.score DESC, r.id ASC
     LIMIT 3
   `).all() as any[];
@@ -383,8 +385,12 @@ export function generateWeeklyReport(
   const filePathMd = join(reportsDir, `${bounds.week}.md`);
   const filePathHtml = join(reportsDir, `${bounds.week}.html`);
 
-  writeFileSync(filePathMd, markdown, 'utf-8');
-  writeFileSync(filePathHtml, html, 'utf-8');
+  const tmpMd = `${filePathMd}.tmp.${Date.now()}`;
+  const tmpHtml = `${filePathHtml}.tmp.${Date.now()}`;
+  writeFileSync(tmpMd, markdown, 'utf-8');
+  renameSync(tmpMd, filePathMd);
+  writeFileSync(tmpHtml, html, 'utf-8');
+  renameSync(tmpHtml, filePathHtml);
 
   return { data, markdown, html, filePathMd, filePathHtml };
 }
@@ -657,14 +663,22 @@ function renderHtml(d: WeeklyReportData, md: string): string {
     <p>Open: <strong>${d.recommendations.newOpen}</strong> · Measuring: <strong>${d.recommendations.accepted}</strong> · Verified: <strong>${d.recommendations.verified}</strong> · Regressed: <strong>${d.recommendations.regressed}</strong></p>
   </div>
 
-  <h2>5. Top Three Actions for Next Week</h2>
-  ${d.topActions.map((act, i) => `
+  <h2>5. Tool Picks & Optimizations</h2>
+  <div class="card">
+    <ul>
+      <li><strong>Fast In-Process Compaction:</strong> Port hot context into skills or rules to avoid re-sending large repetitive files.</li>
+      <li><strong>Targeted Model Selection:</strong> Reserve flagship Opus/Sonnet 3.5 models for planning and architecture; use lighter models for small single-turn edits.</li>
+    </ul>
+  </div>
+
+  <h2>6. Top Three Actions for Next Week</h2>
+  ${d.topActions.length > 0 ? d.topActions.map((act, i) => `
     <div class="card">
       <h3>${i + 1}. ${act.title}</h3>
       <p>Action: <code>${act.action}</code> ${act.estSavingsTokens > 0 ? `· Est. Savings: <strong>~${fmtTok(act.estSavingsTokens)} tokens/week</strong>` : ''}</p>
       ${act.actionSnippet ? `<pre><code>${act.actionSnippet}</code></pre>` : ''}
     </div>
-  `).join('')}
+  `).join('') : '<p>No pending high-priority actions. Check back next week!</p>'}
 </body>
 </html>`;
 }

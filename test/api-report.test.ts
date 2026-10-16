@@ -52,12 +52,17 @@ test('Reports and Tracking API endpoints work correctly', async () => {
     const listData2 = (await listRes2.json()) as any;
     assert.ok(listData2.reports.some((r: any) => r.week === '2026-W42'));
 
+    // Modify the saved file on disk with a custom marker
+    const savedMd = join(tmp, '.local/share/agentlens/reports/2026-W42.md');
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(savedMd, '# Custom Historical Report Marker');
+
     // 4. GET /api/reports/2026-W42
     const repRes = await fetch(`${base}/api/reports/2026-W42`);
     assert.equal(repRes.status, 200);
     const repData = (await repRes.json()) as any;
     assert.equal(repData.data.week, '2026-W42');
-    assert.ok(repData.markdown.length > 0);
+    assert.ok(repData.markdown.includes('# Custom Historical Report Marker'));
     assert.ok(repData.html.length > 0);
 
     // 5. POST /api/recommendations/:id/accept

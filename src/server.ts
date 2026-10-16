@@ -208,7 +208,18 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
         const week = url.pathname.slice('/api/reports/'.length);
         if (/^\d{4}-W\d{1,2}$/.test(week)) {
           try {
-            const rep = generateWeeklyReport(db, week, process.env.AGENTLENS_SOURCE_HOME || homedir());
+            const home = process.env.AGENTLENS_SOURCE_HOME || homedir();
+            const reportsDir = join(home, '.local/share/agentlens/reports');
+            const filePathMd = join(reportsDir, `${week}.md`);
+            const filePathHtml = join(reportsDir, `${week}.html`);
+            if (existsSync(filePathMd) && existsSync(filePathHtml)) {
+              return send(res, 200, 'application/json', JSON.stringify({
+                data: { week },
+                markdown: readFileSync(filePathMd, 'utf8'),
+                html: readFileSync(filePathHtml, 'utf8'),
+              }));
+            }
+            const rep = generateWeeklyReport(db, week, home);
             return send(res, 200, 'application/json', JSON.stringify({
               data: rep.data,
               markdown: rep.markdown,
