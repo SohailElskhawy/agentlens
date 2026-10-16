@@ -17,7 +17,19 @@ export const codex: Adapter = {
   agent: 'codex',
   // The env override only applies to the real home; a custom source home (AGENTLENS_SOURCE_HOME, tests) is honored as given.
   root: (home) => join(home === homedir() && process.env.CODEX_HOME ? process.env.CODEX_HOME : join(home, '.codex'), 'sessions'),
-  discover: (root) => existsSync(root) ? globSync('**/rollout-*.jsonl', { cwd: root }).map((p) => join(root, p)) : [],
+  discover: (root) => {
+    const roots = [root];
+    if (process.platform === 'darwin') {
+      const macRoot = join(homedir(), 'Library/Application Support/codex/sessions');
+      if (existsSync(macRoot) && !roots.includes(macRoot)) roots.push(macRoot);
+    }
+    const paths: string[] = [];
+    for (const r of roots) {
+      if (!existsSync(r)) continue;
+      paths.push(...globSync('**/rollout-*.jsonl', { cwd: r }).map((p) => join(r, p)));
+    }
+    return paths;
+  },
 
   read(path, cursor) {
     // The id is in the file name, so a read that starts mid-file still knows its session.

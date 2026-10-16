@@ -3,6 +3,9 @@ import { antigravity } from './adapters/antigravity.ts';
 import { claude } from './adapters/claude.ts';
 import { codex } from './adapters/codex.ts';
 import { opencode } from './adapters/opencode.ts';
+import { gemini } from './adapters/gemini.ts';
+import { aider } from './adapters/aider.ts';
+import { cursor } from './adapters/cursor.ts';
 import { type DB, getCursor, getFindings, insertQuotas, setCursor, tx, upsertEvents, upsertProject, upsertRecommendations, upsertSessions } from './db.ts';
 import { runDetectors } from './analyze/runner.ts';
 import { generateRecommendations } from './recommend.ts';
@@ -10,7 +13,7 @@ import { evaluateRecommendations } from './track.ts';
 import { projectName, projectRoot } from './project.ts';
 import type { Adapter, Cursor, ReadResult } from './types.ts';
 
-export const ADAPTERS: Adapter[] = [claude, codex, opencode, antigravity];
+export const ADAPTERS: Adapter[] = [claude, codex, opencode, antigravity, gemini, aider, cursor];
 
 export interface IngestStats { files: number; read: number; events: number; errors: number; skipped: number }
 

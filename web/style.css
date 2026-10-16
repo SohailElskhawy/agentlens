@@ -62,6 +62,9 @@
   --agent-codex: #4f86f7;
   --agent-opencode: #2ea073;
   --agent-antigravity: #a35fd6;
+  --agent-gemini: #4285f4;
+  --agent-aider: #00b4d8;
+  --agent-cursor: #a855f7;
 
   color-scheme: dark;
 }
@@ -100,6 +103,9 @@
     --agent-codex: #336be0;
     --agent-opencode: #1f8a5e;
     --agent-antigravity: #8646b9;
+    --agent-gemini: #1a73e8;
+    --agent-aider: #0096c7;
+    --agent-cursor: #9333ea;
 
     color-scheme: light;
   }
@@ -137,6 +143,9 @@
   --agent-codex: #336be0;
   --agent-opencode: #1f8a5e;
   --agent-antigravity: #8646b9;
+  --agent-gemini: #1a73e8;
+  --agent-aider: #0096c7;
+  --agent-cursor: #9333ea;
 
   color-scheme: light;
 }

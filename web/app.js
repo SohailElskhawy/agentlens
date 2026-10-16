@@ -6,10 +6,26 @@ const fmtInt = (n) => (n ?? 0).toLocaleString();
 const fmtUsd = (n) => `$${(n ?? 0).toFixed(2)}`;
 const fmtTime = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 const fmtDelta = (n) => ((n ?? 0) > 0 ? `+${n}%` : `${n ?? 0}%`);
-const AGENTS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', antigravity: 'Antigravity' };
+const AGENTS = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  antigravity: 'Antigravity',
+  gemini: 'Gemini CLI',
+  aider: 'Aider',
+  cursor: 'Cursor',
+};
 
 // Theme-tested hues
-const COLORS = { claude: '#e07a5f', codex: '#4f86f7', opencode: '#2ea073', antigravity: '#a35fd6' };
+const COLORS = {
+  claude: '#e07a5f',
+  codex: '#4f86f7',
+  opencode: '#2ea073',
+  antigravity: '#a35fd6',
+  gemini: '#4285f4',
+  aider: '#00b4d8',
+  cursor: '#a855f7',
+};
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const cost = (t) => (t.cost === 0 && t.unpricedTokens > 0 ? 'unpriced' : fmtUsd(t.cost) + (t.unpricedTokens > 0 ? '*' : ''));
 
@@ -274,13 +290,14 @@ function renderSkeleton() {
 
 // Pages
 async function overview() {
-  const [s, daily, models, projects, quota, findingsRes] = await Promise.all([
+  const [s, daily, models, projects, quota, findingsRes, healthRes] = await Promise.all([
     api('summary'),
     api('daily'),
     api('models'),
     api('projects'),
     api('quota'),
     api('findings').catch(() => ({ findings: [] })),
+    api('health').catch(() => null),
   ]);
   const t = s.totals;
   const days = [...new Set(daily.map((d) => d.day))];
@@ -288,6 +305,23 @@ async function overview() {
 
   const findings = findingsRes?.findings || [];
   const balanceFinding = findings.find((f) => f.rule === 'cross_agent_balance');
+
+  const antigravityNotice = (healthRes?.ccusageAvailable === false && (s.byAgent?.some((a) => a.agent === 'antigravity') || healthRes?.sources?.some((src) => src.agent === 'antigravity'))) ? `
+    <div class="card" style="margin-bottom:var(--space-4);border-color:var(--warn);background:var(--warn-bg)">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:22px">⚠️</span>
+          <div>
+            <strong style="color:var(--warn);font-size:14px">Antigravity Token Ingestion Notice</strong>
+            <p style="margin:2px 0 0;font-size:13px;color:var(--text-main)">
+              The <code>ccusage</code> CLI binary was not detected in your PATH. Antigravity sessions will display zero measured tokens until ccusage is installed. Run <code>npm i -g ccusage</code> to enable token ingestion.
+            </p>
+          </div>
+        </div>
+        <a href="#/health" class="btn btn-sm btn-outline">Check System Health &rarr;</a>
+      </div>
+    </div>
+  ` : '';
 
   const balanceCard = balanceFinding ? `
     <div class="card" style="margin-bottom:var(--space-4);border-color:var(--accent);background:var(--surface)">
@@ -327,6 +361,7 @@ async function overview() {
         ${quotaTiles(quota.latest)}
       </section>
 
+      ${antigravityNotice}
       ${balanceCard}
 
       <div class="grid-12">
@@ -1770,7 +1805,7 @@ async function healthPage() {
         </div>`
       : `<div class="card" style="margin-top:var(--space-4)">
           <div class="card-header"><h3 class="card-title">ccusage Cross-Check</h3></div>
-          <p class="hint" style="margin:0">${h.ccusageAvailable === false ? 'ccusage binary was not detected in PATH. Install ccusage (<code>npm i -g ccusage</code>) to enable automatic daily cross-checking.' : 'No cross-check data available for the last 7 days.'}</p>
+          <p class="hint" style="margin:0">${h.ccusageAvailable === false ? 'ccusage binary was not detected in PATH. Install ccusage (<code>npm i -g ccusage</code>) to enable automatic daily cross-checking and Antigravity token ingestion.' : 'No cross-check data available for the last 7 days.'}</p>
         </div>`;
 
   return {

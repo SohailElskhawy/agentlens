@@ -95,7 +95,7 @@ export function upsertSessions(db: DB, sessions: (SessionInfo & { projectId: num
     INSERT INTO sessions (id, agent, project_id, cwd, parent_id) VALUES ($id, $agent, $projectId, $cwd, $parentId)
     ON CONFLICT(id) DO UPDATE SET project_id = coalesce(project_id, excluded.project_id),
       cwd = coalesce(cwd, excluded.cwd), parent_id = coalesce(parent_id, excluded.parent_id)`);
-  for (const s of sessions) st.run({ id: s.id, agent: s.agent, projectId: s.projectId, cwd: s.cwd ?? null, parentId: s.parentId ?? null });
+  for (const s of sessions) st.run({ id: s.id, agent: s.agent, projectId: s.projectId ?? null, cwd: s.cwd ?? null, parentId: s.parentId ?? null });
 }
 
 export function upsertProject(db: DB, root: string, name: string): number {

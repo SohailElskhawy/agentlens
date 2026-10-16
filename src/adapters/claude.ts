@@ -16,9 +16,19 @@ export const claude: Adapter = {
   agent: 'claude',
   // The env override only applies to the real home; a custom source home (AGENTLENS_SOURCE_HOME, tests) is honored as given.
   root: (home) => join(home === homedir() && process.env.CLAUDE_CONFIG_DIR ? process.env.CLAUDE_CONFIG_DIR : join(home, '.claude'), 'projects'),
-  discover: (root) => existsSync(root)
-    ? [...globSync('*/*.jsonl', { cwd: root }), ...globSync('*/*/subagents/*.jsonl', { cwd: root })].map((p) => join(root, p))
-    : [],
+  discover: (root) => {
+    const roots = [root];
+    if (process.platform === 'darwin') {
+      const macRoot = join(homedir(), 'Library/Application Support/Claude/projects');
+      if (existsSync(macRoot) && !roots.includes(macRoot)) roots.push(macRoot);
+    }
+    const paths: string[] = [];
+    for (const r of roots) {
+      if (!existsSync(r)) continue;
+      paths.push(...[...globSync('*/*.jsonl', { cwd: r }), ...globSync('*/*/subagents/*.jsonl', { cwd: r })].map((p) => join(r, p)));
+    }
+    return paths;
+  },
 
   read(path, cursor) {
     const events: NormalizedEvent[] = [];

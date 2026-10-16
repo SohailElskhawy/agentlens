@@ -2,7 +2,7 @@ import type { DB } from '../db.ts';
 import { INSTRUCTION_OVERHEAD_THRESHOLD } from './constants.ts';
 import type { Agent, Finding, RawConfigItem } from '../types.ts';
 
-const AGENTS: Agent[] = ['claude', 'codex', 'opencode', 'antigravity'];
+const AGENTS: Agent[] = ['claude', 'codex', 'opencode', 'antigravity', 'gemini', 'aider', 'cursor'];
 
 export function analyzeOverhead(
   instructions: RawConfigItem[],

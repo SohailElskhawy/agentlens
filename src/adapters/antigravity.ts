@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +33,14 @@ export const antigravity: AntigravityAdapter = {
       join(root, 'antigravity-cli/conversation_summaries.db'),
       join(root, 'antigravity/conversation_summaries.db'),
     ];
+    if (process.platform === 'darwin') {
+      const macSupport = join(homedir(), 'Library/Application Support');
+      candidates.push(
+        join(macSupport, 'Google/Antigravity/conversation_summaries.db'),
+        join(macSupport, 'antigravity/conversation_summaries.db'),
+        join(macSupport, 'antigravity-cli/conversation_summaries.db')
+      );
+    }
     return candidates.filter((p) => existsSync(p));
   },
   read(path: string, cursor: Cursor, ccusageRunner = runCcusageSession): ReadResult {
