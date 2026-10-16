@@ -8,43 +8,226 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <a class="brand" href="#/overview">agentlens</a>
-    <nav aria-label="Pages">
-      <a href="#/overview">Overview</a>
-      <a href="#/projects">Projects</a>
-      <a href="#/sessions">Sessions</a>
-      <a href="#/quota">Quota</a>
-      <a href="#/recommendations">Recommendations</a>
-      <a href="#/audit">Config Audit</a>
-      <a href="#/reports">Reports</a>
-      <a href="#/catalog">Catalog</a>
-      <a href="#/health">Health</a>
-    </nav>
-    <form class="filters" onsubmit="return false">
-      <label>Range
-        <select id="f-range">
-          <option value="7">Last 7 days</option>
-          <option value="30" selected>Last 30 days</option>
-          <option value="90">Last 90 days</option>
-          <option value="0">All time</option>
-        </select>
-      </label>
-      <label>Agent
-        <select id="f-agent">
-          <option value="">All agents</option>
-          <option value="claude">Claude Code</option>
-          <option value="codex">Codex</option>
-          <option value="opencode">OpenCode</option>
-          <option value="antigravity">Antigravity</option>
-        </select>
-      </label>
-      <label>Project
-        <select id="f-project"><option value="">All projects</option></select>
-      </label>
-    </form>
-  </header>
-  <main id="main"></main>
+  <div class="app-shell">
+    <aside id="sidebar" class="sidebar" aria-label="Primary Navigation">
+      <div class="sidebar-brand">
+        <a class="brand-link" href="#/overview" title="agentlens">
+          <svg class="brand-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 2v3m0 14v3M2 12h3m14 0h3m-3.5-6.5l-2.1 2.1m-8.8 8.8l-2.1 2.1m0-13l2.1 2.1m8.8 8.8l2.1 2.1"></path>
+          </svg>
+          <span class="brand-text">agentlens</span>
+        </a>
+        <button id="btn-sidebar-collapse" class="btn-icon collapse-btn" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Pages">
+        <a href="#/overview" data-nav="overview" title="Overview">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="9"></rect>
+            <rect x="14" y="3" width="7" height="5"></rect>
+            <rect x="14" y="12" width="7" height="9"></rect>
+            <rect x="3" y="16" width="7" height="5"></rect>
+          </svg>
+          <span class="nav-label">Overview</span>
+        </a>
+        <a href="#/projects" data-nav="projects" title="Projects">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span class="nav-label">Projects</span>
+        </a>
+        <a href="#/sessions" data-nav="sessions" title="Sessions">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          <span class="nav-label">Sessions</span>
+        </a>
+        <a href="#/quota" data-nav="quota" title="Quota">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path>
+            <path d="M12 6v6l4 2"></path>
+          </svg>
+          <span class="nav-label">Quota</span>
+        </a>
+        <a href="#/recommendations" data-nav="recommendations" title="Recommendations">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>
+          </svg>
+          <span class="nav-label">Recommendations</span>
+        </a>
+        <a href="#/audit" data-nav="audit" title="Config Audit">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11l3 3L22 4"></path>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          </svg>
+          <span class="nav-label">Config Audit</span>
+        </a>
+        <a href="#/reports" data-nav="reports" title="Reports">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          <span class="nav-label">Reports</span>
+        </a>
+        <a href="#/catalog" data-nav="catalog" title="Catalog">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
+          <span class="nav-label">Catalog</span>
+        </a>
+        <a href="#/health" data-nav="health" title="Health">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+          </svg>
+          <span class="nav-label">Health</span>
+        </a>
+        <a href="#/settings" data-nav="settings" title="Settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span class="nav-label">Settings</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="btn-shortcuts-sidebar" class="sidebar-footer-btn" title="Keyboard shortcuts (?)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <span class="nav-label">Shortcuts <kbd>?</kbd></span>
+        </button>
+        <button id="btn-theme-sidebar" class="sidebar-footer-btn" title="Toggle theme">
+          <svg class="theme-icon-dark" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+          <span class="nav-label theme-label">Theme</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="app-main">
+      <header class="topbar">
+        <button id="btn-mobile-toggle" class="btn-icon mobile-menu-btn" aria-label="Toggle navigation">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <div id="quota-pills" class="quota-pills" aria-label="Live quota indicators"></div>
+
+        <form class="filters" onsubmit="return false">
+          <label class="filter-group">
+            <span class="filter-label">Range</span>
+            <select id="f-range" class="form-select">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="0">All time</option>
+            </select>
+          </label>
+          <label class="filter-group">
+            <span class="filter-label">Agent</span>
+            <select id="f-agent" class="form-select">
+              <option value="">All agents</option>
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex</option>
+              <option value="opencode">OpenCode</option>
+              <option value="antigravity">Antigravity</option>
+            </select>
+          </label>
+          <label class="filter-group">
+            <span class="filter-label">Project</span>
+            <select id="f-project" class="form-select">
+              <option value="">All projects</option>
+            </select>
+          </label>
+        </form>
+
+        <div class="topbar-actions">
+          <button id="btn-theme-top" class="btn-icon" title="Toggle theme (Dark / Light)" aria-label="Toggle theme">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </button>
+          <button id="btn-shortcuts-top" class="btn-icon" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main id="main" class="main-content" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <!-- Slide-over drawer -->
+  <div id="slide-over-backdrop" class="slide-over-backdrop" aria-hidden="true"></div>
+  <aside id="slide-over" class="slide-over" aria-hidden="true" role="dialog" aria-labelledby="slide-over-title">
+    <div class="slide-over-header">
+      <h3 id="slide-over-title" class="slide-over-title">Details</h3>
+      <button id="slide-over-close" class="btn-icon" aria-label="Close details panel" title="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div id="slide-over-body" class="slide-over-body"></div>
+  </aside>
+
+  <!-- Keyboard Shortcuts Modal -->
+  <div id="shortcuts-modal-backdrop" class="modal-backdrop" aria-hidden="true"></div>
+  <div id="shortcuts-modal" class="modal-dialog" aria-hidden="true" role="dialog" aria-labelledby="shortcuts-title">
+    <div class="modal-header">
+      <h3 id="shortcuts-title" class="modal-title">Keyboard Navigation</h3>
+      <button id="shortcuts-close" class="btn-icon" aria-label="Close shortcuts modal" title="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="shortcut-list">
+        <div class="shortcut-row"><span class="shortcut-desc">Overview</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>o</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Projects</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>p</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Sessions</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>s</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Quota</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>q</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Recommendations</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>r</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Config Audit</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>a</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Reports</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>w</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Catalog</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>c</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Health</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>h</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Settings</span><span class="shortcut-keys"><kbd>g</kbd> <kbd>,</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Toggle Theme</span><span class="shortcut-keys"><kbd>t</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Toggle Sidebar</span><span class="shortcut-keys"><kbd>[</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Help / Shortcuts Sheet</span><span class="shortcut-keys"><kbd>?</kbd></span></div>
+        <div class="shortcut-row"><span class="shortcut-desc">Close Modal / Slide-over</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="mobile-sidebar-backdrop" class="mobile-sidebar-backdrop" aria-hidden="true"></div>
+
   <script src="vendor/uPlot.iife.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>

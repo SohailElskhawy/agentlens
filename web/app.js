@@ -7,10 +7,10 @@ const fmtUsd = (n) => `$${(n ?? 0).toFixed(2)}`;
 const fmtTime = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 const fmtDelta = (n) => ((n ?? 0) > 0 ? `+${n}%` : `${n ?? 0}%`);
 const AGENTS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', antigravity: 'Antigravity' };
-// Categorical hues, validated with the dataviz palette validator in light and dark (claude orange nudged from #d97757 to pass the dark lightness band).
-const COLORS = { claude: '#d4724f', codex: '#4f7cff', opencode: '#2fa37a', antigravity: '#a35fd6' };
+
+// Theme-tested hues
+const COLORS = { claude: '#e07a5f', codex: '#4f86f7', opencode: '#2ea073', antigravity: '#a35fd6' };
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-// Unpriced tokens are never shown as $0: all-unpriced says so, partly-unpriced gets an asterisk.
 const cost = (t) => (t.cost === 0 && t.unpricedTokens > 0 ? 'unpriced' : fmtUsd(t.cost) + (t.unpricedTokens > 0 ? '*' : ''));
 
 const state = { range: 30, agent: '', project: '' };
@@ -26,25 +26,64 @@ async function api(path, extra = {}) {
   return r.json();
 }
 
-const tile = (label, value, note = '') =>
-  `<div class="tile"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="note">${esc(note)}</div></div>`;
+function tile(label, value, note = '') {
+  return `<div class="tile"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="note">${esc(note)}</div></div>`;
+}
+
+function emptyState(title, desc = '', actionHtml = '') {
+  return `
+    <div class="empty-state">
+      <div class="empty-state-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+      </div>
+      <div class="empty-state-title">${esc(title)}</div>
+      ${desc ? `<div class="empty-state-desc">${esc(desc)}</div>` : ''}
+      ${actionHtml ? `<div class="empty-state-actions">${actionHtml}</div>` : ''}
+    </div>
+  `;
+}
 
 function table(cols, rows, href) {
-  if (!rows.length) return '<p class="empty">Nothing in this range. Widen the range above, or open Health if you expected data.</p>';
+  if (!rows || !rows.length) {
+    return emptyState('Nothing in this range', 'Widen the range above, or open Health if you expected data.');
+  }
   const head = cols.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.label)}</th>`).join('');
   const body = rows.map((r) => `<tr${href ? ` data-href="${esc(href(r))}" tabindex="0"` : ''}>${
     cols.map((c) => `<td${c.num ? ' class="num"' : ''}>${c.html ? c.get(r) : esc(c.get(r))}</td>`).join('')}</tr>`).join('');
-  return `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-card-scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function chart(id, x, series, { time = true, fmt = fmtTok } = {}) {
   const el = document.getElementById(id);
-  const axis = { stroke: css('--muted'), grid: { stroke: css('--grid') }, ticks: { stroke: css('--grid') } };
-  charts.push(new uPlot({
-    width: el.clientWidth - 16, height: 260, scales: { x: { time } },
-    series: [{}, ...series.map((s) => ({ label: s.label, stroke: s.color, dash: s.dash, width: 2, spanGaps: true, value: (u, v) => (v == null ? '—' : fmt(v)) }))],
-    axes: [axis, { ...axis, size: 64, values: (u, vals) => vals.map(fmt) }],
-  }, [x, ...series.map((s) => s.data)], el));
+  if (!el) return;
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+    (!document.documentElement.getAttribute('data-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const textColor = css('--text-muted') || (isDark ? '#8b949e' : '#656d76');
+  const gridColor = css('--grid') || (isDark ? '#21262d' : '#e8ecf0');
+  const axis = {
+    stroke: textColor,
+    grid: { stroke: gridColor, width: 1 },
+    ticks: { stroke: gridColor, width: 1 },
+    font: '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  };
+  const u = new uPlot({
+    width: Math.max(el.clientWidth - 16, 320),
+    height: 240,
+    scales: { x: { time } },
+    series: [
+      {},
+      ...series.map((s) => ({
+        label: s.label,
+        stroke: s.color,
+        dash: s.dash,
+        width: 2,
+        spanGaps: true,
+        value: (uPlotInstance, v) => (v == null ? '—' : fmt(v)),
+      })),
+    ],
+    axes: [axis, { ...axis, size: 64, values: (uPlotInstance, vals) => vals.map(fmt) }],
+  }, [x, ...series.map((s) => s.data)], el);
+  charts.push(u);
 }
 
 const agentCol = { label: 'Agent', get: (r) => AGENTS[r.agent] ?? r.agent };
@@ -65,74 +104,298 @@ function quotaTiles(latest) {
   return ['claude', 'codex'].flatMap((agent) => ['5h', '7d'].map((win) => {
     const q = latest.find((l) => l.agent === agent && l.win === win);
     const name = `${AGENTS[agent]} ${win}`;
-    if (state.agent && state.agent !== agent) return tile('Quota used (reported by agent)', 'n/a', `${name}: hidden by the Agent filter`);
-    if (!q) return tile('Quota used (reported by agent)', 'n/a', `${name}: not reported yet`);
-    if (q.resetsAt < Date.now()) return tile('Quota used (reported by agent)', 'n/a', `${name}: window reset since the last report`);
-    return tile('Quota used (reported by agent)', `${Math.round(q.usedPct)}%`, `${name} · resets ${fmtTime(q.resetsAt)}`);
+    if (state.agent && state.agent !== agent) return tile('Quota used', 'n/a', `${name}: hidden by Agent filter`);
+    if (!q) return tile('Quota used', 'n/a', `${name}: not reported yet`);
+    if (q.resetsAt < Date.now()) return tile('Quota used', 'n/a', `${name}: window reset since report`);
+    return tile('Quota used', `${Math.round(q.usedPct)}%`, `${name} · resets ${fmtTime(q.resetsAt)}`);
   })).join('');
 }
 
+function fmtCountdown(ms) {
+  if (ms <= 0) return 'resets soon';
+  const sec = Math.floor(ms / 1000);
+  const min = Math.floor(sec / 60);
+  const hrs = Math.floor(min / 60);
+  const days = Math.floor(hrs / 24);
+  if (days > 0) return `${days}d ${hrs % 24}h`;
+  if (hrs > 0) return `${hrs}h ${min % 60}m`;
+  return `${min}m`;
+}
+
+async function updateQuotaPills() {
+  try {
+    const q = await fetch('/api/quota').then((r) => r.json());
+    const container = $('#quota-pills');
+    if (!container || !q || !q.latest) return;
+    const now = Date.now();
+    const pills = q.latest
+      .filter((l) => (l.agent === 'claude' || l.agent === 'codex') && l.resetsAt > now)
+      .map((l) => {
+        const remaining = fmtCountdown(l.resetsAt - now);
+        const color = l.usedPct >= 85 ? 'var(--danger)' : l.usedPct >= 70 ? 'var(--warn)' : 'var(--success)';
+        return `
+          <a class="quota-pill" href="#/quota" title="${esc(AGENTS[l.agent] || l.agent)} ${esc(l.win)}: ${Math.round(l.usedPct)}% used, resets in ${remaining}">
+            <span class="quota-pill-dot" style="background:${color}"></span>
+            <span>${esc(l.agent)} ${esc(l.win)}: <strong>${Math.round(l.usedPct)}%</strong></span>
+            <span class="quota-pill-countdown">${remaining}</span>
+          </a>
+        `;
+      }).join('');
+    container.innerHTML = pills;
+  } catch {}
+}
+
+function openSlideOver(title, contentHtml) {
+  const el = $('#slide-over');
+  const backdrop = $('#slide-over-backdrop');
+  const titleEl = $('#slide-over-title');
+  const bodyEl = $('#slide-over-body');
+  if (!el || !backdrop) return;
+  titleEl.textContent = title;
+  bodyEl.innerHTML = contentHtml;
+  el.classList.add('open');
+  backdrop.classList.add('open');
+  el.setAttribute('aria-hidden', 'false');
+  backdrop.setAttribute('aria-hidden', 'false');
+}
+
+function closeSlideOver() {
+  const el = $('#slide-over');
+  const backdrop = $('#slide-over-backdrop');
+  if (!el || !backdrop) return;
+  el.classList.remove('open');
+  backdrop.classList.remove('open');
+  el.setAttribute('aria-hidden', 'true');
+  backdrop.setAttribute('aria-hidden', 'true');
+}
+
+function openShortcutsModal() {
+  const modal = $('#shortcuts-modal');
+  const backdrop = $('#shortcuts-modal-backdrop');
+  if (!modal || !backdrop) return;
+  modal.classList.add('open');
+  backdrop.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  backdrop.setAttribute('aria-hidden', 'false');
+}
+
+function closeShortcutsModal() {
+  const modal = $('#shortcuts-modal');
+  const backdrop = $('#shortcuts-modal-backdrop');
+  if (!modal || !backdrop) return;
+  modal.classList.remove('open');
+  backdrop.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  backdrop.setAttribute('aria-hidden', 'true');
+}
+
+function toggleSidebar() {
+  const sidebar = $('#sidebar');
+  if (!sidebar) return;
+  const isCollapsed = sidebar.classList.toggle('collapsed');
+  localStorage.setItem('agentlens_sidebar_collapsed', String(isCollapsed));
+}
+
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('agentlens_theme', next);
+  charts.forEach((c) => c.destroy());
+  charts = [];
+  render();
+}
+
+function renderSkeleton() {
+  return `
+    <div class="tiles-row">
+      <div class="tile skeleton-pulse skeleton-tile"></div>
+      <div class="tile skeleton-pulse skeleton-tile"></div>
+      <div class="tile skeleton-pulse skeleton-tile"></div>
+      <div class="tile skeleton-pulse skeleton-tile"></div>
+    </div>
+    <div class="grid-12">
+      <div class="col-7 card skeleton-pulse skeleton-chart"></div>
+      <div class="col-5 card skeleton-pulse skeleton-chart"></div>
+    </div>
+    <div class="grid-12">
+      <div class="col-6 card skeleton-pulse skeleton-table"></div>
+      <div class="col-6 card skeleton-pulse skeleton-table"></div>
+    </div>
+  `;
+}
+
+// Pages
 async function overview() {
-  const [s, daily, models, projects, quota] = await Promise.all([api('summary'), api('daily'), api('models'), api('projects'), api('quota')]);
+  const [s, daily, models, projects, quota] = await Promise.all([
+    api('summary'),
+    api('daily'),
+    api('models'),
+    api('projects'),
+    api('quota'),
+  ]);
   const t = s.totals;
   const days = [...new Set(daily.map((d) => d.day))];
   const agents = [...new Set(daily.map((d) => d.agent))];
+
   return {
     html: `
-      <section class="tiles">
+      <section class="tiles-row">
         ${tile('Tokens (measured)', fmtTok(t.tokens), `${fmtTok(t.input)} input · ${fmtTok(t.output)} output · ${fmtTok(t.cacheRead)} cache read · ${fmtTok(t.cacheWrite)} cache write`)}
         ${tile('API-equivalent cost (estimated)', cost(t), t.unpricedTokens ? `${fmtTok(t.unpricedTokens)} tokens from unpriced models not included` : `List prices as of ${s.pricesAsOf}; not what your plan bills`)}
         ${tile('Sessions', String(s.sessions), t.tokens ? `${Math.round((t.cacheRead / t.tokens) * 100)}% of tokens were cache reads` : '')}
         ${quotaTiles(quota.latest)}
       </section>
-      <h2>Tokens per day</h2>
-      <div id="c-daily" class="chart"></div>
-      <div class="cols">
-        <section><h2>By agent</h2>${table([agentCol, ...tokCols], s.byAgent)}</section>
-        <section><h2>By model</h2>${table([{ label: 'Model', get: (r) => r.name ?? 'unknown' }, agentCol, ...tokCols], models)}</section>
+
+      <div class="grid-12">
+        <div class="col-7 card chart-container">
+          <div class="chart-header">
+            <h3 class="chart-title">Tokens per day</h3>
+            <span class="card-subtitle">Measured token usage across agents</span>
+          </div>
+          <div id="c-daily" class="chart-body"></div>
+        </div>
+
+        <div class="col-5 card">
+          <div class="card-header">
+            <h3 class="card-title">By agent</h3>
+            <span class="card-subtitle">${s.byAgent.length} active agents</span>
+          </div>
+          ${table([agentCol, ...tokCols], s.byAgent)}
+        </div>
       </div>
-      <h2>Top projects</h2>
-      ${table(projectCols, projects.slice(0, 10), (r) => `#/project/${r.projectId}`)}`,
-    after: () => days.length && chart('c-daily', days.map((d) => Date.parse(`${d}T00:00:00`) / 1000),
-      agents.map((a) => ({ label: AGENTS[a] ?? a, color: COLORS[a], data: days.map((d) => daily.find((x) => x.day === d && x.agent === a)?.tokens ?? 0) }))),
+
+      <div class="grid-12">
+        <div class="col-6 card">
+          <div class="card-header">
+            <h3 class="card-title">By model</h3>
+            <span class="card-subtitle">${models.length} models observed</span>
+          </div>
+          ${table([{ label: 'Model', get: (r) => r.name ?? 'unknown' }, agentCol, ...tokCols], models)}
+        </div>
+
+        <div class="col-6 card">
+          <div class="card-header">
+            <h3 class="card-title">Top projects</h3>
+            <a href="#/projects" class="btn btn-sm btn-outline">All projects &rarr;</a>
+          </div>
+          ${table(projectCols, projects.slice(0, 8), (r) => `#/project/${r.projectId}`)}
+        </div>
+      </div>
+    `,
+    after: () => {
+      if (days.length) {
+        chart('c-daily', days.map((d) => Date.parse(`${d}T00:00:00`) / 1000),
+          agents.map((a) => ({
+            label: AGENTS[a] ?? a,
+            color: COLORS[a],
+            data: days.map((d) => daily.find((x) => x.day === d && x.agent === a)?.tokens ?? 0),
+          })));
+      }
+    },
   };
 }
 
 async function projectsPage() {
   const rows = await api('projects');
   return {
-    html: `<h1>Projects</h1>
-      <p class="hint">Grouped by git repository; worktrees count toward their main repo. Select a row to filter the overview to that project.</p>
-      ${table([...projectCols, { label: 'Path', get: (r) => r.root }], rows, (r) => `#/project/${r.projectId}`)}`,
+    html: `
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">Projects</h1>
+          <p class="hint" style="margin:4px 0 0">Grouped by git repository; worktrees count toward their main repo. Click a row to view project details.</p>
+        </div>
+      </div>
+      <div class="card">
+        ${table([...projectCols, { label: 'Path', get: (r) => r.root }], rows, (r) => `#/project/${r.projectId}`)}
+      </div>
+    `,
   };
 }
 
 async function sessionsPage() {
   const rows = await api('sessions', { limit: '300' });
   return {
-    html: `<h1>Sessions</h1>${table([
-      { label: 'Last activity', get: (r) => fmtTime(r.ended) }, agentCol, { label: 'Project', get: (r) => r.project ?? '—' },
-      { label: 'Kind', get: (r) => (r.parentId ? 'subagent' : 'main') },
-      { label: 'Turns', num: true, get: (r) => r.turns }, { label: 'Tool calls', num: true, get: (r) => r.toolCalls }, ...tokCols,
-    ], rows, (r) => `#/session/${encodeURIComponent(r.id)}`)}`,
+    html: `
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">Sessions</h1>
+          <p class="hint" style="margin:4px 0 0">Latest agent sessions ingested into local sqlite. Click a row to inspect turn-by-turn context growth.</p>
+        </div>
+      </div>
+      <div class="card">
+        ${table([
+          { label: 'Last activity', get: (r) => fmtTime(r.ended) },
+          agentCol,
+          { label: 'Project', get: (r) => r.project ?? '—' },
+          { label: 'Kind', get: (r) => (r.parentId ? 'subagent' : 'main') },
+          { label: 'Turns', num: true, get: (r) => r.turns },
+          { label: 'Tool calls', num: true, get: (r) => r.toolCalls },
+          ...tokCols,
+        ], rows, (r) => `#/session/${encodeURIComponent(r.id)}`)}
+      </div>
+    `,
   };
 }
 
 async function sessionPage(id) {
   const d = await api('session', { id: decodeURIComponent(id) });
-  if (!d) return { html: '<p class="empty">Session not found. It may not have been ingested yet; check Health.</p>' };
+  if (!d) return { html: emptyState('Session not found', 'It may not have been ingested yet; check Health.') };
+
   return {
-    html: `<h1>${esc(AGENTS[d.agent] ?? d.agent)} session</h1>
-      <p class="hint">${esc(d.project ?? d.cwd ?? '')} · ${esc(d.id)}${d.parentId ? ` · subagent of <a href="#/session/${encodeURIComponent(d.parentId)}">${esc(d.parentId)}</a>` : ''}</p>
-      <section class="tiles">${tile('Tokens (measured)', fmtTok(d.totals.tokens))}${tile('API-equivalent cost (estimated)', cost(d.totals))}${tile('Turns', String(d.turns.length))}</section>
-      <h2>Context size per turn</h2>
-      <p class="hint">Input plus cache tokens sent on each turn. Steady growth with no drop means the context was never compacted.</p>
-      <div id="c-ctx" class="chart"></div>
-      <h2>Tools</h2>
-      ${table([{ label: 'Tool', get: (r) => r.tool }, { label: 'Calls', num: true, get: (r) => r.calls }, { label: 'Result size', num: true, get: (r) => `${fmtTok(r.resultBytes)}B` }, { label: 'Errors', num: true, get: (r) => r.errors }], d.tools)}
-      ${d.children.length ? `<h2>Subagents</h2>${table([{ label: 'Session', get: (r) => r.id }, agentCol], d.children, (r) => `#/session/${encodeURIComponent(r.id)}`)}` : ''}`,
-    after: () => d.turns.length && chart('c-ctx', d.turns.map((_, i) => i + 1),
-      [{ label: 'Context tokens', color: COLORS[d.agent], data: d.turns.map((t) => t.context) }], { time: false }),
+    html: `
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">${esc(AGENTS[d.agent] ?? d.agent)} session</h1>
+          <p class="hint" style="margin:4px 0 0">${esc(d.project ?? d.cwd ?? '')} · <code>${esc(d.id)}</code>${d.parentId ? ` · subagent of <a href="#/session/${encodeURIComponent(d.parentId)}">${esc(d.parentId)}</a>` : ''}</p>
+        </div>
+        <a href="#/sessions" class="btn btn-sm btn-outline">&larr; Back to sessions</a>
+      </div>
+
+      <section class="tiles-row">
+        ${tile('Tokens (measured)', fmtTok(d.totals.tokens))}
+        ${tile('API-equivalent cost (estimated)', cost(d.totals))}
+        ${tile('Turns', String(d.turns.length))}
+        ${tile('Tool Calls', String(d.tools.reduce((acc, t) => acc + (t.calls || 0), 0)))}
+      </section>
+
+      <div class="grid-12">
+        <div class="col-7 card chart-container">
+          <div class="chart-header">
+            <h3 class="chart-title">Context size per turn</h3>
+            <span class="card-subtitle">Input plus cache tokens sent on each turn. Steady growth means no compaction occurred.</span>
+          </div>
+          <div id="c-ctx" class="chart-body"></div>
+        </div>
+
+        <div class="col-5 card">
+          <div class="card-header">
+            <h3 class="card-title">Tools invoked</h3>
+            <span class="card-subtitle">${d.tools.length} unique tools</span>
+          </div>
+          ${table([
+            { label: 'Tool', get: (r) => r.tool },
+            { label: 'Calls', num: true, get: (r) => r.calls },
+            { label: 'Result size', num: true, get: (r) => `${fmtTok(r.resultBytes)}B` },
+            { label: 'Errors', num: true, get: (r) => r.errors },
+          ], d.tools)}
+        </div>
+      </div>
+
+      ${d.children.length ? `
+        <div class="card" style="margin-top:var(--space-4)">
+          <div class="card-header"><h3 class="card-title">Subagent sessions</h3></div>
+          ${table([{ label: 'Session', get: (r) => r.id }, agentCol], d.children, (r) => `#/session/${encodeURIComponent(r.id)}`)}
+        </div>
+      ` : ''}
+    `,
+    after: () => {
+      if (d.turns.length) {
+        chart('c-ctx', d.turns.map((_, i) => i + 1),
+          [{ label: 'Context tokens', color: COLORS[d.agent], data: d.turns.map((t) => t.context) }],
+          { time: false });
+      }
+    },
   };
 }
 
@@ -141,72 +404,53 @@ async function quotaPage() {
   const keys = [...new Set(q.timeline.map((p) => `${p.agent}|${p.win}`))];
   const xs = [...new Set(q.timeline.map((p) => p.ts))].sort((a, b) => a - b);
   const idx = new Map(xs.map((x, i) => [x, i]));
-  return {
-    html: `<h1>Quota</h1>
-      <p class="hint">Percentages exactly as each agent reports them. Agents that don't report quota show n/a, never an estimate.</p>
-      <section class="tiles">${quotaTiles(q.latest)}</section>
-      <h2>Usage over time</h2>
-      <div id="c-quota" class="chart"></div>
-      <h2>Limit hits</h2>
-      ${table([agentCol, { label: 'Window', get: (r) => r.win }, { label: 'First hit', get: (r) => fmtTime(r.firstHit) }, { label: 'Window reset', get: (r) => fmtTime(r.resetsAt) }], q.limitHits)}`,
-    after: () => xs.length && chart('c-quota', xs.map((x) => x / 1000), keys.map((k) => {
-      const [agent, win] = k.split('|');
-      const data = new Array(xs.length).fill(null);
-      for (const p of q.timeline) if (p.agent === agent && p.win === win) data[idx.get(p.ts)] = p.usedPct;
-      return { label: `${AGENTS[agent] ?? agent} ${win}`, color: COLORS[agent], dash: win === '7d' ? [6, 4] : undefined, data };
-    }), { fmt: (v) => `${Math.round(v)}%` }),
-  };
-}
-
-async function healthPage() {
-  const h = await api('health');
-  const badgeColor = h.status === 'healthy' ? '#22c55e' : h.status === 'warning' ? '#eab308' : '#ef4444';
-  const badgeLabel = h.status ? h.status.charAt(0).toUpperCase() + h.status.slice(1) : 'Healthy';
-  const statusBadge = `<span style="font-size:0.875rem;padding:0.2rem 0.6rem;border-radius:9999px;background:${badgeColor};color:#fff;font-weight:600;vertical-align:middle;margin-left:0.5rem">${badgeLabel}</span>`;
-
-  const warningsHtml =
-    h.warnings && h.warnings.length > 0
-      ? `<div style="margin:1rem 0;padding:1rem;background:rgba(234,179,8,0.1);border-left:4px solid #eab308;border-radius:4px">
-          <strong style="color:#ca8a04">Warnings (${h.warnings.length})</strong>
-          <ul style="margin:0.5rem 0 0 1.25rem;padding:0">
-            ${h.warnings.map((w) => `<li style="margin:0.25rem 0">${esc(w)}</li>`).join('')}
-          </ul>
-        </div>`
-      : '';
-
-  const crossCheckHtml =
-    h.crossCheck && h.crossCheck.length > 0
-      ? `<h2>ccusage Cross-Check</h2>
-         <p class="hint">Daily token comparison against ccusage. Drift &gt; 5% triggers a warning.</p>
-         ${table(
-           [
-             agentCol,
-             { label: 'Date', get: (r) => r.date },
-             { label: 'agentlens tokens', num: true, get: (r) => fmtInt(r.agentlensTokens) },
-             { label: 'ccusage tokens', num: true, get: (r) => fmtInt(r.ccusageTokens) },
-             { label: 'Variance', num: true, get: (r) => `${r.diffPct}%` },
-             {
-               label: 'Status',
-               html: true,
-               get: (r) =>
-                 r.warning
-                   ? '<span style="color:#ef4444;font-weight:600">Drift &gt; 5%</span>'
-                   : '<span style="color:#22c55e;font-weight:500">OK</span>',
-             },
-           ],
-           h.crossCheck,
-         )}`
-      : `<h2>ccusage Cross-Check</h2>
-         <p class="hint">${h.ccusageAvailable === false ? 'ccusage binary was not detected in PATH. Install ccusage (<code>npm i -g ccusage</code>) to enable automatic daily cross-checking.' : 'No cross-check data available for the last 7 days.'}</p>`;
 
   return {
-    html: `<h1>Health ${statusBadge}</h1>
-      <p class="hint">Ingestion status, parser integrity, and ccusage cross-check.</p>
-      ${warningsHtml}
-      ${table([agentCol, { label: 'Files tracked', num: true, get: (r) => r.files }, { label: 'Bad lines', num: true, get: (r) => r.badLines }, { label: 'Last ingest', get: (r) => fmtTime(r.lastIngest) }], h.sources)}
-      <h2>Events</h2>
-      ${table([agentCol, { label: 'Events', num: true, get: (r) => r.events }, { label: 'Latest event', get: (r) => fmtTime(r.latestEvent) }], h.events)}
-      ${crossCheckHtml}`,
+    html: `
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">Quota & Rate Limits</h1>
+          <p class="hint" style="margin:4px 0 0">Percentages exactly as reported by each agent API. Agents that don't report quota show n/a.</p>
+        </div>
+      </div>
+
+      <section class="tiles-row">
+        ${quotaTiles(q.latest)}
+      </section>
+
+      <div class="grid-12">
+        <div class="col-7 card chart-container">
+          <div class="chart-header">
+            <h3 class="chart-title">Usage over time</h3>
+            <span class="card-subtitle">Burn rate across sliding windows</span>
+          </div>
+          <div id="c-quota" class="chart-body"></div>
+        </div>
+
+        <div class="col-5 card">
+          <div class="card-header">
+            <h3 class="card-title">Limit hits</h3>
+            <span class="card-subtitle">${q.limitHits.length} incidents logged</span>
+          </div>
+          ${table([
+            agentCol,
+            { label: 'Window', get: (r) => r.win },
+            { label: 'First hit', get: (r) => fmtTime(r.firstHit) },
+            { label: 'Window reset', get: (r) => fmtTime(r.resetsAt) },
+          ], q.limitHits)}
+        </div>
+      </div>
+    `,
+    after: () => {
+      if (xs.length) {
+        chart('c-quota', xs.map((x) => x / 1000), keys.map((k) => {
+          const [agent, win] = k.split('|');
+          const data = new Array(xs.length).fill(null);
+          for (const p of q.timeline) if (p.agent === agent && p.win === win) data[idx.get(p.ts)] = p.usedPct;
+          return { label: `${AGENTS[agent] ?? agent} ${win}`, color: COLORS[agent], dash: win === '7d' ? [6, 4] : undefined, data };
+        }), { fmt: (v) => `${Math.round(v)}%` });
+      }
+    },
   };
 }
 
@@ -226,20 +470,20 @@ async function recommendationsPage() {
   const acceptedRecs = recs.filter((r) => r.status === 'accepted' || r.status === 'measuring');
 
   const ACTION_COLORS = {
-    add: '#22c55e',
-    remove: '#ef4444',
-    replace: '#f59e0b',
-    improve: '#3b82f6',
+    add: 'var(--success)',
+    remove: 'var(--danger)',
+    replace: 'var(--warn)',
+    improve: 'var(--accent)',
   };
 
   const CONF_COLORS = {
-    high: '#22c55e',
-    medium: '#f59e0b',
-    low: '#6b7280',
+    high: 'var(--success)',
+    medium: 'var(--warn)',
+    low: 'var(--text-muted)',
   };
 
   const tiles = `
-    <div class="tiles">
+    <div class="tiles-row">
       <div class="tile">
         <div class="label">Est. Weekly Potential Savings</div>
         <div class="value">${fmtTok(savings)}</div>
@@ -253,14 +497,16 @@ async function recommendationsPage() {
       <div class="tile">
         <div class="label">Flagged Findings</div>
         <div class="value">${findings.length}</div>
-        <div class="note">Across 10 workflow detectors</div>
+        <div class="note">Across workflow detectors</div>
       </div>
     </div>
   `;
 
   const trackedSection = trackedItems.length > 0 ? `
-    <h2>Tracked Improvements (${trackedItems.length})</h2>
-    <p class="hint">14-day pre- vs post-adoption verification with quality guardrails (tool errors, corrections, turns/session).</p>
+    <div class="card-header" style="margin-top:var(--space-4)">
+      <h2 style="margin:0;font-size:15px;font-weight:600">Tracked Improvements (${trackedItems.length})</h2>
+      <span class="card-subtitle">14-day pre- vs post-adoption verification with quality guardrails</span>
+    </div>
     <div class="rec-grid">
       ${trackedItems.map((r) => {
         const res = r.result;
@@ -272,15 +518,15 @@ async function recommendationsPage() {
           <div class="rec-card">
             <div class="rec-header">
               <span class="pill pill-${esc(r.status)}">${esc(r.status.toUpperCase())}</span>
-              <span class="badge" style="border:1px solid #e5e7eb;color:var(--text)">${esc(r.findingRule.replace(/_/g, ' '))}</span>
+              <span class="badge" style="border:1px solid var(--border);color:var(--text)">${esc(r.findingRule.replace(/_/g, ' '))}</span>
               <span class="track-delta ${deltaClass}" style="margin-left:auto">${esc(delta)}</span>
             </div>
-            <h3 style="margin:8px 0 4px;font-size:15px">${esc(r.title)}</h3>
+            <h3 style="margin:8px 0 4px;font-size:14.5px">${esc(r.title)}</h3>
             ${res ? `
               <div class="track-metric">Target: <strong>${esc(res.metricName)}</strong> (${fmtTok(res.baselineVal)} &rarr; ${fmtTok(res.currentVal)})</div>
-              <div class="track-metric">Samples: ${res.sampleBefore} sessions before &middot; ${res.sampleAfter} after (min 5)</div>
-              <div class="track-metric">Guardrails: <span style="font-weight:600;color:${res.guardrails?.passed ? '#15803d' : '#b91c1c'}">${res.guardrails?.passed ? 'PASSED' : 'REGRESSED'}</span></div>
-            ` : `<p style="color:var(--muted);font-size:12px">Tracking initialized &middot; gathering sessions...</p>`}
+              <div class="track-metric">Samples: ${res.sampleBefore} before &middot; ${res.sampleAfter} after (min 5)</div>
+              <div class="track-metric">Guardrails: <span style="font-weight:600;color:${res.guardrails?.passed ? 'var(--success)' : 'var(--danger)'}">${res.guardrails?.passed ? 'PASSED' : 'REGRESSED'}</span></div>
+            ` : `<p style="color:var(--text-muted);font-size:12px;margin:4px 0">Tracking initialized &middot; gathering sessions...</p>`}
           </div>
         `;
       }).join('')}
@@ -288,17 +534,17 @@ async function recommendationsPage() {
   ` : '';
 
   const recList = openRecs.length === 0
-    ? '<p class="empty">No open recommendations! All active patterns resolved or dismissed.</p>'
+    ? emptyState('No open recommendations!', 'All active waste patterns resolved or dismissed.')
     : `<div class="rec-grid">
         ${openRecs.map((r) => `
           <div class="rec-card" data-rec-id="${esc(r.id)}">
             <div class="rec-header">
-              <span class="badge" style="background:${ACTION_COLORS[r.action] || '#3b82f6'};color:#fff">${esc(r.action.toUpperCase())}</span>
-              <span class="badge" style="border:1px solid #e5e7eb;color:var(--text)">${esc(r.findingRule.replace(/_/g, ' '))}</span>
-              <span style="margin-left:auto;font-weight:600;color:#10b981">${r.score ? `+${fmtTok(r.score)} tokens/wk` : ''}</span>
+              <span class="badge" style="background:${ACTION_COLORS[r.action] || 'var(--accent)'};color:#fff">${esc(r.action.toUpperCase())}</span>
+              <span class="badge" style="border:1px solid var(--border);color:var(--text)">${esc(r.findingRule.replace(/_/g, ' '))}</span>
+              <span style="margin-left:auto;font-weight:600;color:var(--success)">${r.score ? `+${fmtTok(r.score)} tokens/wk` : ''}</span>
             </div>
-            <h3 style="margin:8px 0 4px;font-size:15px">${esc(r.title)}</h3>
-            <p style="margin:0 0 12px;color:var(--muted);font-size:13px">${esc(r.body)}</p>
+            <h3 style="margin:8px 0 4px;font-size:14.5px">${esc(r.title)}</h3>
+            <p style="margin:0 0 10px;color:var(--text-muted);font-size:13px">${esc(r.body)}</p>
             ${r.actionSnippet ? `<div><code class="action-snippet">${esc(r.actionSnippet)}</code></div>` : ''}
             <div class="rec-actions">
               <button class="btn btn-sm btn-accept" data-id="${esc(r.id)}">Accept & Track</button>
@@ -322,23 +568,31 @@ async function recommendationsPage() {
 
   return {
     html: `
-      <h1>Recommendations & Findings</h1>
-      <p class="hint">Deterministic workflow waste detection, potential savings, and actionable configuration suggestions.</p>
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">Recommendations & Findings</h1>
+          <p class="hint" style="margin:4px 0 0">Deterministic workflow waste detection, potential savings, and actionable configuration suggestions.</p>
+        </div>
+      </div>
       ${tiles}
       ${trackedSection}
-      <h2>Active Recommendations</h2>
+      <div class="card-header" style="margin-top:var(--space-4)">
+        <h2 style="margin:0;font-size:15px;font-weight:600">Active Recommendations</h2>
+      </div>
       ${recList}
-      <h2>Workflow Findings (${findings.length})</h2>
-      <p class="hint">Click any row with a session link to drill into per-turn context growth and tool calls.</p>
-      ${findingsTable}
+      <div class="card-header" style="margin-top:var(--space-4)">
+        <h2 style="margin:0;font-size:15px;font-weight:600">Workflow Findings (${findings.length})</h2>
+        <span class="card-subtitle">Click row to drill into session turn context</span>
+      </div>
+      <div class="card">
+        ${findingsTable}
+      </div>
     `,
     after: () => {
       document.querySelectorAll('.btn-accept').forEach((btn) => {
         btn.addEventListener('click', async (e) => {
           const id = e.currentTarget.dataset.id;
-          await fetch(`/api/recommendations/${encodeURIComponent(id)}/accept`, {
-            method: 'POST',
-          });
+          await fetch(`/api/recommendations/${encodeURIComponent(id)}/accept`, { method: 'POST' });
           render();
         });
       });
@@ -369,14 +623,13 @@ async function auditPage() {
   };
 
   const statusPill = (status) => `<span class="pill pill-${esc(status)}">${esc(status)}</span>`;
-
   const instructions = items.filter((i) => i.kind === 'instruction');
   const toolsAndMcps = items.filter((i) => i.kind === 'mcp' || i.kind === 'plugin');
   const skills = items.filter((i) => i.kind === 'skill');
   const issues = items.filter((i) => i.status === 'duplicate' || i.status === 'conflict');
 
   const tiles = `
-    <div class="tiles">
+    <div class="tiles-row">
       <div class="tile">
         <div class="label">Per-Session Fixed Overhead</div>
         <div class="value">${fmtTok(summary.totalFixedTokens)}</div>
@@ -389,82 +642,87 @@ async function auditPage() {
       </div>
       <div class="tile">
         <div class="label">Unused in 30 Days</div>
-        <div class="value" style="${summary.unusedCount > 0 ? 'color:var(--error)' : ''}">${summary.unusedCount}</div>
+        <div class="value" style="${summary.unusedCount > 0 ? 'color:var(--danger)' : ''}">${summary.unusedCount}</div>
         <div class="note">Stale MCPs, skills, or plugins</div>
       </div>
       <div class="tile">
         <div class="label">Duplicates & Conflicts</div>
-        <div class="value" style="${summary.duplicateCount + summary.conflictCount > 0 ? 'color:#f59e0b' : ''}">${summary.duplicateCount + summary.conflictCount}</div>
+        <div class="value" style="${summary.duplicateCount + summary.conflictCount > 0 ? 'color:var(--warn)' : ''}">${summary.duplicateCount + summary.conflictCount}</div>
         <div class="note">${summary.duplicateCount} duplicates, ${summary.conflictCount} conflicts</div>
       </div>
     </div>
   `;
 
-  const instructionsTable = table(
-    [
-      agentCol,
-      { label: 'Name', get: (r) => r.name },
-      { label: 'Tokens', num: true, get: (r) => fmtTok(r.tokens) },
-      { label: 'Chars', num: true, get: (r) => fmtInt(r.details?.chars) },
-      { label: 'Source Path', get: (r) => r.sourcePath },
-    ],
-    instructions,
-  );
-
-  const toolsTable = table(
-    [
-      agentCol,
-      { label: 'Type', get: (r) => r.kind.toUpperCase() },
-      { label: 'Name', get: (r) => r.name },
-      { label: 'Status', html: true, get: (r) => statusPill(r.status) },
-      { label: '30d Calls', num: true, get: (r) => r.invocations30d > 0 ? fmtInt(r.invocations30d) : 'none' },
-      { label: 'Source Path', get: (r) => r.sourcePath },
-    ],
-    toolsAndMcps,
-  );
-
-  const skillsTable = table(
-    [
-      agentCol,
-      { label: 'Skill Name', get: (r) => r.name },
-      { label: 'Status', html: true, get: (r) => statusPill(r.status) },
-      { label: '30d Calls', num: true, get: (r) => r.invocations30d > 0 ? fmtInt(r.invocations30d) : 'none' },
-      { label: 'Description', get: (r) => r.details?.description || '—' },
-      { label: 'Tokens', num: true, get: (r) => fmtTok(r.tokens) },
-    ],
-    skills,
-  );
-
-  const issuesTable = issues.length === 0
-    ? '<p class="empty">No duplicates or conflicts detected across agents or projects.</p>'
-    : table(
-        [
-          agentCol,
-          { label: 'Issue', html: true, get: (r) => statusPill(r.status) },
-          { label: 'Type', get: (r) => r.kind.toUpperCase() },
-          { label: 'Name', get: (r) => r.name },
-          { label: 'Source Path', get: (r) => r.sourcePath },
-        ],
-        issues,
-      );
-
   return {
     html: `
-      <h1>Configuration Audit</h1>
-      <p class="hint">Read-only audit of always-loaded instruction overhead, MCPs, skills, plugins, duplicates, and conflicts across all 4 agents.</p>
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">Configuration Audit</h1>
+          <p class="hint" style="margin:4px 0 0">Read-only audit of always-loaded instruction overhead, MCPs, skills, plugins, duplicates, and conflicts.</p>
+        </div>
+      </div>
       ${tiles}
-      <h2>Instruction Files (${instructions.length})</h2>
-      <p class="hint">Always-loaded context injected on session start and turns. Estimated as chars/4.</p>
-      ${instructionsTable}
-      <h2>MCP Servers & Plugins (${toolsAndMcps.length})</h2>
-      <p class="hint">Tools registered via configuration files or directories, correlated with 30-day tool call history.</p>
-      ${toolsTable}
-      <h2>Skills (${skills.length})</h2>
-      <p class="hint">Skills available in global or project repositories.</p>
-      ${skillsTable}
-      <h2>Flagged Duplicates & Conflicts (${issues.length})</h2>
-      <p class="hint">Configurations declared in multiple places or specifying conflicting developer commands.</p>
-      ${issuesTable}
+
+      <div class="grid-12">
+        <div class="col-6 card">
+          <div class="card-header">
+            <h3 class="card-title">Instruction Files (${instructions.length})</h3>
+            <span class="card-subtitle">Always-loaded context injected on turns</span>
+          </div>
+          ${table([
+            agentCol,
+            { label: 'Name', get: (r) => r.name },
+            { label: 'Tokens', num: true, get: (r) => fmtTok(r.tokens) },
+            { label: 'Chars', num: true, get: (r) => fmtInt(r.details?.chars) },
+            { label: 'Source Path', get: (r) => r.sourcePath },
+          ], instructions)}
+        </div>
+
+        <div class="col-6 card">
+          <div class="card-header">
+            <h3 class="card-title">MCP Servers & Plugins (${toolsAndMcps.length})</h3>
+            <span class="card-subtitle">Correlated with 30-day tool call history</span>
+          </div>
+          ${table([
+            agentCol,
+            { label: 'Type', get: (r) => r.kind.toUpperCase() },
+            { label: 'Name', get: (r) => r.name },
+            { label: 'Status', html: true, get: (r) => statusPill(r.status) },
+            { label: '30d Calls', num: true, get: (r) => r.invocations30d > 0 ? fmtInt(r.invocations30d) : 'none' },
+            { label: 'Source Path', get: (r) => r.sourcePath },
+          ], toolsAndMcps)}
+        </div>
+      </div>
+
+      <div class="grid-12">
+        <div class="col-6 card">
+          <div class="card-header">
+            <h3 class="card-title">Skills (${skills.length})</h3>
+            <span class="card-subtitle">Available in global or project repositories</span>
+          </div>
+          ${table([
+            agentCol,
+            { label: 'Skill Name', get: (r) => r.name },
+            { label: 'Status', html: true, get: (r) => statusPill(r.status) },
+            { label: '30d Calls', num: true, get: (r) => r.invocations30d > 0 ? fmtInt(r.invocations30d) : 'none' },
+            { label: 'Tokens', num: true, get: (r) => fmtTok(r.tokens) },
+          ], skills)}
+        </div>
+
+        <div class="col-6 card">
+          <div class="card-header">
+            <h3 class="card-title">Flagged Duplicates & Conflicts (${issues.length})</h3>
+            <span class="card-subtitle">Configurations declared in multiple places</span>
+          </div>
+          ${issues.length === 0 ? emptyState('No duplicates or conflicts', 'All tool and instruction declarations are consistent.') : table([
+            agentCol,
+            { label: 'Issue', html: true, get: (r) => statusPill(r.status) },
+            { label: 'Type', get: (r) => r.kind.toUpperCase() },
+            { label: 'Name', get: (r) => r.name },
+            { label: 'Source Path', get: (r) => r.sourcePath },
+          ], issues)}
+        </div>
+      </div>
     `,
   };
 }
@@ -484,10 +742,10 @@ async function reportsPage() {
   }
 
   const selector = `
-    <div class="report-bar">
+    <div class="card-header" style="margin-bottom:var(--space-4);flex-wrap:wrap;gap:12px">
       <div style="display:flex;align-items:center;gap:10px">
-        <label for="rep-select" style="font-weight:600;font-size:14px">Select Report:</label>
-        <select id="rep-select" style="max-width:300px">
+        <label for="rep-select" style="font-weight:600;font-size:13px">Report:</label>
+        <select id="rep-select" class="form-select" style="max-width:300px">
           ${reports.length === 0 ? '<option value="">No reports yet</option>' : ''}
           ${reports.map((r) => `<option value="${esc(r.week)}" ${r.week === selectedWeek ? 'selected' : ''}>${esc(r.week)} (${fmtTime(r.generatedAt)})</option>`).join('')}
         </select>
@@ -499,12 +757,15 @@ async function reportsPage() {
   if (!reportDetail) {
     return {
       html: `
-        <h1>Weekly Usage Reports</h1>
-        <p class="hint">Automated weekly usage, cost trends, quota peaks, token-wasting patterns, and action items.</p>
+        <div class="card-header">
+          <div>
+            <h1 style="margin:0;font-size:18px;font-weight:600">Weekly Usage Reports</h1>
+            <p class="hint" style="margin:4px 0 0">Automated weekly usage, cost trends, quota peaks, token-wasting patterns, and action items.</p>
+          </div>
+        </div>
         ${selector}
-        <div class="card" style="margin-top:20px;text-align:center;padding:40px">
-          <p class="empty">No weekly report available yet.</p>
-          <button class="btn" id="btn-gen-first" style="margin-top:12px">Generate Report Now</button>
+        <div class="card" style="text-align:center;padding:40px">
+          ${emptyState('No weekly report available yet', 'Generate a report to inspect weekly patterns.', '<button class="btn" id="btn-gen-first">Generate Report Now</button>')}
         </div>
       `,
       after: () => {
@@ -522,22 +783,12 @@ async function reportsPage() {
   }
 
   const d = reportDetail.data || {};
-  const s = d.summary || {
-    totalTokens: 0,
-    tokensDeltaPct: 0,
-    totalCost: 0,
-    costDeltaPct: 0,
-    activeSessions: 0,
-    sessionsDeltaPct: 0,
-  };
-  const q = d.quotaInsights || {
-    fiveHourPeakPct: 0,
-    limitHits: 0,
-  };
+  const s = d.summary || { totalTokens: 0, tokensDeltaPct: 0, totalCost: 0, costDeltaPct: 0, activeSessions: 0, sessionsDeltaPct: 0 };
+  const q = d.quotaInsights || { fiveHourPeakPct: 0, limitHits: 0 };
   const weekLabel = d.week || selectedWeek || 'Current';
   const dateRange = (d.startDate && d.endDate) ? ` (${esc(d.startDate)} to ${esc(d.endDate)})` : '';
   const tiles = `
-    <div class="tiles" style="margin-bottom:20px">
+    <div class="tiles-row">
       <div class="tile">
         <div class="label">Tokens (measured)</div>
         <div class="value">${fmtTok(s.totalTokens)}</div>
@@ -554,7 +805,7 @@ async function reportsPage() {
         <div class="note">${fmtDelta(s.sessionsDeltaPct)} vs prev week</div>
       </div>
       <div class="tile">
-        <div class="label">5h Window Peak Quota</div>
+        <div class="label">5h Peak Quota</div>
         <div class="value">${q.fiveHourPeakPct}%</div>
         <div class="note">${q.limitHits} limit hits recorded</div>
       </div>
@@ -564,13 +815,17 @@ async function reportsPage() {
   const mode = state.reportMode || 'preview';
   return {
     html: `
-      <h1>Weekly Usage Reports</h1>
-      <p class="hint">Automated weekly usage, cost trends, quota peaks, token-wasting patterns, and action items.</p>
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">Weekly Usage Reports</h1>
+          <p class="hint" style="margin:4px 0 0">Automated weekly usage, cost trends, quota peaks, and action items.</p>
+        </div>
+      </div>
       ${selector}
       ${tiles}
-      <div class="report-viewer">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <h2 style="margin:0">Report: ${esc(weekLabel)}${dateRange}</h2>
+      <div class="report-viewer card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <h2 style="margin:0;font-size:15px;font-weight:600">Report: ${esc(weekLabel)}${dateRange}</h2>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button id="btn-toggle-mode" class="btn btn-sm btn-outline">${mode === 'preview' ? 'View Markdown' : 'View Rendered HTML'}</button>
             <button id="btn-copy-md" class="btn btn-sm btn-outline">Copy Markdown</button>
@@ -579,7 +834,7 @@ async function reportsPage() {
           </div>
         </div>
         ${mode === 'preview'
-          ? `<iframe srcdoc="${esc(reportDetail.html || '')}" style="width:100%;min-height:600px;border:1px solid var(--border);border-radius:6px;background:var(--bg)"></iframe>`
+          ? `<iframe srcdoc="${esc(reportDetail.html || '')}" style="width:100%;min-height:550px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg)"></iframe>`
           : `<pre><code>${esc(reportDetail.markdown || '')}</code></pre>`
         }
       </div>
@@ -630,15 +885,15 @@ async function catalogPage() {
   }
 
   const tabsHtml = `
-    <div class="catalog-bar">
-      <div class="catalog-tabs">
+    <div class="card-header" style="margin-bottom:var(--space-4);flex-wrap:wrap;gap:12px">
+      <div style="display:flex;gap:8px">
         <button id="tab-curated" class="btn btn-sm ${tab === 'curated' ? '' : 'btn-outline'}">Curated Tools & MCPs (${catalog.length})</button>
         <button id="tab-candidates" class="btn btn-sm ${tab === 'candidates' ? '' : 'btn-outline'}">Discovered Candidates (${candidates.length})</button>
       </div>
       ${tab === 'curated' ? `
         <div style="display:flex;align-items:center;gap:8px">
-          <label style="font-size:12px;color:var(--muted)">Kind:
-            <select id="sel-cat-kind" style="font-size:12px;padding:2px 6px">
+          <label style="font-size:12px;color:var(--text-muted)">Kind:
+            <select id="sel-cat-kind" class="form-select" style="font-size:12px;padding:2px 6px">
               <option value="all" ${kindFilter === 'all' ? 'selected' : ''}>All Types</option>
               <option value="mcp" ${kindFilter === 'mcp' ? 'selected' : ''}>MCP Servers</option>
               <option value="tool" ${kindFilter === 'tool' ? 'selected' : ''}>CLI Tools</option>
@@ -660,15 +915,15 @@ async function catalogPage() {
             <div class="catalog-header">
               <div>
                 <h3 class="catalog-title">${esc(item.name)}</h3>
-                <div class="catalog-meta">
-                  <span class="badge" style="background:var(--grid)">${esc(item.kind.toUpperCase())}</span>
+                <div style="display:flex;gap:6px;margin-top:4px">
+                  <span class="badge" style="background:var(--border)">${esc(item.kind.toUpperCase())}</span>
                   <span class="pill pill-active">~${item.estSavingsPct}% Potential Savings</span>
                 </div>
               </div>
             </div>
             <div class="catalog-desc">${esc(item.description)}</div>
             <div style="margin-bottom:12px">
-              <span style="font-size:11px;color:var(--muted)">Targets Waste Patterns:</span>
+              <span style="font-size:11px;color:var(--text-muted)">Targets Waste Patterns:</span>
               <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
                 ${item.targetRules.map((r) => `<span class="pill" style="background:var(--bg)">${esc(r)}</span>`).join('')}
               </div>
@@ -679,7 +934,7 @@ async function catalogPage() {
               </div>
             ` : ''}
             <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center">
-              <a href="${esc(item.url)}" target="_blank" class="btn btn-sm btn-outline">View Repository ↗</a>
+              <a href="${esc(item.url)}" target="_blank" class="btn btn-sm btn-outline">View Repository &nearr;</a>
             </div>
           </div>
         `).join('')}
@@ -687,37 +942,33 @@ async function catalogPage() {
     `;
   } else {
     contentHtml = `
-      <div class="card" style="margin-top:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px">
-        <h3 style="margin:0 0 8px 0;font-size:14px">Opt-In GitHub Discovery</h3>
+      <div class="card" style="margin-bottom:var(--space-4)">
+        <h3 style="margin:0 0 6px 0;font-size:14px">Opt-In GitHub Discovery</h3>
         <p class="hint" style="margin-bottom:12px">
           Search GitHub for public AI developer tools and MCPs. <strong>Privacy Guarantee:</strong> Searches use only generic keywords. Your code, prompts, project names, and tokens are never sent.
         </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input type="text" id="inp-discover-q" placeholder="Search keywords (e.g. mcp server postgres)" style="flex:1;min-width:240px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit" />
+          <input type="text" id="inp-discover-q" placeholder="Search keywords (e.g. mcp server postgres)" style="flex:1;min-width:240px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);color:var(--text);font:inherit" />
           <button id="btn-run-discover" class="btn btn-sm">Discover Tools</button>
         </div>
       </div>
-      ${candidates.length === 0 ? `
-        <div class="empty" style="text-align:center;padding:40px">
-          No candidate tools discovered yet. Click "Discover Tools" above or run <code>agentlens discover</code>.
-        </div>
-      ` : `
+      ${candidates.length === 0 ? emptyState('No candidate tools discovered yet', 'Click "Discover Tools" above or run agentlens discover.') : `
         <div class="catalog-grid">
           ${candidates.map((c) => `
             <div class="catalog-card">
               <div class="catalog-header">
                 <div>
                   <h3 class="catalog-title">${esc(c.fullName)}</h3>
-                  <div class="catalog-meta">
-                    <span class="stars-pill">★ ${c.stars.toLocaleString()}</span>
-                    <span class="badge" style="background:var(--grid)">${esc(c.suggestedKind.toUpperCase())}</span>
+                  <div style="display:flex;gap:6px;margin-top:4px">
+                    <span class="badge" style="background:var(--warn-bg);color:var(--warn)">★ ${c.stars.toLocaleString()}</span>
+                    <span class="badge" style="background:var(--border)">${esc(c.suggestedKind.toUpperCase())}</span>
                     ${c.relevanceRule ? `<span class="pill" style="background:var(--bg)">${esc(c.relevanceRule)}</span>` : ''}
                   </div>
                 </div>
               </div>
               <div class="catalog-desc">${esc(c.description || 'No description provided')}</div>
               <div style="margin-top:auto">
-                <a href="${esc(c.url)}" target="_blank" class="btn btn-sm btn-outline">View on GitHub ↗</a>
+                <a href="${esc(c.url)}" target="_blank" class="btn btn-sm btn-outline">View on GitHub &nearr;</a>
               </div>
             </div>
           `).join('')}
@@ -728,8 +979,12 @@ async function catalogPage() {
 
   return {
     html: `
-      <h1>Tool Catalog & Discovery</h1>
-      <p class="hint">Curated AI tools, MCPs, and skills mapped to workflow waste patterns, with privacy-preserving tool discovery.</p>
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">Tool Catalog & Discovery</h1>
+          <p class="hint" style="margin:4px 0 0">Curated AI tools, MCPs, and skills mapped to workflow waste patterns.</p>
+        </div>
+      </div>
       ${tabsHtml}
       ${contentHtml}
     `,
@@ -771,46 +1026,358 @@ async function catalogPage() {
   };
 }
 
-const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, recommendations: recommendationsPage, audit: auditPage, reports: reportsPage, catalog: catalogPage, health: healthPage };
+async function healthPage() {
+  const h = await api('health');
+  const badgeColor = h.status === 'healthy' ? 'var(--success)' : h.status === 'warning' ? 'var(--warn)' : 'var(--danger)';
+  const badgeLabel = h.status ? h.status.charAt(0).toUpperCase() + h.status.slice(1) : 'Healthy';
+  const statusBadge = `<span class="badge" style="background:${badgeColor};color:#fff;vertical-align:middle;margin-left:0.5rem">${badgeLabel}</span>`;
+
+  const warningsHtml =
+    h.warnings && h.warnings.length > 0
+      ? `<div style="margin-bottom:var(--space-4);padding:var(--space-3) var(--space-4);background:var(--warn-bg);border-left:4px solid var(--warn);border-radius:var(--radius-md)">
+          <strong style="color:var(--warn)">Warnings (${h.warnings.length})</strong>
+          <ul style="margin:0.25rem 0 0 1.25rem;padding:0">
+            ${h.warnings.map((w) => `<li style="margin:0.25rem 0">${esc(w)}</li>`).join('')}
+          </ul>
+        </div>`
+      : '';
+
+  const crossCheckHtml =
+    h.crossCheck && h.crossCheck.length > 0
+      ? `<div class="card" style="margin-top:var(--space-4)">
+          <div class="card-header">
+            <h3 class="card-title">ccusage Cross-Check</h3>
+            <span class="card-subtitle">Daily token comparison against ccusage. Drift &gt; 5% triggers a warning.</span>
+          </div>
+          ${table(
+            [
+              agentCol,
+              { label: 'Date', get: (r) => r.date },
+              { label: 'agentlens tokens', num: true, get: (r) => fmtInt(r.agentlensTokens) },
+              { label: 'ccusage tokens', num: true, get: (r) => fmtInt(r.ccusageTokens) },
+              { label: 'Variance', num: true, get: (r) => `${r.diffPct}%` },
+              {
+                label: 'Status',
+                html: true,
+                get: (r) =>
+                  r.warning
+                    ? '<span style="color:var(--danger);font-weight:600">Drift &gt; 5%</span>'
+                    : '<span style="color:var(--success);font-weight:500">OK</span>',
+              },
+            ],
+            h.crossCheck,
+          )}
+        </div>`
+      : `<div class="card" style="margin-top:var(--space-4)">
+          <div class="card-header"><h3 class="card-title">ccusage Cross-Check</h3></div>
+          <p class="hint" style="margin:0">${h.ccusageAvailable === false ? 'ccusage binary was not detected in PATH. Install ccusage (<code>npm i -g ccusage</code>) to enable automatic daily cross-checking.' : 'No cross-check data available for the last 7 days.'}</p>
+        </div>`;
+
+  return {
+    html: `
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">System Health ${statusBadge}</h1>
+          <p class="hint" style="margin:4px 0 0">Ingestion status, parser integrity, and ccusage daily cross-checking.</p>
+        </div>
+      </div>
+      ${warningsHtml}
+      <div class="grid-12">
+        <div class="col-6 card">
+          <div class="card-header">
+            <h3 class="card-title">Log sources</h3>
+            <span class="card-subtitle">Tracked cursor offsets</span>
+          </div>
+          ${table([
+            agentCol,
+            { label: 'Files tracked', num: true, get: (r) => r.files },
+            { label: 'Bad lines', num: true, get: (r) => r.badLines },
+            { label: 'Last ingest', get: (r) => fmtTime(r.lastIngest) },
+          ], h.sources)}
+        </div>
+
+        <div class="col-6 card">
+          <div class="card-header">
+            <h3 class="card-title">Events recorded</h3>
+            <span class="card-subtitle">Database event log totals</span>
+          </div>
+          ${table([
+            agentCol,
+            { label: 'Events', num: true, get: (r) => r.events },
+            { label: 'Latest event', get: (r) => fmtTime(r.latestEvent) },
+          ], h.events)}
+        </div>
+      </div>
+      ${crossCheckHtml}
+    `,
+  };
+}
+
+async function settingsPage() {
+  const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+  return {
+    html: `
+      <div class="card-header" style="margin-bottom:var(--space-4)">
+        <div>
+          <h1 style="margin:0;font-size:18px;font-weight:600">Settings</h1>
+          <p class="hint" style="margin:4px 0 0">Configure agentlens preferences, layout, and automation permissions.</p>
+        </div>
+      </div>
+
+      <div class="grid-12">
+        <div class="col-6 card">
+          <div class="card-header"><h3 class="card-title">Appearance & Layout</h3></div>
+          <p style="margin-bottom:12px;color:var(--text-muted)">Customize dashboard theme and navigation.</p>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <label style="display:flex;align-items:center;justify-content:space-between">
+              <span>Theme</span>
+              <select id="settings-theme" class="form-select">
+                <option value="dark" ${theme === 'dark' ? 'selected' : ''}>Dark (Default)</option>
+                <option value="light" ${theme === 'light' ? 'selected' : ''}>Light</option>
+              </select>
+            </label>
+            <label style="display:flex;align-items:center;justify-content:space-between">
+              <span>Sidebar layout</span>
+              <button id="settings-toggle-sidebar" class="btn btn-sm btn-outline">Toggle Sidebar Collapsed</button>
+            </label>
+            <label style="display:flex;align-items:center;justify-content:space-between">
+              <span>Keyboard navigation</span>
+              <button id="settings-show-shortcuts" class="btn btn-sm btn-outline">Show Shortcut Sheet (?)</button>
+            </label>
+          </div>
+        </div>
+
+        <div class="col-6 card">
+          <div class="card-header"><h3 class="card-title">Agent Automation (Opt-In)</h3></div>
+          <p style="margin-bottom:12px;color:var(--text-muted)">Allow agentlens to execute fix prompts with local CLI agents (claude, codex, opencode).</p>
+          <div id="settings-agent-automation-section">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="chk-allow-agent-launch" />
+              <span>Allow agentlens to launch agents</span>
+            </label>
+            <p class="hint" style="margin-top:8px">When disabled, fix actions only offer "Copy Prompt". When enabled, fixes can be dispatched directly to your agent CLI.</p>
+          </div>
+        </div>
+      </div>
+    `,
+    after: () => {
+      $('#settings-theme')?.addEventListener('change', (e) => {
+        const val = e.target.value;
+        document.documentElement.setAttribute('data-theme', val);
+        localStorage.setItem('agentlens_theme', val);
+        charts.forEach((c) => c.destroy());
+        charts = [];
+        render();
+      });
+      $('#settings-toggle-sidebar')?.addEventListener('click', toggleSidebar);
+      $('#settings-show-shortcuts')?.addEventListener('click', openShortcutsModal);
+    },
+  };
+}
+
+const routes = {
+  overview,
+  projects: projectsPage,
+  sessions: sessionsPage,
+  session: sessionPage,
+  quota: quotaPage,
+  recommendations: recommendationsPage,
+  audit: auditPage,
+  reports: reportsPage,
+  catalog: catalogPage,
+  health: healthPage,
+  settings: settingsPage,
+};
 
 async function render() {
   const [, name = 'overview', arg = ''] = location.hash.split('/');
   if (name === 'project') {
     state.project = arg;
-    $('#f-project').value = arg;
-    location.replace('#/overview'); // replace, not assign: assigning would leave #/project/<id> in history and trap the Back button
+    const fProj = $('#f-project');
+    if (fProj) fProj.value = arg;
+    location.replace('#/overview');
     return;
   }
-  document.querySelectorAll('nav a').forEach((a) => {
+
+  document.querySelectorAll('#sidebar a').forEach((a) => {
     if (a.getAttribute('href') === `#/${name}`) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
+
   const main = $('#main');
   main.setAttribute('aria-busy', 'true');
+
+  let skeletonTimer = setTimeout(() => {
+    if (main.getAttribute('aria-busy') === 'true') {
+      main.innerHTML = renderSkeleton();
+    }
+  }, 300);
+
   try {
     const { html, after } = await (routes[name] ?? overview)(arg);
+    clearTimeout(skeletonTimer);
     charts.forEach((c) => c.destroy());
     charts = [];
     main.innerHTML = html;
     after?.();
   } catch (e) {
-    main.innerHTML = `<p class="error">Couldn't load this page (${esc(e.message)}). Check that the agentlens service is running, then reload.</p>`;
+    clearTimeout(skeletonTimer);
+    main.innerHTML = emptyState(`Couldn't load this page`, esc(e.message), '<a href="#/health" class="btn btn-sm">Check System Health</a>');
   }
   main.removeAttribute('aria-busy');
 }
 
+// Global filters
 for (const [id, key] of [['f-range', 'range'], ['f-agent', 'agent'], ['f-project', 'project']]) {
-  $(`#${id}`).addEventListener('change', (e) => { state[key] = key === 'range' ? Number(e.target.value) : e.target.value; render(); });
+  $(`#${id}`)?.addEventListener('change', (e) => {
+    state[key] = key === 'range' ? Number(e.target.value) : e.target.value;
+    render();
+  });
 }
-document.addEventListener('click', (e) => { const tr = e.target.closest?.('tr[data-href]'); if (tr) location.hash = tr.dataset.href; });
-document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches?.('tr[data-href]')) location.hash = e.target.dataset.href; });
-window.addEventListener('hashchange', render);
-let resizeTimer;
-window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 250); });
-setInterval(() => { if (!document.hidden) render(); }, 60_000);
 
-fetch('/api/projects').then((r) => r.json()).then((ps) => {
-  $('#f-project').insertAdjacentHTML('beforeend', ps.map((p) => `<option value="${p.projectId}">${esc(p.name)}</option>`).join(''));
-  if (state.project) $('#f-project').value = state.project;
+// Table click / enter navigation
+document.addEventListener('click', (e) => {
+  const tr = e.target.closest?.('tr[data-href]');
+  if (tr && !e.target.closest('button, a, input, select')) {
+    location.hash = tr.dataset.href;
+  }
 });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches?.('tr[data-href]')) {
+    location.hash = e.target.dataset.href;
+  }
+});
+
+// UI controls
+$('#btn-sidebar-collapse')?.addEventListener('click', toggleSidebar);
+$('#btn-theme-top')?.addEventListener('click', toggleTheme);
+$('#btn-theme-sidebar')?.addEventListener('click', toggleTheme);
+$('#btn-shortcuts-top')?.addEventListener('click', openShortcutsModal);
+$('#btn-shortcuts-sidebar')?.addEventListener('click', openShortcutsModal);
+$('#shortcuts-close')?.addEventListener('click', closeShortcutsModal);
+$('#shortcuts-modal-backdrop')?.addEventListener('click', closeShortcutsModal);
+$('#slide-over-close')?.addEventListener('click', closeSlideOver);
+$('#slide-over-backdrop')?.addEventListener('click', closeSlideOver);
+
+// Mobile drawer
+$('#btn-mobile-toggle')?.addEventListener('click', () => {
+  const sidebar = $('#sidebar');
+  const backdrop = $('#mobile-sidebar-backdrop');
+  if (sidebar && backdrop) {
+    sidebar.classList.toggle('mobile-open');
+    backdrop.classList.toggle('open');
+  }
+});
+$('#mobile-sidebar-backdrop')?.addEventListener('click', () => {
+  $('#sidebar')?.classList.remove('mobile-open');
+  $('#mobile-sidebar-backdrop')?.classList.remove('open');
+});
+
+// Keyboard navigation
+let pendingG = false;
+let gTimer = null;
+
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    closeSlideOver();
+    closeShortcutsModal();
+    $('#sidebar')?.classList.remove('mobile-open');
+    $('#mobile-sidebar-backdrop')?.classList.remove('open');
+    return;
+  }
+
+  if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+    e.preventDefault();
+    openShortcutsModal();
+    return;
+  }
+
+  if (e.key === '[') {
+    e.preventDefault();
+    toggleSidebar();
+    return;
+  }
+
+  if (e.key === 't') {
+    e.preventDefault();
+    toggleTheme();
+    return;
+  }
+
+  if (e.key === 'g') {
+    pendingG = true;
+    clearTimeout(gTimer);
+    gTimer = setTimeout(() => { pendingG = false; }, 1000);
+    return;
+  }
+
+  if (pendingG) {
+    pendingG = false;
+    clearTimeout(gTimer);
+    const map = {
+      o: '#/overview',
+      p: '#/projects',
+      s: '#/sessions',
+      q: '#/quota',
+      r: '#/recommendations',
+      a: '#/audit',
+      w: '#/reports',
+      c: '#/catalog',
+      h: '#/health',
+      ',': '#/settings',
+    };
+    if (map[e.key]) {
+      e.preventDefault();
+      location.hash = map[e.key];
+    }
+  }
+});
+
+window.addEventListener('hashchange', () => {
+  $('#sidebar')?.classList.remove('mobile-open');
+  $('#mobile-sidebar-backdrop')?.classList.remove('open');
+  render();
+});
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(render, 250);
+});
+
+setInterval(() => {
+  if (!document.hidden) {
+    render();
+    updateQuotaPills();
+  }
+}, 60_000);
+
+// Init theme & sidebar
+const storedTheme = localStorage.getItem('agentlens_theme');
+if (storedTheme === 'light' || storedTheme === 'dark') {
+  document.documentElement.setAttribute('data-theme', storedTheme);
+} else {
+  document.documentElement.setAttribute('data-theme', 'dark');
+}
+
+if (localStorage.getItem('agentlens_sidebar_collapsed') === 'true') {
+  $('#sidebar')?.classList.add('collapsed');
+}
+
+// Fetch project options
+fetch('/api/projects').then((r) => r.json()).then((ps) => {
+  const fProj = $('#f-project');
+  if (fProj) {
+    fProj.insertAdjacentHTML('beforeend', ps.map((p) => `<option value="${p.projectId}">${esc(p.name)}</option>`).join(''));
+    if (state.project) fProj.value = state.project;
+  }
+}).catch(() => {});
+
+updateQuotaPills();
 render();
