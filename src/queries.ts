@@ -1,5 +1,6 @@
 import type { DB } from './db.ts';
 import type { Filter } from './types.ts';
+import { checkHealth } from './health.ts';
 import { costOf, PRICES_AS_OF } from './pricing.ts';
 
 export interface Totals {
@@ -126,8 +127,5 @@ export function quota(db: DB, f: Filter) {
 }
 
 export function health(db: DB) {
-  return {
-    sources: plain(db.prepare('SELECT agent, count(*) AS files, sum(errors) AS badLines, max(updated_at) AS lastIngest FROM cursors GROUP BY agent').all()),
-    events: plain(db.prepare('SELECT agent, count(*) AS events, max(ts) AS latestEvent FROM events GROUP BY agent').all()),
-  };
+  return checkHealth(db);
 }

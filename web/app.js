@@ -158,12 +158,51 @@ async function quotaPage() {
 
 async function healthPage() {
   const h = await api('health');
+  const badgeColor = h.status === 'healthy' ? '#22c55e' : h.status === 'warning' ? '#eab308' : '#ef4444';
+  const badgeLabel = h.status ? h.status.charAt(0).toUpperCase() + h.status.slice(1) : 'Healthy';
+  const statusBadge = `<span style="font-size:0.875rem;padding:0.2rem 0.6rem;border-radius:9999px;background:${badgeColor};color:#fff;font-weight:600;vertical-align:middle;margin-left:0.5rem">${badgeLabel}</span>`;
+
+  const warningsHtml =
+    h.warnings && h.warnings.length > 0
+      ? `<div style="margin:1rem 0;padding:1rem;background:rgba(234,179,8,0.1);border-left:4px solid #eab308;border-radius:4px">
+          <strong style="color:#ca8a04">Warnings (${h.warnings.length})</strong>
+          <ul style="margin:0.5rem 0 0 1.25rem;padding:0">
+            ${h.warnings.map((w) => `<li style="margin:0.25rem 0">${esc(w)}</li>`).join('')}
+          </ul>
+        </div>`
+      : '';
+
+  const crossCheckHtml =
+    h.crossCheck && h.crossCheck.length > 0
+      ? `<h2>ccusage Cross-Check</h2>
+         <p class="hint">Daily token comparison against ccusage. Drift &gt; 5% triggers a warning.</p>
+         ${table(
+           [
+             agentCol,
+             { label: 'Date', get: (r) => r.date },
+             { label: 'agentlens tokens', num: true, get: (r) => fmtInt(r.agentlensTokens) },
+             { label: 'ccusage tokens', num: true, get: (r) => fmtInt(r.ccusageTokens) },
+             { label: 'Variance', num: true, get: (r) => `${r.diffPct}%` },
+             {
+               label: 'Status',
+               get: (r) =>
+                 r.warning
+                   ? '<span style="color:#ef4444;font-weight:600">Drift &gt; 5%</span>'
+                   : '<span style="color:#22c55e;font-weight:500">OK</span>',
+             },
+           ],
+           h.crossCheck,
+         )}`
+      : '';
+
   return {
-    html: `<h1>Health</h1>
-      <p class="hint">What agentlens has read so far. Bad lines are records it could not parse and skipped.</p>
+    html: `<h1>Health ${statusBadge}</h1>
+      <p class="hint">Ingestion status, parser integrity, and ccusage cross-check.</p>
+      ${warningsHtml}
       ${table([agentCol, { label: 'Files tracked', num: true, get: (r) => r.files }, { label: 'Bad lines', num: true, get: (r) => r.badLines }, { label: 'Last ingest', get: (r) => fmtTime(r.lastIngest) }], h.sources)}
       <h2>Events</h2>
-      ${table([agentCol, { label: 'Events', num: true, get: (r) => r.events }, { label: 'Latest event', get: (r) => fmtTime(r.latestEvent) }], h.events)}`,
+      ${table([agentCol, { label: 'Events', num: true, get: (r) => r.events }, { label: 'Latest event', get: (r) => fmtTime(r.latestEvent) }], h.events)}
+      ${crossCheckHtml}`,
   };
 }
 
