@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { openDb } from './db.ts';
+import { openDb, getRecommendations, updateRecommendationStatus } from './db.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
@@ -13,6 +13,8 @@ import { startServer } from './server.ts';
 import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from './summary.ts';
 import { runAudit } from './audit/runner.ts';
 import { checkWeeklyReportSchedule } from './report-scheduler.ts';
+import { generateWeeklyReport } from './report.ts';
+import { evaluateRecommendations } from './track.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -29,6 +31,9 @@ const HELP = `Usage: agentlens <command>
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
   audit               audit agent instructions, MCPs, skills, and plugins
+  report              generate and display weekly usage report (--week, --html, --json)
+  track               show improvement tracking for accepted recommendations
+  accept <id>         accept a recommendation and begin 14-day improvement tracking
   statusline          process Claude Code statusline stdin, spool quota, and print status
   install-statusline  show configuration instructions for Claude Code statusline
   install-service     write a systemd user unit so serve starts at login (you enable it)
@@ -298,6 +303,92 @@ const commands: Record<string, () => unknown> = {
       console.log('');
     }
     console.log(`==================================================\n`);
+  },
+  report: () => {
+    let weekArg: string | undefined;
+    let isHtml = false;
+    let isJson = false;
+    for (let i = 3; i < process.argv.length; i++) {
+      if (process.argv[i] === '--week' && process.argv[i + 1]) {
+        weekArg = process.argv[i + 1];
+        i++;
+      } else if (process.argv[i] === '--html') {
+        isHtml = true;
+      } else if (process.argv[i] === '--json') {
+        isJson = true;
+      }
+    }
+    const db = openDb(DB_PATH);
+    const rep = generateWeeklyReport(db, weekArg, HOME);
+    if (isJson) {
+      console.log(JSON.stringify(rep.data, null, 2));
+    } else if (isHtml) {
+      console.log(`Weekly report HTML saved at: ${rep.filePathHtml}`);
+    } else {
+      console.log(rep.markdown);
+    }
+  },
+  track: () => {
+    let projectArg: string | undefined;
+    for (let i = 3; i < process.argv.length; i++) {
+      if (process.argv[i] === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      }
+    }
+    const db = openDb(DB_PATH);
+    let projId: number | undefined;
+    if (projectArg) {
+      const root = projectRoot(projectArg);
+      const proj = db.prepare('SELECT id FROM projects WHERE root = ?').get(root) as { id: number } | undefined;
+      projId = proj?.id;
+    }
+    evaluateRecommendations(db);
+    const all = getRecommendations(db, { projectId: projId });
+    const tracked = all.filter((r) => r.acceptedAt != null || r.status !== 'open');
+
+    console.log(`\n==================================================`);
+    console.log(`Improvement Tracking: ${tracked.length} recommendation(s) tracked`);
+    console.log(`==================================================\n`);
+
+    if (tracked.length === 0) {
+      console.log('No recommendations currently being tracked.');
+      console.log("Run 'agentlens accept <id>' to accept a recommendation and begin tracking.\n");
+      return;
+    }
+
+    for (const r of tracked) {
+      const res = r.result;
+      const statusBadge = `[${r.status.toUpperCase()}]`;
+      console.log(`${statusBadge} ${r.title} (ID: ${r.id})`);
+      console.log(`  Rule: ${r.findingRule} | Action: ${r.action}`);
+      if (res) {
+        const delta = res.deltaPct > 0 ? `+${res.deltaPct}%` : `${res.deltaPct}%`;
+        console.log(`  Target Metric: ${res.metricName}`);
+        console.log(`  Baseline -> Current: ${res.baselineVal} -> ${res.currentVal} (${delta})`);
+        console.log(`  Samples: ${res.sampleBefore} sessions before, ${res.sampleAfter} sessions after`);
+        console.log(`  Guardrails: ${res.guardrails?.passed ? 'PASSED' : 'REGRESSED'} | Verdict: ${res.verdict}`);
+      } else {
+        console.log(`  Status: ${r.status}`);
+      }
+      console.log('');
+    }
+    console.log(`==================================================\n`);
+  },
+  accept: () => {
+    const id = process.argv[3];
+    if (!id) {
+      console.error('Usage: agentlens accept <recommendation-id>');
+      process.exit(1);
+    }
+    const db = openDb(DB_PATH);
+    const ok = updateRecommendationStatus(db, id, 'accepted');
+    if (!ok) {
+      console.error(`Recommendation not found: ${id}`);
+      process.exit(1);
+    }
+    evaluateRecommendations(db);
+    console.log(`Accepted recommendation '${id}'. Improvement tracking initialized for next 14 days.`);
   },
   'install-statusline': () => {
     console.log(`Add this to ~/.claude/settings.json or project .claude/settings.json:

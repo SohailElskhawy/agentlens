@@ -1,10 +1,13 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { DB } from './db.ts';
 import { getAuditItems, getFindings, getRecommendations, updateRecommendationStatus } from './db.ts';
 import type { AuditKind, AuditStatus, Filter } from './types.ts';
+import { generateWeeklyReport } from './report.ts';
+import { evaluateRecommendations } from './track.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -76,6 +79,37 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
         },
       };
     },
+    '/api/reports': () => {
+      const reportsDir = join(process.env.AGENTLENS_SOURCE_HOME || homedir(), '.local/share/agentlens/reports');
+      const reports: Array<{ week: string; filePathMd: string; filePathHtml: string; generatedAt: number }> = [];
+      if (existsSync(reportsDir)) {
+        const files = readdirSync(reportsDir);
+        for (const f of files) {
+          if (f.endsWith('.md')) {
+            const week = f.replace(/\.md$/, '');
+            const filePathMd = join(reportsDir, f);
+            const filePathHtml = join(reportsDir, `${week}.html`);
+            try {
+              const st = statSync(filePathMd);
+              reports.push({
+                week,
+                filePathMd,
+                filePathHtml,
+                generatedAt: Math.round(st.mtimeMs),
+              });
+            } catch {}
+          }
+        }
+      }
+      reports.sort((a, b) => b.week.localeCompare(a.week));
+      return { reports };
+    },
+    '/api/tracking': (f) => {
+      evaluateRecommendations(db);
+      const all = getRecommendations(db, { projectId: f.projectId });
+      const items = all.filter((r) => r.acceptedAt != null || r.status !== 'open');
+      return { items };
+    },
   };
 
   const server = createServer((req, res) => {
@@ -125,6 +159,65 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
           }
         });
         return;
+      }
+
+      if (req.method === 'POST' && url.pathname.startsWith('/api/recommendations/') && url.pathname.endsWith('/accept')) {
+        const parts = url.pathname.split('/');
+        let id: string;
+        try {
+          id = decodeURIComponent(parts.slice(3, parts.length - 1).join('/'));
+        } catch {
+          return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid id encoding' }));
+        }
+        const now = Date.now();
+        const ok = updateRecommendationStatus(db, id, 'accepted');
+        if (!ok) {
+          return send(res, 404, 'application/json', JSON.stringify({ error: 'recommendation not found', id }));
+        }
+        evaluateRecommendations(db, now);
+        return send(res, 200, 'application/json', JSON.stringify({ ok: true, id, status: 'accepted', acceptedAt: now }));
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/reports/generate') {
+        let body = '';
+        req.on('data', (c) => { body += c; });
+        req.on('end', () => {
+          let week: string | undefined;
+          try {
+            if (body.trim()) {
+              const parsed = JSON.parse(body);
+              week = parsed.week;
+            }
+          } catch {}
+          try {
+            const rep = generateWeeklyReport(db, week, process.env.AGENTLENS_SOURCE_HOME || homedir());
+            send(res, 200, 'application/json', JSON.stringify({
+              ok: true,
+              week: rep.data.week,
+              filePathMd: rep.filePathMd,
+              filePathHtml: rep.filePathHtml,
+            }));
+          } catch (e) {
+            send(res, 500, 'application/json', JSON.stringify({ error: (e as Error).message }));
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname.startsWith('/api/reports/')) {
+        const week = url.pathname.slice('/api/reports/'.length);
+        if (/^\d{4}-W\d{1,2}$/.test(week)) {
+          try {
+            const rep = generateWeeklyReport(db, week, process.env.AGENTLENS_SOURCE_HOME || homedir());
+            return send(res, 200, 'application/json', JSON.stringify({
+              data: rep.data,
+              markdown: rep.markdown,
+              html: rep.html,
+            }));
+          } catch (e) {
+            return send(res, 404, 'application/json', JSON.stringify({ error: (e as Error).message }));
+          }
+        }
       }
 
       const handler = api[url.pathname];
