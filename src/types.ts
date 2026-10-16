@@ -102,3 +102,13 @@ export interface AuditItem {
   details: Record<string, any>;
   updatedAt: number;
 }
+
+export interface RawConfigItem {
+  agent: Agent | 'all';
+  projectId: number | null;
+  kind: AuditKind;
+  name: string;
+  sourcePath: string;
+  tokens: number;
+  details: Record<string, any>;
+}
