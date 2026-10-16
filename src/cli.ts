@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
+import { costOf } from './pricing.ts';
+import { projectName, projectRoot } from './project.ts';
 import { startServer } from './server.ts';
 import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from './summary.ts';
 
@@ -22,6 +24,7 @@ const HELP = `Usage: agentlens <command>
 
   serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
   ingest              one-shot ingest of new agent log data, then exit
+  status              show terminal summary for current project or --project <path>
   statusline          process Claude Code statusline stdin, spool quota, and print status
   install-statusline  show configuration instructions for Claude Code statusline
   install-service     write a systemd user unit so serve starts at login (you enable it)
@@ -127,6 +130,115 @@ const commands: Record<string, () => unknown> = {
     spoolQuota(SPOOL_PATH, input);
     const out = formatStatusline(SUMMARY_PATH, process.cwd());
     process.stdout.write(out + '\n');
+  },
+  status: () => {
+    let projectArg: string | undefined;
+    for (let i = 3; i < process.argv.length; i++) {
+      if (process.argv[i] === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      }
+    }
+    const targetPath = projectArg ?? process.cwd();
+    const root = projectRoot(targetPath);
+    const name = projectName(root);
+
+    if (!existsSync(DB_PATH)) {
+      console.log(`No database found at ${DB_PATH}. Run 'agentlens ingest' first.`);
+      return;
+    }
+
+    const db = openDb(DB_PATH);
+    const proj = db.prepare('SELECT id FROM projects WHERE root = ?').get(root) as { id: number } | undefined;
+    const projId = proj?.id;
+
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const todayTs = midnight.getTime();
+    const sevenDaysTs = Date.now() - 7 * 86400_000;
+
+    function getUsage(fromTs: number) {
+      const sql =
+        projId != null
+          ? `SELECT e.model,
+                    coalesce(sum(e.input), 0) AS input,
+                    coalesce(sum(e.output), 0) AS output,
+                    coalesce(sum(e.cache_read), 0) AS cacheRead,
+                    coalesce(sum(e.cache_write), 0) AS cacheWrite,
+                    coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
+             FROM events e
+             JOIN sessions s ON s.id = e.session_id
+             WHERE s.project_id = ? AND e.ts >= ?
+             GROUP BY e.model`
+          : `SELECT e.model,
+                    coalesce(sum(e.input), 0) AS input,
+                    coalesce(sum(e.output), 0) AS output,
+                    coalesce(sum(e.cache_read), 0) AS cacheRead,
+                    coalesce(sum(e.cache_write), 0) AS cacheWrite,
+                    coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
+             FROM events e
+             WHERE e.ts >= ?
+             GROUP BY e.model`;
+      const rows = (projId != null ? db.prepare(sql).all(projId, fromTs) : db.prepare(sql).all(fromTs)) as {
+        model: string | null;
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheWrite: number;
+        cacheWrite1h: number;
+      }[];
+
+      let tokens = 0;
+      let cost: number | null = 0;
+      for (const r of rows) {
+        const u = {
+          input: r.input,
+          output: r.output,
+          cacheRead: r.cacheRead,
+          cacheWrite: r.cacheWrite,
+          cacheWrite1h: r.cacheWrite1h,
+        };
+        tokens += r.input + r.output + r.cacheRead + r.cacheWrite;
+        const c = costOf(r.model, u);
+        if (c == null) cost = null;
+        else if (cost != null) cost += c;
+      }
+      return { tokens, cost };
+    }
+
+    const todayUsage = getUsage(todayTs);
+    const weekUsage = getUsage(sevenDaysTs);
+
+    const quotaRows = db.prepare(`
+      SELECT agent, win, used_pct AS usedPct, resets_at AS resetsAt
+      FROM quota_snapshots q
+      WHERE ts = (SELECT max(ts) FROM quota_snapshots WHERE agent = q.agent AND win = q.win)
+      ORDER BY agent, win
+    `).all() as { agent: string; win: string; usedPct: number; resetsAt: number }[];
+
+    const formatCost = (c: number | null) => (c == null ? 'unpriced' : `$${c.toFixed(2)}`);
+
+    console.log(`\n==================================================`);
+    console.log(`Project: ${name} (${root})`);
+    console.log(`==================================================\n`);
+    console.log(`Tokens (measured):`);
+    console.log(`  Today: ${todayUsage.tokens.toLocaleString()} tokens`);
+    console.log(`  7-day: ${weekUsage.tokens.toLocaleString()} tokens\n`);
+    console.log(`API-equivalent cost (estimated):`);
+    console.log(`  Today: ${formatCost(todayUsage.cost)}`);
+    console.log(`  7-day: ${formatCost(weekUsage.cost)}\n`);
+    console.log(`Quota used (reported by agent):`);
+    if (quotaRows.length === 0) {
+      console.log(`  n/a`);
+    } else {
+      for (const q of quotaRows) {
+        const agentName = q.agent.charAt(0).toUpperCase() + q.agent.slice(1);
+        const minsLeft = Math.max(0, Math.round((q.resetsAt - Date.now()) / 60_000));
+        const resetStr = minsLeft >= 60 ? `${Math.floor(minsLeft / 60)}h ${minsLeft % 60}m` : `${minsLeft}m`;
+        console.log(`  ${agentName} ${q.win}: ${Math.round(q.usedPct)}% (resets in ${resetStr})`);
+      }
+    }
+    console.log(`==================================================\n`);
   },
   'install-statusline': () => {
     console.log(`Add this to ~/.claude/settings.json or project .claude/settings.json:
