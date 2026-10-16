@@ -23,7 +23,7 @@ function createMockSessionsAndEvents(
   const beforeErrors = options?.beforeErrors ?? 0;
   const afterErrors = options?.afterErrors ?? 0;
 
-  const sessions: SessionInfo[] = [];
+  const sessions: (SessionInfo & { projectId: number | null })[] = [];
   const events: NormalizedEvent[] = [];
 
   // Before sessions: spread over 7 days before acceptedAt
@@ -35,8 +35,6 @@ function createMockSessionsAndEvents(
       agent: 'claude',
       projectId,
       cwd: '/test/proj',
-      startedAt: ts,
-      endedAt: ts + 1800_000,
     });
 
     // 2 turns per session
@@ -86,8 +84,6 @@ function createMockSessionsAndEvents(
       agent: 'claude',
       projectId,
       cwd: '/test/proj',
-      startedAt: ts,
-      endedAt: ts + 1800_000,
     });
 
     events.push({

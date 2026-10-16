@@ -59,6 +59,21 @@ export interface WeeklyReportData {
   }>;
 }
 
+export function getIsoWeekString(dateOrTs: Date | number = new Date()): string {
+  const now = typeof dateOrTs === 'number' ? new Date(dateOrTs) : dateOrTs;
+  const target = new Date(now.valueOf());
+  const dayNr = (now.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNr + 3);
+  const firstThursday = target.valueOf();
+  target.setUTCMonth(0, 1);
+  if (target.getUTCDay() !== 4) {
+    target.setUTCMonth(0, 1 + ((4 - target.getUTCDay() + 7) % 7));
+  }
+  const week = 1 + Math.ceil((firstThursday - target.valueOf()) / 604_800_000);
+  const year = target.getUTCFullYear();
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
 export function getIsoWeekBounds(weekStr?: string): {
   week: string;
   startTs: number;

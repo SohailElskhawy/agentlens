@@ -12,6 +12,7 @@ import { projectName, projectRoot } from './project.ts';
 import { startServer } from './server.ts';
 import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from './summary.ts';
 import { runAudit } from './audit/runner.ts';
+import { checkWeeklyReportSchedule } from './report-scheduler.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -52,6 +53,7 @@ async function serve() {
         drainQuotaSpool(db, SPOOL_PATH);
         await ingest(db, HOME);
         writeSummary(db, SUMMARY_PATH);
+        try { checkWeeklyReportSchedule(db, HOME); } catch {}
       } while (again);
     } catch (e) {
       console.error('agentlens: ingest failed:', e);

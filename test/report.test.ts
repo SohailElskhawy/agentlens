@@ -30,7 +30,7 @@ test('generateWeeklyReport produces data, Markdown, and HTML with all 6 sections
     const currMid = bounds.startTs + 86_400_000;
 
     // Previous week sessions (50,000 tokens)
-    const prevSessions: SessionInfo[] = [
+    const prevSessions: (SessionInfo & { projectId: number | null })[] = [
       { id: 's_prev_1', agent: 'claude', projectId: projId, cwd: '/work/test-app' },
     ];
     const prevEvents: NormalizedEvent[] = [
@@ -40,7 +40,7 @@ test('generateWeeklyReport produces data, Markdown, and HTML with all 6 sections
     upsertEvents(db, prevEvents);
 
     // Current week sessions (25,000 tokens = -50% reduction!)
-    const currSessions: SessionInfo[] = [
+    const currSessions: (SessionInfo & { projectId: number | null })[] = [
       { id: 's_curr_1', agent: 'claude', projectId: projId, cwd: '/work/test-app' },
       { id: 's_curr_2', agent: 'codex', projectId: projId, cwd: '/work/test-app' },
     ];
