@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { Cursor, NormalizedEvent, QuotaSnapshot, SessionInfo } from './types.ts';
+import type { Cursor, Finding, NormalizedEvent, QuotaSnapshot, Recommendation, SessionInfo } from './types.ts';
 
 export type DB = DatabaseSync;
 
@@ -22,6 +22,18 @@ CREATE INDEX IF NOT EXISTS events_session ON events(session_id, ts);
 CREATE TABLE IF NOT EXISTS quota_snapshots (
   agent TEXT NOT NULL, ts INTEGER NOT NULL, win TEXT NOT NULL, used_pct REAL NOT NULL, resets_at INTEGER NOT NULL,
   source TEXT NOT NULL, PRIMARY KEY (agent, win, ts));
+CREATE TABLE IF NOT EXISTS findings (
+  id TEXT PRIMARY KEY, rule TEXT NOT NULL, project_id INTEGER REFERENCES projects(id),
+  session_id TEXT, evidence TEXT NOT NULL, confidence TEXT NOT NULL, confidence_reason TEXT NOT NULL,
+  est_tokens_week INTEGER NOT NULL DEFAULT 0, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS findings_project ON findings(project_id);
+CREATE INDEX IF NOT EXISTS findings_rule ON findings(rule);
+CREATE TABLE IF NOT EXISTS recommendations (
+  id TEXT PRIMARY KEY, finding_rule TEXT NOT NULL, project_id INTEGER REFERENCES projects(id),
+  action TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, catalog_ref TEXT,
+  status TEXT NOT NULL DEFAULT 'open', accepted_at INTEGER, result TEXT);
+CREATE INDEX IF NOT EXISTS recs_project ON recommendations(project_id);
+CREATE INDEX IF NOT EXISTS recs_status ON recommendations(status);
 `;
 
 export function openDb(path: string): DB {
@@ -96,3 +108,104 @@ export function setCursor(db: DB, path: string, agent: string, cursor: Cursor, e
       errors = errors + excluded.errors, updated_at = excluded.updated_at`)
     .run(path, agent, cursor.offset, JSON.stringify(cursor.state), errors, Date.now());
 }
+
+export function upsertFindings(db: DB, findings: Finding[]): void {
+  const st = db.prepare(`
+    INSERT INTO findings (id, rule, project_id, session_id, evidence, confidence, confidence_reason, est_tokens_week, first_seen, last_seen)
+    VALUES ($id, $rule, $projectId, $sessionId, $evidence, $confidence, $confidenceReason, $estTokensWeek, $firstSeen, $lastSeen)
+    ON CONFLICT(id) DO UPDATE SET
+      evidence = excluded.evidence,
+      confidence = excluded.confidence,
+      confidence_reason = excluded.confidence_reason,
+      est_tokens_week = max(findings.est_tokens_week, excluded.est_tokens_week),
+      last_seen = excluded.last_seen
+  `);
+  for (const f of findings) {
+    st.run({
+      id: f.id,
+      rule: f.rule,
+      projectId: f.projectId ?? null,
+      sessionId: f.sessionId ?? null,
+      evidence: JSON.stringify(f.evidence ?? {}),
+      confidence: f.confidence,
+      confidenceReason: f.confidenceReason,
+      estTokensWeek: f.estTokensWeek ?? 0,
+      firstSeen: f.firstSeen,
+      lastSeen: f.lastSeen,
+    });
+  }
+}
+
+export function getFindings(db: DB, filter?: { projectId?: number; rule?: string }): Finding[] {
+  let sql = 'SELECT id, rule, project_id AS projectId, session_id AS sessionId, evidence, confidence, confidence_reason AS confidenceReason, est_tokens_week AS estTokensWeek, first_seen AS firstSeen, last_seen AS lastSeen FROM findings WHERE 1=1';
+  const params: any[] = [];
+  if (filter?.projectId != null) {
+    sql += ' AND project_id = ?';
+    params.push(filter.projectId);
+  }
+  if (filter?.rule != null) {
+    sql += ' AND rule = ?';
+    params.push(filter.rule);
+  }
+  sql += ' ORDER BY est_tokens_week DESC, last_seen DESC';
+  const rows = db.prepare(sql).all(...params) as any[];
+  return rows.map((r) => ({
+    ...r,
+    evidence: JSON.parse(r.evidence || '{}'),
+  }));
+}
+
+export function upsertRecommendations(db: DB, recs: Recommendation[]): void {
+  const st = db.prepare(`
+    INSERT INTO recommendations (id, finding_rule, project_id, action, title, body, catalog_ref, status, accepted_at, result)
+    VALUES ($id, $findingRule, $projectId, $action, $title, $body, $catalogRef, $status, $acceptedAt, $result)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      body = excluded.body,
+      catalog_ref = excluded.catalog_ref,
+      result = coalesce(excluded.result, recommendations.result)
+  `);
+  for (const r of recs) {
+    st.run({
+      id: r.id,
+      findingRule: r.findingRule,
+      projectId: r.projectId ?? null,
+      action: r.action,
+      title: r.title,
+      body: r.body,
+      catalogRef: r.catalogRef ?? null,
+      status: r.status ?? 'open',
+      acceptedAt: r.acceptedAt ?? null,
+      result: r.result ? JSON.stringify(r.result) : null,
+    });
+  }
+}
+
+export function getRecommendations(db: DB, filter?: { projectId?: number; status?: string }): Recommendation[] {
+  let sql = 'SELECT id, finding_rule AS findingRule, project_id AS projectId, action, title, body, catalog_ref AS catalogRef, status, accepted_at AS acceptedAt, result FROM recommendations WHERE 1=1';
+  const params: any[] = [];
+  if (filter?.projectId != null) {
+    sql += ' AND project_id = ?';
+    params.push(filter.projectId);
+  }
+  if (filter?.status != null) {
+    sql += ' AND status = ?';
+    params.push(filter.status);
+  }
+  const rows = db.prepare(sql).all(...params) as any[];
+  return rows.map((r) => ({
+    ...r,
+    result: r.result ? JSON.parse(r.result) : undefined,
+  }));
+}
+
+export function updateRecommendationStatus(db: DB, id: string, status: string): boolean {
+  const acceptedAt = status === 'accepted' ? Date.now() : null;
+  const res = db.prepare(`
+    UPDATE recommendations
+    SET status = ?, accepted_at = coalesce(?, accepted_at)
+    WHERE id = ?
+  `).run(status, acceptedAt, id);
+  return res.changes > 0;
+}
+

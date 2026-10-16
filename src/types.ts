@@ -52,3 +52,34 @@ export interface Adapter {
 }
 
 export interface Filter { from?: number; to?: number; agent?: string; projectId?: number }
+
+export type ConfidenceLevel = 'high' | 'medium' | 'low';
+export type ActionType = 'add' | 'remove' | 'replace' | 'improve';
+export type RecommendationStatus = 'open' | 'accepted' | 'measuring' | 'verified' | 'no_effect' | 'regressed' | 'dismissed';
+
+export interface Finding {
+  id: string;
+  rule: string;
+  projectId: number | null;
+  sessionId: string | null;
+  evidence: any;
+  confidence: ConfidenceLevel;
+  confidenceReason: string;
+  estTokensWeek: number;
+  firstSeen: number;
+  lastSeen: number;
+}
+
+export interface Recommendation {
+  id: string;
+  findingRule: string;
+  projectId: number | null;
+  action: ActionType;
+  title: string;
+  body: string;
+  catalogRef?: string;
+  status: RecommendationStatus;
+  acceptedAt?: number;
+  result?: any;
+  score?: number;
+}
