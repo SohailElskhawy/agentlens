@@ -8,6 +8,7 @@ import { analyzeOverhead } from './overhead.ts';
 import { analyzeUsage } from './usage.ts';
 import { detectDuplicates } from './duplicates.ts';
 import { detectConflicts } from './conflicts.ts';
+import { trimInstructions, type InstructionTrimmerResult } from './trimmer.ts';
 import { scanInstructions } from './scanners/instruction.ts';
 import { scanMcp } from './scanners/mcp.ts';
 import { scanSkills } from './scanners/skill.ts';
@@ -16,7 +17,7 @@ import { scanPlugins } from './scanners/plugin.ts';
 export function runAudit(
   db: DB,
   home?: string
-): { items: AuditItem[]; findings: Finding[] } {
+): { items: AuditItem[]; findings: Finding[]; trimmings: InstructionTrimmerResult[] } {
   const userHome = home || homedir();
   const now = Date.now();
 
@@ -41,6 +42,10 @@ export function runAudit(
   const usageResult = analyzeUsage(allRaw, db, userHome);
   const dupResult = detectDuplicates(usageResult.items);
   const conflictResult = detectConflicts(dupResult.items, projects);
+  const trimmings = trimInstructions(instructions, projects);
+
+  const trimmingsMap = new Map<string, InstructionTrimmerResult>();
+  for (const t of trimmings) trimmingsMap.set(t.filePath, t);
 
   // 3. Assemble findings
   const findings: Finding[] = [
@@ -54,6 +59,10 @@ export function runAudit(
   const auditItems: AuditItem[] = conflictResult.items.map((item) => {
     const pathSlug = createHash('sha256').update(item.sourcePath).digest('hex').slice(0, 8);
     const id = `audit:${item.kind}:${item.agent}:${item.projectId ?? 'global'}:${item.name}:${pathSlug}`;
+    const trim = trimmingsMap.get(item.sourcePath);
+    const details = { ...item.details };
+    if (trim) details.trimming = trim;
+
     return {
       id,
       agent: item.agent,
@@ -65,7 +74,7 @@ export function runAudit(
       invocations30d: item.invocations30d,
       lastInvoked: item.lastInvoked,
       status: item.status,
-      details: item.details,
+      details,
       updatedAt: now,
     };
   });
@@ -88,5 +97,5 @@ export function runAudit(
     upsertRecommendations(db, recs);
   } catch {}
 
-  return { items: auditItems, findings };
+  return { items: auditItems, findings, trimmings };
 }

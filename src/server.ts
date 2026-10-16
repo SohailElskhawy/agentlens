@@ -75,14 +75,20 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       const unusedCount = items.filter((i) => i.status === 'unused').length;
       const duplicateCount = items.filter((i) => i.status === 'duplicate').length;
       const conflictCount = items.filter((i) => i.status === 'conflict').length;
+      const trimmings = items
+        .filter((i) => i.kind === 'instruction' && i.details?.trimming)
+        .map((i) => i.details.trimming);
+      const totalTrimSavings = trimmings.reduce((sum: number, t: any) => sum + (t.tokensSaved || 0), 0);
       return {
         items,
+        trimmings,
         summary: {
           totalItems: items.length,
           totalFixedTokens,
           unusedCount,
           duplicateCount,
           conflictCount,
+          totalTrimSavings,
         },
       };
     },

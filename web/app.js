@@ -53,6 +53,20 @@ function table(cols, rows, href) {
   return `<div class="table-card-scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
+function renderDiff(diffText) {
+  if (!diffText) return '';
+  return diffText
+    .split('\n')
+    .map((line) => {
+      let cls = '';
+      if (line.startsWith('+') && !line.startsWith('+++')) cls = 'diff-line-add';
+      else if (line.startsWith('-') && !line.startsWith('---')) cls = 'diff-line-del';
+      else if (line.startsWith('@@')) cls = 'diff-line-hunk';
+      return `<div class="${cls}">${esc(line)}</div>`;
+    })
+    .join('');
+}
+
 function chart(id, x, series, { time = true, fmt = fmtTok } = {}) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -1163,14 +1177,20 @@ async function recommendationsPage() {
 }
 
 async function auditPage() {
-  const data = await api('audit');
+  const [data, settingsRes] = await Promise.all([
+    api('audit'),
+    api('settings').catch(() => ({})),
+  ]);
+  const allowAgentLaunch = settingsRes?.settings?.allowAgentLaunch === 'true';
   const items = data.items || [];
+  const trimmings = data.trimmings || [];
   const summary = data.summary || {
     totalItems: 0,
     totalFixedTokens: 0,
     unusedCount: 0,
     duplicateCount: 0,
     conflictCount: 0,
+    totalTrimSavings: 0,
   };
 
   const statusPill = (status) => `<span class="pill pill-${esc(status)}">${esc(status)}</span>`;
@@ -1204,6 +1224,66 @@ async function auditPage() {
     </div>
   `;
 
+  const trimmerSection = trimmings.length > 0 ? `
+    <div class="card" style="margin-top:var(--space-4);border-color:var(--accent-subtle)">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title" style="color:var(--accent);display:inline-flex;align-items:center;gap:6px">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="6" r="3"></circle>
+              <circle cx="6" cy="18" r="3"></circle>
+              <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+              <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
+              <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+            </svg>
+            Instruction Trimmer & Unified Diffs (${trimmings.length})
+          </h3>
+          <span class="card-subtitle">Non-destructive cuts: duplicate lines, conflicting directives, oversized code blocks, and stale paths (~${fmtTok(summary.totalTrimSavings || 0)} tokens/turn saved).</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;margin-top:12px">
+        ${trimmings.map((t, idx) => `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+              <div>
+                <strong>${esc(t.fileName)}</strong>
+                <span class="badge" style="margin-left:6px;background:var(--surface-subtle);border:1px solid var(--border)">${esc(t.agent)}</span>
+                ${t.projectName ? `<span class="badge" style="margin-left:4px;border:1px solid var(--border)">${esc(t.projectName)}</span>` : ''}
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:2px">${esc(t.filePath)}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="badge" style="background:var(--success-bg);color:var(--success);font-weight:600">+${fmtTok(t.tokensSaved)} tokens/turn saved</span>
+                <button type="button" class="btn btn-sm btn-outline btn-copy-trim-diff" data-idx="${idx}">Copy Diff</button>
+                <button type="button" class="btn btn-sm btn-outline btn-copy-trim-prompt" data-idx="${idx}">Copy Prompt</button>
+                <button type="button" class="btn btn-sm ${allowAgentLaunch ? '' : 'btn-outline'} btn-send-trim-agent" data-idx="${idx}" ${allowAgentLaunch ? '' : 'data-disabled="true"'} title="${allowAgentLaunch ? 'Send fix to agent CLI' : 'Enable agent launching in Settings'}">
+                  ${allowAgentLaunch ? 'Send to agent' : 'Send (Disabled)'}
+                </button>
+              </div>
+            </div>
+
+            <div style="margin:8px 0">
+              <div style="font-size:11.5px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Cuts identified:</div>
+              <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--text)">
+                ${t.cuts.map((c) => `
+                  <li style="margin-bottom:3px">
+                    <span class="badge" style="font-size:10px;text-transform:uppercase">${esc(c.type.replace(/_/g, ' '))}</span>
+                    Line ${c.startLine}${c.endLine > c.startLine ? `-${c.endLine}` : ''}:
+                    <span>${esc(c.description)}</span>
+                    <span style="color:var(--success);font-weight:600;font-size:11.5px">(+${fmtTok(c.tokensSaved)} tok)</span>
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+
+            <div class="diff-container">
+              ${renderDiff(t.unifiedDiff)}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
   return {
     html: `
       <div class="card-header" style="margin-bottom:var(--space-4)">
@@ -1213,8 +1293,9 @@ async function auditPage() {
         </div>
       </div>
       ${tiles}
+      ${trimmerSection}
 
-      <div class="grid-12">
+      <div class="grid-12" style="margin-top:var(--space-4)">
         <div class="col-6 card">
           <div class="card-header">
             <h3 class="card-title">Instruction Files (${instructions.length})</h3>
@@ -1275,6 +1356,74 @@ async function auditPage() {
         </div>
       </div>
     `,
+    after: () => {
+      document.querySelectorAll('.btn-copy-trim-diff').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const idx = Number(e.currentTarget.dataset.idx);
+          const t = trimmings[idx];
+          if (!t) return;
+          await navigator.clipboard.writeText(t.unifiedDiff);
+          const orig = btn.textContent;
+          btn.textContent = 'Copied Diff!';
+          setTimeout(() => { btn.textContent = orig; }, 2000);
+        });
+      });
+
+      document.querySelectorAll('.btn-copy-trim-prompt').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const idx = Number(e.currentTarget.dataset.idx);
+          const t = trimmings[idx];
+          if (!t) return;
+          await navigator.clipboard.writeText(t.fixPrompt);
+          const orig = btn.textContent;
+          btn.textContent = 'Copied Prompt!';
+          setTimeout(() => { btn.textContent = orig; }, 2000);
+        });
+      });
+
+      document.querySelectorAll('.btn-send-trim-agent').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          if (btn.dataset.disabled === 'true') {
+            alert('Agent execution is disabled by default for privacy & safety.\n\nPlease enable "Allow agentlens to launch agents" on the Settings page first.');
+            location.hash = '#/settings';
+            return;
+          }
+          const idx = Number(e.currentTarget.dataset.idx);
+          const t = trimmings[idx];
+          if (!t) return;
+
+          const defaultCli = t.agent === 'claude' ? 'claude' : t.agent === 'codex' ? 'codex' : 'opencode run';
+          const confirmText = `Send Trimming Fix to Agent?\n\nCommand: ${defaultCli} "${t.fixPrompt.slice(0, 80)}..."\nFolder: ${t.filePath}\n\nClick OK to launch in background terminal (or Cancel to abort).`;
+          if (!confirm(confirmText)) return;
+
+          btn.disabled = true;
+          btn.textContent = 'Launching...';
+
+          try {
+            const runRes = await fetch('/api/fix/run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                agent: t.agent,
+                prompt: t.fixPrompt,
+                projectId: t.projectId ?? undefined,
+                headless: false,
+              }),
+            });
+            const data = await runRes.json();
+            if (!runRes.ok) {
+              alert(`Launch failed: ${data.error || runRes.statusText}`);
+              btn.textContent = 'Failed';
+            } else {
+              btn.textContent = 'Dispatched!';
+            }
+          } catch (err) {
+            alert(`Launch error: ${err.message}`);
+            btn.textContent = 'Error';
+          }
+        });
+      });
+    },
   };
 }
 
