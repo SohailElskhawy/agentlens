@@ -80,6 +80,33 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         actionSnippet = 'agentlens status';
         break;
 
+      case 'instruction_bloat':
+        action = 'improve';
+        title = 'Trim always-loaded instruction files';
+        body = `Instruction files consume ${f.evidence?.fixedTokens?.toLocaleString() ?? 'many'} tokens per session. Move detailed guidelines to on-demand skills or reference documents.`;
+        break;
+
+      case 'unused_config':
+        action = 'remove';
+        title = `Remove unused ${f.evidence?.kind ?? 'config'} '${f.evidence?.name}'`;
+        body = `No invocations detected in the last 30 days. Disabling unused configurations saves context overhead and eliminates tool schema pollution.`;
+        actionSnippet = f.evidence?.kind === 'mcp'
+          ? `claude mcp remove ${f.evidence?.name}`
+          : undefined;
+        break;
+
+      case 'duplicate_config':
+        action = 'remove';
+        title = `Consolidate duplicate ${f.evidence?.kind ?? 'config'} '${f.evidence?.name}'`;
+        body = `${f.evidence?.kind ?? 'Config'} '${f.evidence?.name}' is defined in ${f.evidence?.sources?.length ?? 'multiple'} locations. Maintain a single canonical definition to prevent conflicts.`;
+        break;
+
+      case 'config_conflict':
+        action = 'improve';
+        title = 'Resolve conflicting instruction commands';
+        body = `Instructions in ${f.evidence?.projectName ?? 'project'} specify conflicting package managers (${f.evidence?.managers?.join(', ')}). Standardize on a single package manager.`;
+        break;
+
       default:
         action = 'improve';
         title = `Address ${f.rule.replace(/_/g, ' ')} workflow waste`;

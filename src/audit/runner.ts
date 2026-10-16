@@ -1,0 +1,87 @@
+import { homedir } from 'node:os';
+import type { DB } from '../db.ts';
+import { getFindings, upsertAuditItems, upsertFindings, upsertRecommendations } from '../db.ts';
+import { generateRecommendations } from '../recommend.ts';
+import type { AuditItem, Finding } from '../types.ts';
+import { analyzeOverhead } from './overhead.ts';
+import { analyzeUsage } from './usage.ts';
+import { detectDuplicates } from './duplicates.ts';
+import { detectConflicts } from './conflicts.ts';
+import { scanInstructions } from './scanners/instruction.ts';
+import { scanMcp } from './scanners/mcp.ts';
+import { scanSkills } from './scanners/skill.ts';
+import { scanPlugins } from './scanners/plugin.ts';
+
+export function runAudit(
+  db: DB,
+  home?: string
+): { items: AuditItem[]; findings: Finding[] } {
+  const userHome = home || homedir();
+  const now = Date.now();
+
+  let projects: { id: number; root: string; name: string }[] = [];
+  try {
+    projects = db.prepare('SELECT id, root, name FROM projects').all() as {
+      id: number;
+      root: string;
+      name: string;
+    }[];
+  } catch {}
+
+  // 1. Run all scanners
+  const instructions = scanInstructions(userHome, projects);
+  const mcps = scanMcp(userHome, projects);
+  const skills = scanSkills(userHome, projects);
+  const plugins = scanPlugins(userHome, projects);
+  const allRaw = [...instructions, ...mcps, ...skills, ...plugins];
+
+  // 2. Run analyzers
+  const overheadResult = analyzeOverhead(instructions, db, projects);
+  const usageResult = analyzeUsage(allRaw, db, userHome);
+  const dupResult = detectDuplicates(usageResult.items);
+  const conflictResult = detectConflicts(dupResult.items, projects);
+
+  // 3. Assemble findings
+  const findings: Finding[] = [
+    ...overheadResult.findings,
+    ...usageResult.findings,
+    ...dupResult.findings,
+    ...conflictResult.findings,
+  ];
+
+  // 4. Assemble AuditItems
+  const auditItems: AuditItem[] = conflictResult.items.map((item) => {
+    const id = `audit:${item.kind}:${item.agent}:${item.projectId ?? 'global'}:${item.name}`;
+    return {
+      id,
+      agent: item.agent,
+      projectId: item.projectId,
+      kind: item.kind,
+      name: item.name,
+      sourcePath: item.sourcePath,
+      tokens: item.tokens,
+      invocations30d: item.invocations30d,
+      lastInvoked: item.lastInvoked,
+      status: item.status,
+      details: item.details,
+      updatedAt: now,
+    };
+  });
+
+  // 5. Persist to DB
+  if (auditItems.length > 0) {
+    upsertAuditItems(db, auditItems);
+  }
+  if (findings.length > 0) {
+    upsertFindings(db, findings);
+  }
+
+  // Update recommendations with newly discovered findings
+  try {
+    const allFindings = getFindings(db);
+    const recs = generateRecommendations(allFindings);
+    upsertRecommendations(db, recs);
+  } catch {}
+
+  return { items: auditItems, findings };
+}
