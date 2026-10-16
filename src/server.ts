@@ -3,8 +3,8 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DB } from './db.ts';
-import { getFindings, getRecommendations, updateRecommendationStatus } from './db.ts';
-import type { Filter } from './types.ts';
+import { getAuditItems, getFindings, getRecommendations, updateRecommendationStatus } from './db.ts';
+import type { AuditKind, AuditStatus, Filter } from './types.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -47,6 +47,27 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       const status = sp.get('status') || undefined;
       const recs = getRecommendations(db, { projectId: f.projectId, status });
       return { recommendations: recs };
+    },
+    '/api/audit': (f, sp) => {
+      const kind = (sp.get('kind') || undefined) as AuditKind | undefined;
+      const status = (sp.get('status') || undefined) as AuditStatus | undefined;
+      const items = getAuditItems(db, { projectId: f.projectId, kind, status });
+      const totalFixedTokens = items
+        .filter((i) => i.kind === 'instruction')
+        .reduce((sum, i) => sum + (i.tokens || 0), 0);
+      const unusedCount = items.filter((i) => i.status === 'unused').length;
+      const duplicateCount = items.filter((i) => i.status === 'duplicate').length;
+      const conflictCount = items.filter((i) => i.status === 'conflict').length;
+      return {
+        items,
+        summary: {
+          totalItems: items.length,
+          totalFixedTokens,
+          unusedCount,
+          duplicateCount,
+          conflictCount,
+        },
+      };
     },
   };
 

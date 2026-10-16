@@ -11,6 +11,7 @@ import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
 import { startServer } from './server.ts';
 import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from './summary.ts';
+import { runAudit } from './audit/runner.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -26,6 +27,7 @@ const HELP = `Usage: agentlens <command>
   serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
+  audit               audit agent instructions, MCPs, skills, and plugins
   statusline          process Claude Code statusline stdin, spool quota, and print status
   install-statusline  show configuration instructions for Claude Code statusline
   install-service     write a systemd user unit so serve starts at login (you enable it)
@@ -228,6 +230,70 @@ const commands: Record<string, () => unknown> = {
         const resetStr = minsLeft >= 60 ? `${Math.floor(minsLeft / 60)}h ${minsLeft % 60}m` : `${minsLeft}m`;
         console.log(`  ${agentName} ${q.win}: ${Math.round(q.usedPct)}% (resets in ${resetStr})`);
       }
+    }
+    console.log(`==================================================\n`);
+  },
+  audit: () => {
+    let projectArg: string | undefined;
+    for (let i = 3; i < process.argv.length; i++) {
+      if (process.argv[i] === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      }
+    }
+    const targetPath = projectArg ?? process.cwd();
+    const root = projectRoot(targetPath);
+    const name = projectName(root);
+
+    const db = openDb(DB_PATH);
+    const proj = db.prepare('SELECT id FROM projects WHERE root = ?').get(root) as { id: number } | undefined;
+    const projId = proj?.id;
+
+    // Run audit to collect fresh configuration inventory
+    const { items } = runAudit(db, HOME);
+    const filteredItems = projId != null ? items.filter((i) => i.projectId === projId || i.projectId === null) : items;
+
+    const instructions = filteredItems.filter((i) => i.kind === 'instruction');
+    const toolsAndMcps = filteredItems.filter((i) => i.kind !== 'instruction');
+    const fixedTokens = instructions.reduce((sum, i) => sum + i.tokens, 0);
+
+    const activeCount = filteredItems.filter((i) => i.status === 'active').length;
+    const unusedCount = filteredItems.filter((i) => i.status === 'unused').length;
+    const dupCount = filteredItems.filter((i) => i.status === 'duplicate').length;
+    const conflictCount = filteredItems.filter((i) => i.status === 'conflict').length;
+
+    console.log(`\n==================================================`);
+    console.log(`Configuration Audit: ${name} (${root})`);
+    console.log(`==================================================\n`);
+    console.log(`Overview:`);
+    console.log(`  Fixed instruction overhead: ${fixedTokens.toLocaleString()} tokens per session`);
+    console.log(`  Configured items: ${filteredItems.length} total (${activeCount} active, ${unusedCount} unused, ${dupCount} duplicate, ${conflictCount} conflict)\n`);
+
+    if (instructions.length > 0) {
+      console.log(`Instruction Files:`);
+      for (const inst of instructions) {
+        console.log(`  - [${inst.agent}] ${inst.name} (${inst.tokens.toLocaleString()} tokens) -> ${inst.sourcePath}`);
+      }
+      console.log('');
+    }
+
+    if (toolsAndMcps.length > 0) {
+      console.log(`Tools, MCPs & Skills:`);
+      for (const t of toolsAndMcps) {
+        const statusBadge = t.status === 'active' ? '[active]' : `[${t.status.toUpperCase()}]`;
+        const invStr = t.invocations30d > 0 ? `${t.invocations30d} calls in 30d` : '0 calls (stale)';
+        console.log(`  - ${statusBadge} [${t.agent}] ${t.kind.toUpperCase()}: ${t.name} (${invStr})`);
+      }
+      console.log('');
+    }
+
+    const issues = filteredItems.filter((i) => i.status === 'duplicate' || i.status === 'conflict');
+    if (issues.length > 0) {
+      console.log(`Flagged Duplicates & Conflicts:`);
+      for (const issue of issues) {
+        console.log(`  ! [${issue.status.toUpperCase()}] ${issue.name}: ${issue.sourcePath}`);
+      }
+      console.log('');
     }
     console.log(`==================================================\n`);
   },
