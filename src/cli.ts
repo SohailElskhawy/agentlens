@@ -20,6 +20,7 @@ import { discoverGitHubCandidates } from './discover.ts';
 import { getPlatformPaths } from './paths.ts';
 import { installService } from './service.ts';
 import { computeQuotaForecasts } from './quota-forecast.ts';
+import { checkLiveAlerts } from './alerts.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -67,6 +68,7 @@ async function serve() {
         await ingest(db, HOME);
         writeSummary(db, SUMMARY_PATH);
         try { checkWeeklyReportSchedule(db, HOME); } catch {}
+        try { checkLiveAlerts(db); } catch {}
       } while (again);
     } catch (e) {
       console.error('agentlens: ingest failed:', e);

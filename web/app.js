@@ -1452,6 +1452,25 @@ async function settingsPage() {
             <div id="settings-save-status" style="font-size:12px;color:var(--success);margin-top:6px;display:none">Settings saved successfully.</div>
           </div>
         </div>
+
+        <div class="col-6 card" style="margin-top:var(--space-4)">
+          <div class="card-header"><h3 class="card-title">Live Desktop Alerts</h3></div>
+          <p style="margin-bottom:12px;color:var(--text-muted)">Raise native desktop notifications during background serve when critical waste or limits occur.</p>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="chk-alert-retry" ${settings.alert_retry_loop !== 'false' ? 'checked' : ''} />
+              <span>Alert when a retry loop is detected in an active session</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="chk-alert-quota" ${settings.alert_quota_forecast !== 'false' ? 'checked' : ''} />
+              <span>Alert when quota exhaustion is projected within 30 minutes</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="chk-alert-budget" ${settings.alert_budget !== 'false' ? 'checked' : ''} />
+              <span>Alert when project token budget crosses 80% or 100%</span>
+            </label>
+          </div>
+        </div>
       </div>
     `,
     after: () => {
@@ -1478,6 +1497,16 @@ async function settingsPage() {
           setTimeout(() => { statusEl.style.display = 'none'; }, 2000);
         }
       });
+      const saveAlertSetting = async (key, checked) => {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, value: String(checked) }),
+        });
+      };
+      $('#chk-alert-retry')?.addEventListener('change', (e) => saveAlertSetting('alert_retry_loop', e.target.checked));
+      $('#chk-alert-quota')?.addEventListener('change', (e) => saveAlertSetting('alert_quota_forecast', e.target.checked));
+      $('#chk-alert-budget')?.addEventListener('change', (e) => saveAlertSetting('alert_budget', e.target.checked));
     },
   };
 }
