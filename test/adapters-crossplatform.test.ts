@@ -77,3 +77,33 @@ test('audit scanners: detects OpenCode instructions, MCPs, and skills in macOS/W
     rmSync(tmpHome, { recursive: true, force: true });
   }
 });
+
+test('inferHomeFromRoot: performs case-insensitive comparison for Windows AppData suffixes', async () => {
+  const { inferHomeFromRoot } = await import('../src/adapters/opencode.ts');
+
+  assert.equal(
+    inferHomeFromRoot('C:\\Users\\Developer\\appdata\\roaming\\opencode'),
+    'C:/Users/Developer'
+  );
+  assert.equal(
+    inferHomeFromRoot('C:/Users/Developer/APPDATA/LOCAL/OPENCODE'),
+    'C:/Users/Developer'
+  );
+  assert.equal(
+    inferHomeFromRoot('C:\\Users\\Developer\\AppData\\Roaming\\OpenCode\\'),
+    'C:/Users/Developer'
+  );
+  assert.equal(
+    inferHomeFromRoot('D:\\Profiles\\Admin\\appdata\\local\\opencode'),
+    'D:/Profiles/Admin'
+  );
+  // POSIX suffixes remain case-sensitive
+  assert.equal(
+    inferHomeFromRoot('/home/user/.local/share/opencode'),
+    '/home/user'
+  );
+  assert.equal(
+    inferHomeFromRoot('/home/user/.LOCAL/SHARE/OPENCODE'),
+    undefined
+  );
+});

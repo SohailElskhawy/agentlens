@@ -128,6 +128,7 @@ export function installService(options?: {
 
   try {
     mkdirSync(dirname(config.targetPath), { recursive: true });
+    mkdirSync(stateDir, { recursive: true });
     writeFileSync(config.targetPath, config.content, 'utf8');
 
     if (config.auxiliaryPath && config.auxiliaryContent && config.auxiliaryPath !== config.targetPath) {
@@ -154,12 +155,13 @@ export function installService(options?: {
     };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
+    let step = 1;
     let message = `Failed to install service configuration: ${errorMsg}\n\nManual setup instructions:\n`;
-    message += `1. Create ${config.targetPath} with:\n${config.content}\n\n`;
+    message += `${step++}. Create ${config.targetPath} with:\n${config.content}\n\n`;
     if (config.auxiliaryPath && config.auxiliaryPath !== config.targetPath) {
-      message += `2. Create ${config.auxiliaryPath} with:\n${config.auxiliaryContent}\n\n`;
+      message += `${step++}. Create ${config.auxiliaryPath} with:\n${config.auxiliaryContent}\n\n`;
     }
-    message += `3. Enable command:\n   ${config.enableCommand}\n`;
+    message += `${step++}. Enable command:\n   ${config.enableCommand}\n`;
     return {
       success: false,
       message,

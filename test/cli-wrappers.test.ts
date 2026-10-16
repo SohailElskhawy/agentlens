@@ -30,12 +30,15 @@ test('getStatuslineSnippet: outputs agentlens.cmd on Windows and agentlens on PO
   const { getStatuslineSnippet } = await import('../src/cli.ts');
   const winSnippet = getStatuslineSnippet('win32');
   assert.ok(winSnippet.includes('"command": "agentlens.cmd statusline"'));
+  assert.ok(winSnippet.includes('%USERPROFILE%\\.claude\\settings.json or project .claude\\settings.json'));
 
   const linuxSnippet = getStatuslineSnippet('linux');
   assert.ok(linuxSnippet.includes('"command": "agentlens statusline"'));
+  assert.ok(linuxSnippet.includes('~/.claude/settings.json or project .claude/settings.json'));
 
   const macSnippet = getStatuslineSnippet('darwin');
   assert.ok(macSnippet.includes('"command": "agentlens statusline"'));
+  assert.ok(macSnippet.includes('~/.claude/settings.json or project .claude/settings.json'));
 });
 
 test('getStatuslineSnippet: defaults to process.platform when called without args', async () => {

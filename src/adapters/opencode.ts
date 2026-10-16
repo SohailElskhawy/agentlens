@@ -5,16 +5,24 @@ import { getOpenCodeDataRoots } from '../paths.ts';
 import type { Adapter, Cursor, NormalizedEvent, ReadResult, SessionInfo } from '../types.ts';
 import { hash } from '../util.ts';
 
-function inferHomeFromRoot(root: string): string | undefined {
+export function inferHomeFromRoot(root: string): string | undefined {
   const normalized = root.replace(/\\/g, '/').replace(/\/+$/, '');
   const candidateSuffixes = [
     '/.local/share/opencode',
     '/Library/Application Support/opencode',
-    '/AppData/Roaming/opencode',
-    '/AppData/Local/opencode',
   ];
   for (const suffix of candidateSuffixes) {
     if (normalized.endsWith(suffix)) {
+      return normalized.slice(0, -suffix.length);
+    }
+  }
+  const windowsSuffixes = [
+    '/AppData/Roaming/opencode',
+    '/AppData/Local/opencode',
+  ];
+  const lower = normalized.toLowerCase();
+  for (const suffix of windowsSuffixes) {
+    if (lower.endsWith(suffix.toLowerCase())) {
       return normalized.slice(0, -suffix.length);
     }
   }

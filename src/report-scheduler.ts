@@ -20,8 +20,8 @@ export function sendDesktopNotification(
         detached: true,
       });
     } else if (platform === 'win32') {
-      const script = `Add-Type -AssemblyName System.Windows.Forms; $notify = New-Object System.Windows.Forms.NotifyIcon; $notify.Icon = [System.Drawing.SystemIcons]::Information; $notify.BalloonTipTitle = ${JSON.stringify(title)}; $notify.BalloonTipText = ${JSON.stringify(body)}; $notify.Visible = $true; $notify.ShowBalloonTip(5000);`;
-      p = spawnFn('powershell', ['-NoProfile', '-Command', script], {
+      const script = `param($title, $body); [reflection.assembly]::loadwithpartialname('System.Windows.Forms') | Out-Null; $notify = New-Object System.Windows.Forms.NotifyIcon; $notify.Icon = [System.Drawing.SystemIcons]::Information; $notify.Visible = $True; $notify.ShowBalloonTip(10000, $title, $body, [System.Windows.Forms.ToolTipIcon]::Info);`;
+      p = spawnFn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, title, body], {
         stdio: 'ignore',
         detached: true,
       });

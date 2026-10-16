@@ -76,6 +76,7 @@ test('installService: writes files to disk cleanly on simulated platforms', () =
     });
     assert.equal(res.success, true);
     assert.ok(existsSync(join(tmpHome, 'Library/LaunchAgents/com.agentlens.plist')));
+    assert.ok(existsSync(join(tmpHome, 'Library/Caches/agentlens')), 'stateDir must be created for macOS launchd log/err output');
   } finally {
     rmSync(tmpHome, { recursive: true, force: true });
   }
@@ -147,8 +148,40 @@ test('installService: handles file write failures gracefully (Review Focus 5)', 
     if (!res.success) {
       assert.ok(res.message.includes('Failed to install service configuration'));
       assert.ok(res.message.includes('Manual setup instructions:'));
+      assert.ok(res.message.includes('1. Create'));
+      assert.ok(res.message.includes('2. Enable command:'));
+      assert.ok(!res.message.includes('3. Enable command:'));
     } else {
       assert.equal(typeof res.message, 'string');
+    }
+  } finally {
+    try {
+      chmodSync(unwriteableDir, 0o777);
+      rmSync(unwriteableDir, { recursive: true, force: true });
+    } catch {
+      // cleanup best effort
+    }
+  }
+});
+
+test('installService: failure instructions dynamically number steps without skipping from 1 to 3', () => {
+  const unwriteableDir = join(process.cwd(), 'scratch/tmp-unwriteable-win');
+  mkdirSync(unwriteableDir, { recursive: true });
+  chmodSync(unwriteableDir, 0o444);
+
+  try {
+    const res = installService({
+      platform: 'win32',
+      home: unwriteableDir,
+      execPath: 'C:\\node.exe',
+      cliPath: 'C:\\cli.ts',
+      stateDir: join(unwriteableDir, 'state'),
+      env: { LOCALAPPDATA: unwriteableDir },
+    });
+    if (!res.success) {
+      assert.ok(res.message.includes('1. Create'));
+      assert.ok(res.message.includes('2. Enable command:'));
+      assert.ok(!res.message.includes('3. Enable command:'));
     }
   } finally {
     try {

@@ -33,7 +33,13 @@ test('sendDesktopNotification: dispatches powershell toast on Windows (win32)', 
   assert.equal(ok, true);
   assert.equal(calledCmd, 'powershell');
   assert.ok(calledArgs.includes('-NoProfile'));
+  assert.ok(calledArgs.includes('-ExecutionPolicy'));
+  assert.ok(calledArgs.includes('Bypass'));
+  assert.ok(calledArgs.includes('-Command'));
   assert.ok(calledArgs.some((arg) => arg.includes('System.Windows.Forms.NotifyIcon')));
+  assert.ok(calledArgs.some((arg) => arg.includes('param($title, $body)')));
+  assert.equal(calledArgs[calledArgs.length - 2], 'agentlens Weekly');
+  assert.equal(calledArgs[calledArgs.length - 1], 'Report ready');
 });
 
 test('sendDesktopNotification: dispatches notify-send on Linux', () => {
@@ -61,13 +67,17 @@ test('sendDesktopNotification: safely escapes quotes and special chars (Review F
   assert.ok(darwinScript.startsWith('display notification '));
   assert.doesNotThrow(() => JSON.parse(darwinScript.split('display notification ')[1].split(' with title ')[0]));
 
-  let winScript = '';
+  let winArgs: string[] = [];
   const fakeSpawnWin: any = (_cmd: string, args: string[]) => {
-    winScript = args[args.indexOf('-Command') + 1];
+    winArgs = args;
     return { on: () => {}, unref: () => {} };
   };
   sendDesktopNotification('Title "test"', 'Body "test"', 'win32', fakeSpawnWin);
-  assert.ok(winScript.includes('"Title \\"test\\""'));
+  const cmdIdx = winArgs.indexOf('-Command');
+  assert.ok(winArgs[cmdIdx + 1].includes('param($title, $body)'));
+  assert.ok(!winArgs[cmdIdx + 1].includes('Title "test"'));
+  assert.equal(winArgs[cmdIdx + 2], 'Title "test"');
+  assert.equal(winArgs[cmdIdx + 3], 'Body "test"');
 });
 
 test('sendDesktopNotification: returns false gracefully when spawn throws (Review Focus 5)', () => {

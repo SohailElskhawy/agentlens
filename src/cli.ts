@@ -473,7 +473,11 @@ const commands: Record<string, () => unknown> = {
 
 export function getStatuslineSnippet(platform: NodeJS.Platform = process.platform): string {
   const command = platform === 'win32' ? 'agentlens.cmd statusline' : 'agentlens statusline';
-  return `Add this to ~/.claude/settings.json or project .claude/settings.json:
+  const targetPath =
+    platform === 'win32'
+      ? '%USERPROFILE%\\.claude\\settings.json or project .claude\\settings.json'
+      : '~/.claude/settings.json or project .claude/settings.json';
+  return `Add this to ${targetPath}:
 
 {
   "statusLine": {
