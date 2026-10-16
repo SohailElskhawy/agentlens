@@ -49,4 +49,9 @@ a { color: var(--accent); }
 .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
 .btn-outline:hover { background: var(--bg); }
 .action-snippet { background: var(--bg); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; display: inline-block; margin-bottom: 12px; color: var(--text); word-break: break-all; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.pill-active { background: #dcfce7; color: #15803d; }
+.pill-unused { background: #fee2e2; color: #b91c1c; }
+.pill-duplicate { background: #fef3c7; color: #b45309; }
+.pill-conflict { background: #ffedd5; color: #c2410c; }
 

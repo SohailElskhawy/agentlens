@@ -326,7 +326,119 @@ async function recommendationsPage() {
   };
 }
 
-const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, recommendations: recommendationsPage, health: healthPage };
+async function auditPage() {
+  const data = await api('audit');
+  const items = data.items || [];
+  const summary = data.summary || {
+    totalItems: 0,
+    totalFixedTokens: 0,
+    unusedCount: 0,
+    duplicateCount: 0,
+    conflictCount: 0,
+  };
+
+  const statusPill = (status) => `<span class="pill pill-${esc(status)}">${esc(status)}</span>`;
+
+  const instructions = items.filter((i) => i.kind === 'instruction');
+  const toolsAndMcps = items.filter((i) => i.kind === 'mcp' || i.kind === 'plugin');
+  const skills = items.filter((i) => i.kind === 'skill');
+  const issues = items.filter((i) => i.status === 'duplicate' || i.status === 'conflict');
+
+  const tiles = `
+    <div class="tiles">
+      <div class="tile">
+        <div class="label">Per-Session Fixed Overhead</div>
+        <div class="value">${fmtTok(summary.totalFixedTokens)}</div>
+        <div class="note">Estimated instruction tokens per turn/session</div>
+      </div>
+      <div class="tile">
+        <div class="label">Configured Items</div>
+        <div class="value">${summary.totalItems}</div>
+        <div class="note">${items.filter((i) => i.status === 'active').length} active in last 30d</div>
+      </div>
+      <div class="tile">
+        <div class="label">Unused in 30 Days</div>
+        <div class="value" style="${summary.unusedCount > 0 ? 'color:var(--error)' : ''}">${summary.unusedCount}</div>
+        <div class="note">Stale MCPs, skills, or plugins</div>
+      </div>
+      <div class="tile">
+        <div class="label">Duplicates & Conflicts</div>
+        <div class="value" style="${summary.duplicateCount + summary.conflictCount > 0 ? 'color:#f59e0b' : ''}">${summary.duplicateCount + summary.conflictCount}</div>
+        <div class="note">${summary.duplicateCount} duplicates, ${summary.conflictCount} conflicts</div>
+      </div>
+    </div>
+  `;
+
+  const instructionsTable = table(
+    [
+      agentCol,
+      { label: 'Name', get: (r) => r.name },
+      { label: 'Tokens', num: true, get: (r) => fmtTok(r.tokens) },
+      { label: 'Chars', num: true, get: (r) => fmtInt(r.details?.chars) },
+      { label: 'Source Path', get: (r) => r.sourcePath },
+    ],
+    instructions,
+  );
+
+  const toolsTable = table(
+    [
+      agentCol,
+      { label: 'Type', get: (r) => r.kind.toUpperCase() },
+      { label: 'Name', get: (r) => r.name },
+      { label: 'Status', html: true, get: (r) => statusPill(r.status) },
+      { label: '30d Calls', num: true, get: (r) => r.invocations30d > 0 ? fmtInt(r.invocations30d) : 'none' },
+      { label: 'Source Path', get: (r) => r.sourcePath },
+    ],
+    toolsAndMcps,
+  );
+
+  const skillsTable = table(
+    [
+      agentCol,
+      { label: 'Skill Name', get: (r) => r.name },
+      { label: 'Status', html: true, get: (r) => statusPill(r.status) },
+      { label: '30d Calls', num: true, get: (r) => r.invocations30d > 0 ? fmtInt(r.invocations30d) : 'none' },
+      { label: 'Description', get: (r) => r.details?.description || '—' },
+      { label: 'Tokens', num: true, get: (r) => fmtTok(r.tokens) },
+    ],
+    skills,
+  );
+
+  const issuesTable = issues.length === 0
+    ? '<p class="empty">No duplicates or conflicts detected across agents or projects.</p>'
+    : table(
+        [
+          agentCol,
+          { label: 'Issue', html: true, get: (r) => statusPill(r.status) },
+          { label: 'Type', get: (r) => r.kind.toUpperCase() },
+          { label: 'Name', get: (r) => r.name },
+          { label: 'Source Path', get: (r) => r.sourcePath },
+        ],
+        issues,
+      );
+
+  return {
+    html: `
+      <h1>Configuration Audit</h1>
+      <p class="hint">Read-only audit of always-loaded instruction overhead, MCPs, skills, plugins, duplicates, and conflicts across all 4 agents.</p>
+      ${tiles}
+      <h2>Instruction Files (${instructions.length})</h2>
+      <p class="hint">Always-loaded context injected on session start and turns. Estimated as chars/4.</p>
+      ${instructionsTable}
+      <h2>MCP Servers & Plugins (${toolsAndMcps.length})</h2>
+      <p class="hint">Tools registered via configuration files or directories, correlated with 30-day tool call history.</p>
+      ${toolsTable}
+      <h2>Skills (${skills.length})</h2>
+      <p class="hint">Skills available in global or project repositories.</p>
+      ${skillsTable}
+      <h2>Flagged Duplicates & Conflicts (${issues.length})</h2>
+      <p class="hint">Configurations declared in multiple places or specifying conflicting developer commands.</p>
+      ${issuesTable}
+    `,
+  };
+}
+
+const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, recommendations: recommendationsPage, audit: auditPage, health: healthPage };
 
 async function render() {
   const [, name = 'overview', arg = ''] = location.hash.split('/');
