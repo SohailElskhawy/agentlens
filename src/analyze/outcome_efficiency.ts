@@ -14,11 +14,11 @@ export function readGitNumstat(cwd: string, sinceDays = 30): GitCommitStat[] {
   try {
     const stdout = execFileSync(
       'git',
-      ['log', '--numstat', '--format=commit %H %ct', `--since=${sinceDays} days ago`],
+      ['log', '--numstat', '--format=commit %H %ct', '-n', '100', `--since=${sinceDays} days ago`],
       {
         cwd,
         encoding: 'utf-8',
-        timeout: 5000,
+        timeout: 1500,
         stdio: ['ignore', 'pipe', 'ignore'],
       }
     );

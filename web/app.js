@@ -442,7 +442,7 @@ async function projectPage(projectId) {
     api('audit', { project: projectId }),
     api('sessions', { project: projectId, limit: '20' }),
     fetch('/api/settings').then((r) => r.json()).catch(() => ({ settings: {} })),
-    api('outcomes').catch(() => []),
+    api('outcomes', { project: projectId }).catch(() => []),
   ]);
 
   const p = projects.find((x) => String(x.projectId) === String(projectId));
