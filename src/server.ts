@@ -8,6 +8,8 @@ import { getAuditItems, getFindings, getRecommendations, updateRecommendationSta
 import type { AuditKind, AuditStatus, Filter } from './types.ts';
 import { generateWeeklyReport } from './report.ts';
 import { evaluateRecommendations } from './track.ts';
+import { getCuratedCatalog } from './catalog.ts';
+import { discoverGitHubCandidates, loadDiscoveredCandidates } from './discover.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -110,6 +112,8 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       const items = all.filter((r) => r.acceptedAt != null || r.status !== 'open');
       return { items };
     },
+    '/api/catalog': () => ({ catalog: getCuratedCatalog() }),
+    '/api/candidates': () => ({ candidates: loadDiscoveredCandidates(process.env.AGENTLENS_SOURCE_HOME || homedir()) }),
   };
 
   const server = createServer((req, res) => {
@@ -199,6 +203,35 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
             }));
           } catch (e) {
             send(res, 500, 'application/json', JSON.stringify({ error: (e as Error).message }));
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/discover') {
+        let body = '';
+        req.on('data', (c) => { body += c; });
+        req.on('end', async () => {
+          let opts: any = {};
+          try {
+            if (body.trim()) opts = JSON.parse(body);
+          } catch {}
+          try {
+            const resData = await discoverGitHubCandidates({
+              query: opts.query,
+              token: opts.token,
+              limit: opts.limit,
+              home: process.env.AGENTLENS_SOURCE_HOME || homedir(),
+            });
+            send(res, 200, 'application/json', JSON.stringify({
+              ok: true,
+              candidates: resData.candidates,
+              count: resData.candidates.length,
+              source: resData.source,
+              rateLimitRemaining: resData.rateLimitRemaining,
+            }));
+          } catch (e) {
+            send(res, 400, 'application/json', JSON.stringify({ error: (e as Error).message }));
           }
         });
         return;

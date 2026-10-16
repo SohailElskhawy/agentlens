@@ -15,6 +15,8 @@ import { runAudit } from './audit/runner.ts';
 import { checkWeeklyReportSchedule } from './report-scheduler.ts';
 import { generateWeeklyReport } from './report.ts';
 import { evaluateRecommendations } from './track.ts';
+import { getCuratedCatalog } from './catalog.ts';
+import { discoverGitHubCandidates } from './discover.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -34,6 +36,8 @@ const HELP = `Usage: agentlens <command>
   report              generate and display weekly usage report (--week, --html, --json)
   track               show improvement tracking for accepted recommendations
   accept <id>         accept a recommendation and begin 14-day improvement tracking
+  catalog             browse curated AI tools, MCPs, and skills (--json, --rule <rule>)
+  discover            opt-in discovery of AI agent tools from GitHub (--query, --dry-run, --json)
   statusline          process Claude Code statusline stdin, spool quota, and print status
   install-statusline  show configuration instructions for Claude Code statusline
   install-service     write a systemd user unit so serve starts at login (you enable it)
@@ -389,6 +393,87 @@ const commands: Record<string, () => unknown> = {
     }
     evaluateRecommendations(db);
     console.log(`Accepted recommendation '${id}'. Improvement tracking initialized for next 14 days.`);
+  },
+  catalog: () => {
+    let jsonMode = false;
+    let ruleFilter: string | undefined;
+    for (let i = 3; i < process.argv.length; i++) {
+      if (process.argv[i] === '--json') jsonMode = true;
+      else if (process.argv[i] === '--rule' && process.argv[i + 1]) {
+        ruleFilter = process.argv[i + 1];
+        i++;
+      }
+    }
+    const all = getCuratedCatalog();
+    const items = ruleFilter ? all.filter((i) => i.targetRules.includes(ruleFilter!)) : all;
+    if (jsonMode) {
+      console.log(JSON.stringify(items, null, 2));
+      return;
+    }
+    console.log(`\n==================================================`);
+    console.log(`agentlens Curated Tool & MCP Catalog`);
+    console.log(`==================================================\n`);
+    for (const it of items) {
+      console.log(`[${it.kind.toUpperCase()}] ${it.name} (~${it.estSavingsPct}% potential savings)`);
+      console.log(`  Target Rules: ${it.targetRules.join(', ')}`);
+      console.log(`  Description:  ${it.description}`);
+      console.log(`  Repository:   ${it.url}`);
+      if (it.installCommand) console.log(`  Install:      ${it.installCommand}`);
+      console.log('');
+    }
+    console.log(`==================================================\n`);
+  },
+  discover: async () => {
+    let query: string | undefined;
+    let dryRun = false;
+    let jsonMode = false;
+    let token: string | undefined;
+
+    for (let i = 3; i < process.argv.length; i++) {
+      if (process.argv[i] === '--dry-run') dryRun = true;
+      else if (process.argv[i] === '--json') jsonMode = true;
+      else if (process.argv[i] === '--query' && process.argv[i + 1]) {
+        query = process.argv[i + 1];
+        i++;
+      } else if (process.argv[i] === '--token' && process.argv[i + 1]) {
+        token = process.argv[i + 1];
+        i++;
+      }
+    }
+
+    try {
+      const res = await discoverGitHubCandidates({ query, dryRun, token });
+      if (jsonMode) {
+        console.log(JSON.stringify(res, null, 2));
+        return;
+      }
+      console.log(`\n==================================================`);
+      console.log(`agentlens Tool Discovery — ${res.source}`);
+      console.log(`==================================================\n`);
+      if (res.rateLimitRemaining != null) {
+        console.log(`GitHub API Rate Limit Remaining: ${res.rateLimitRemaining}\n`);
+      }
+      if (res.candidates.length === 0) {
+        console.log('No new candidates found for query.');
+      } else {
+        for (const c of res.candidates) {
+          console.log(`★ ${c.stars} | [${c.suggestedKind.toUpperCase()}] ${c.fullName}`);
+          console.log(`  Description: ${c.description || 'No description provided'}`);
+          console.log(`  URL:         ${c.url}`);
+          if (c.relevanceRule) console.log(`  Target Waste: ${c.relevanceRule}`);
+          console.log('');
+        }
+      }
+      if (dryRun) {
+        console.log('(Dry-run mode: candidates not saved to local store)');
+      } else {
+        console.log(`Saved ${res.candidates.length} candidates to discovery store.`);
+      }
+      console.log(`==================================================\n`);
+    } catch (e) {
+      console.error(`Discovery failed: ${(e as Error).message}`);
+      process.exit(1);
+    }
   },
   'install-statusline': () => {
     console.log(`Add this to ~/.claude/settings.json or project .claude/settings.json:
