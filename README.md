@@ -343,9 +343,11 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ Roadmap & Integrations
 
-Check out our [ROADMAP.md](ROADMAP.md) for upcoming features and architectural proposals, including in-flight guardrails via MCP, automated ignore generation, git branch cost attribution, terminal UI (`agentlens tui`), and expanded agent adapters.
+- **[ROADMAP.md](ROADMAP.md)** — Architectural proposals for in-flight guardrails via MCP, automated ignore generation, git branch cost attribution, and terminal UI (`agentlens tui`).
+- **[OMARCHY_PLUGIN.md](OMARCHY_PLUGIN.md)** — Complete specification for the native **Omarchy Quattro** desktop bar widget and slide-out details panel (`BarWidget.qml`, `Panel.qml`).
+- **[VSCODE_EXTENSION.md](VSCODE_EXTENSION.md)** — Full specification for the **VS Code & Cursor** extension (`vscode-agentlens`), including ambient status bar quota monitoring, workspace Fix Now tree view, and in-editor instruction trimmer diff preview.
 
 ---
 

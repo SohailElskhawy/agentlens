@@ -99,13 +99,15 @@ Every roadmap feature must strictly adhere to the project's foundational constra
   - Implemented with pure ANSI escape codes and terminal control sequences (zero external npm packages).
   - Live rolling token meters, 5h / 7d quota dials, active session turns, and real-time alerts.
 
-### 4.2 IDE Status Bar Integration (VS Code / Cursor)
-- **Concept**: Ambient status bar indicator in VS Code and Cursor.
-- **Implementation**:
-  - Tiny companion extension (or lightweight file watcher reading `<stateDir>/summary.json`).
-  - Displays live quota pills, token burn rate, and alert badges directly in the editor's footer bar.
+### 4.2 IDE Status Bar & Sidebar Extension (VS Code / Cursor)
+- **Concept**: Ambient status bar indicator, workspace Fix Now tree view, and in-editor instruction trimmer diff preview.
+- **Specification Document**: See **[VSCODE_EXTENSION.md](VSCODE_EXTENSION.md)** for complete extension architecture, virtual diff provider, and manifest layout.
 
-### 4.3 Shell Prompt Modules (`starship` / `p10k`)
+### 4.3 Omarchy Quattro Desktop Bar Widget & Details Panel
+- **Concept**: Native desktop shell integration for the Omarchy Quattro desktop environment.
+- **Specification Document**: See **[OMARCHY_PLUGIN.md](OMARCHY_PLUGIN.md)** for complete QML component implementations (`BarWidget.qml`, `Panel.qml`), manifest, and installation workflow.
+
+### 4.4 Shell Prompt Modules (`starship` / `p10k`)
 - **Concept**: Provide formatted output for custom prompt engines.
 - **CLI**: `agentlens statusline --format starship` or `--format raw`.
 - **Display**: e.g., `⚡ 82% 5h (2h 14m) | 14.2k tok/h` rendered directly in shell prompts.
