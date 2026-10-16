@@ -36,7 +36,7 @@ Before writing code, please keep these non-negotiable principles in mind:
 
 ### Clone & Install
 ```bash
-git clone https://github.com/sohail/agentlens.git
+git clone https://github.com/SohailElskhawy/agentlens.git
 cd agentlens
 
 # Install devDependencies (TypeScript for typechecking)

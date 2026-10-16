@@ -109,7 +109,7 @@ flowchart TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/sohail/agentlens.git
+git clone https://github.com/SohailElskhawy/agentlens.git
 cd agentlens
 
 # Install devDependencies (TypeScript for typechecking/tests)
