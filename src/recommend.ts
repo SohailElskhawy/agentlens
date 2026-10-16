@@ -1,4 +1,5 @@
 import { CONFIDENCE_WEIGHTS } from './analyze/constants.ts';
+import { findCatalogItemsForRule } from './catalog.ts';
 import type { ActionType, Finding, Recommendation } from './types.ts';
 
 export function generateRecommendations(findings: Finding[]): Recommendation[] {
@@ -120,6 +121,15 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         title = `Address ${f.rule.replace(/_/g, ' ')} workflow waste`;
         body = f.confidenceReason;
         break;
+    }
+
+    const matchingCatalog = findCatalogItemsForRule(f.rule);
+    if (matchingCatalog.length > 0) {
+      const topPick = matchingCatalog[0];
+      catalogRef = topPick.id;
+      if (!actionSnippet && topPick.installCommand) {
+        actionSnippet = topPick.installCommand;
+      }
     }
 
     const weight = CONFIDENCE_WEIGHTS[f.confidence] ?? 0.6;

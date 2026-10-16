@@ -1,0 +1,58 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { getCuratedCatalog, findCatalogItemsForRule } from '../src/catalog.ts';
+import { generateRecommendations } from '../src/recommend.ts';
+import type { Finding } from '../src/types.ts';
+
+test('getCuratedCatalog loads vetted tools covering key waste rules', () => {
+  const catalog = getCuratedCatalog();
+  assert.ok(catalog.length >= 8, `Expected at least 8 catalog entries, got ${catalog.length}`);
+
+  const rulesCovered = new Set(catalog.flatMap((item) => item.targetRules));
+  assert.ok(rulesCovered.has('hot_files'), 'Should cover hot_files');
+  assert.ok(rulesCovered.has('retry_loop'), 'Should cover retry_loop');
+  assert.ok(rulesCovered.has('context_growth'), 'Should cover context_growth');
+  assert.ok(rulesCovered.has('instruction_bloat'), 'Should cover instruction_bloat');
+
+  for (const item of catalog) {
+    assert.ok(item.id.length > 0, 'Item must have id');
+    assert.ok(item.name.length > 0, 'Item must have name');
+    assert.ok(['mcp', 'skill', 'plugin', 'tool'].includes(item.kind), `Invalid kind: ${item.kind}`);
+    assert.ok(item.url.startsWith('https://'), `Invalid url: ${item.url}`);
+    assert.ok(item.estSavingsPct > 0 && item.estSavingsPct <= 100, `Invalid estSavingsPct: ${item.estSavingsPct}`);
+    assert.equal(typeof item.safeToSuggest, 'boolean');
+  }
+});
+
+test('findCatalogItemsForRule returns matching tools for waste pattern', () => {
+  const hotFileTools = findCatalogItemsForRule('hot_files');
+  assert.ok(hotFileTools.length > 0);
+  assert.ok(hotFileTools.some((t) => t.id === 'serena' || t.id === 'repomix'));
+
+  const retryTools = findCatalogItemsForRule('retry_loop');
+  assert.ok(retryTools.length > 0);
+  assert.ok(retryTools.some((t) => t.id === 'context7' || t.id === 'agent-audit'));
+
+  const unknown = findCatalogItemsForRule('non_existent_rule');
+  assert.deepEqual(unknown, []);
+});
+
+test('generateRecommendations enriches recommendations with catalogRef', () => {
+  const finding: Finding = {
+    id: 'f_test_cat_1',
+    rule: 'hot_files',
+    projectId: 1,
+    sessionId: null,
+    evidence: { reads: 5, path: 'src/heavy.ts' },
+    confidence: 'high',
+    confidenceReason: 'Repeated file reads',
+    estTokensWeek: 45_000,
+    firstSeen: 1_700_000_000_000,
+    lastSeen: 1_700_000_000_000,
+  };
+
+  const recs = generateRecommendations([finding]);
+  assert.equal(recs.length, 1);
+  assert.ok(recs[0].catalogRef != null, 'Should assign catalogRef');
+  assert.ok(['serena', 'repomix'].includes(recs[0].catalogRef!), `Unexpected catalogRef: ${recs[0].catalogRef}`);
+});

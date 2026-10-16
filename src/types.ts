@@ -112,3 +112,20 @@ export interface RawConfigItem {
   tokens: number;
   details: Record<string, any>;
 }
+
+export type CatalogKind = 'mcp' | 'skill' | 'plugin' | 'tool';
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  kind: CatalogKind;
+  description: string;
+  url: string;
+  targetRules: string[];
+  estSavingsPct: number;
+  recommendedAction: ActionType;
+  installCommand?: string;
+  configSnippet?: string;
+  safeToSuggest: boolean;
+}
+

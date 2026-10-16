@@ -1,0 +1,147 @@
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { CatalogItem } from './types.ts';
+
+const FALLBACK_CATALOG: CatalogItem[] = [
+  {
+    id: 'serena',
+    name: 'Serena Semantic Code MCP',
+    kind: 'mcp',
+    description: 'Symbol-level semantic retrieval and targeted code manipulation to avoid re-reading entire project files.',
+    url: 'https://github.com/orai-sh/serena',
+    targetRules: ['hot_files', 'large_tool_output'],
+    estSavingsPct: 35,
+    recommendedAction: 'add',
+    installCommand: 'claude mcp add serena -- uvx --from git+https://github.com/orai-sh/serena.git serena-mcp',
+    safeToSuggest: true,
+  },
+  {
+    id: 'context7',
+    name: 'Context7 Documentation CLI',
+    kind: 'tool',
+    description: 'Fetches current, version-accurate documentation for libraries and SDKs directly into agent turns, stopping API trial-and-error retry loops.',
+    url: 'https://github.com/context7/cli',
+    targetRules: ['retry_loop', 'cache_miss'],
+    estSavingsPct: 25,
+    recommendedAction: 'add',
+    installCommand: 'npx ctx7@latest library <name> "<query>"',
+    safeToSuggest: true,
+  },
+  {
+    id: 'repomix',
+    name: 'Repomix Codebase Packer',
+    kind: 'tool',
+    description: 'Packs targeted repository subtrees with intelligent token counting, compression, and file-pattern filtering.',
+    url: 'https://github.com/yamadashy/repomix',
+    targetRules: ['large_tool_output', 'hot_files'],
+    estSavingsPct: 30,
+    recommendedAction: 'add',
+    installCommand: 'npx repomix --style xml --compress',
+    safeToSuggest: true,
+  },
+  {
+    id: 'mcp-tokens',
+    name: 'mcp-tokens Schema Inspector',
+    kind: 'tool',
+    description: 'Measures token overhead of active MCP server tool schemas to identify heavy, rarely used MCP tools consuming session context.',
+    url: 'https://github.com/sd2k/mcp-tokens',
+    targetRules: ['instruction_bloat', 'unused_config'],
+    estSavingsPct: 20,
+    recommendedAction: 'add',
+    installCommand: 'npx mcp-tokens ~/.claude/claude_desktop_config.json',
+    safeToSuggest: true,
+  },
+  {
+    id: 'superpowers',
+    name: 'Superpowers Agent Skills',
+    kind: 'plugin',
+    description: 'Structured agent workflow skills for TDD, brainstorming, plan execution, and code review that prevent runaway prompt context.',
+    url: 'https://github.com/obra/superpowers',
+    targetRules: ['repeated_prompt', 'context_growth'],
+    estSavingsPct: 25,
+    recommendedAction: 'add',
+    installCommand: 'git clone https://github.com/obra/superpowers.git ~/.gemini/config/plugins/superpowers',
+    safeToSuggest: true,
+  },
+  {
+    id: 'ccusage',
+    name: 'ccusage Quota & Usage Tracker',
+    kind: 'tool',
+    description: 'Lightweight CLI tool for tracking Claude Code daily and monthly token limits and costs with zero configuration.',
+    url: 'https://github.com/ccusage/ccusage',
+    targetRules: ['quota_pressure'],
+    estSavingsPct: 15,
+    recommendedAction: 'add',
+    installCommand: 'npx ccusage@latest',
+    safeToSuggest: true,
+  },
+  {
+    id: 'agent-audit',
+    name: 'agent-audit Workflow Debugger',
+    kind: 'tool',
+    description: 'Inspects agent tool failure sequences and redundant operations to isolate failing command loops.',
+    url: 'https://github.com/Back-Road-Creative/agent-audit',
+    targetRules: ['retry_loop', 'unused_config'],
+    estSavingsPct: 20,
+    recommendedAction: 'add',
+    installCommand: 'npx @back-road-creative/agent-audit',
+    safeToSuggest: true,
+  },
+  {
+    id: 'tokenomics',
+    name: 'Tokenomics Model Optimizer',
+    kind: 'tool',
+    description: 'Calculates per-task token expenditure and recommends lightweight model tiers for routine single-turn queries.',
+    url: 'https://github.com/galando/tokenomics',
+    targetRules: ['model_fit', 'quota_pressure'],
+    estSavingsPct: 40,
+    recommendedAction: 'add',
+    installCommand: 'npx tokenomics analyze',
+    safeToSuggest: true,
+  },
+  {
+    id: 'traceroost',
+    name: 'TraceRoost Subagent Observer',
+    kind: 'tool',
+    description: 'Monitors multi-agent coordination, subagent spawn chains, and cross-agent context handoffs.',
+    url: 'https://github.com/traceroost/core',
+    targetRules: ['subagent_share', 'handoff'],
+    estSavingsPct: 25,
+    recommendedAction: 'add',
+    installCommand: 'npx traceroost',
+    safeToSuggest: true,
+  },
+];
+
+let cachedCatalog: CatalogItem[] | null = null;
+
+export function getCuratedCatalog(): CatalogItem[] {
+  if (cachedCatalog) return cachedCatalog;
+
+  try {
+    const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+    const jsonPath = join(pkgRoot, 'catalog.json');
+    if (existsSync(jsonPath)) {
+      const raw = readFileSync(jsonPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        cachedCatalog = parsed;
+        return cachedCatalog;
+      }
+    }
+  } catch {}
+
+  cachedCatalog = FALLBACK_CATALOG;
+  return cachedCatalog;
+}
+
+export function findCatalogItemsForRule(rule: string): CatalogItem[] {
+  const catalog = getCuratedCatalog();
+  return catalog.filter((item) => item.targetRules.includes(rule));
+}
+
+export function getCatalogItem(id: string): CatalogItem | undefined {
+  const catalog = getCuratedCatalog();
+  return catalog.find((item) => item.id === id);
+}

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { DB } from './db.ts';
 import { costOf } from './pricing.ts';
+import { findCatalogItemsForRule, getCuratedCatalog } from './catalog.ts';
 
 const HOME = process.env.AGENTLENS_SOURCE_HOME || process.env.AGENTLENS_HOME || homedir();
 
@@ -56,6 +57,13 @@ export interface WeeklyReportData {
     action: string;
     actionSnippet?: string;
     estSavingsTokens: number;
+  }>;
+  toolPicks?: Array<{
+    name: string;
+    kind: string;
+    description: string;
+    url: string;
+    installCommand?: string;
   }>;
 }
 
@@ -348,6 +356,51 @@ export function generateWeeklyReport(
     estSavingsTokens: r.estSavingsTokens || 0,
   }));
 
+  // 5. Dynamic Tool Picks matching current week's waste
+  const pickedToolIds = new Set<string>();
+  const toolPicks: Array<{
+    name: string;
+    kind: string;
+    description: string;
+    url: string;
+    installCommand?: string;
+  }> = [];
+
+  for (const w of topWastePatterns) {
+    const items = findCatalogItemsForRule(w.rule);
+    for (const it of items) {
+      if (!pickedToolIds.has(it.id)) {
+        pickedToolIds.add(it.id);
+        toolPicks.push({
+          name: it.name,
+          kind: it.kind,
+          description: it.description,
+          url: it.url,
+          installCommand: it.installCommand,
+        });
+      }
+      if (toolPicks.length >= 3) break;
+    }
+    if (toolPicks.length >= 3) break;
+  }
+
+  // Backfill with general best-practice picks if fewer than 2
+  if (toolPicks.length < 2) {
+    for (const it of getCuratedCatalog()) {
+      if (!pickedToolIds.has(it.id)) {
+        pickedToolIds.add(it.id);
+        toolPicks.push({
+          name: it.name,
+          kind: it.kind,
+          description: it.description,
+          url: it.url,
+          installCommand: it.installCommand,
+        });
+      }
+      if (toolPicks.length >= 2) break;
+    }
+  }
+
   const data: WeeklyReportData = {
     week: bounds.week,
     generatedAt: Date.now(),
@@ -377,6 +430,7 @@ export function generateWeeklyReport(
       regressed: recCounts['regressed'] || 0,
     },
     topActions,
+    toolPicks,
   };
 
   const markdown = renderMarkdown(data);
@@ -484,8 +538,15 @@ function renderMarkdown(d: WeeklyReportData): string {
 
   // Section 5
   lines.push(`## 5. Tool Picks & Optimizations`);
-  lines.push(`- **Fast In-Process Compaction:** Port hot context into skills or rules to avoid re-sending large repetitive files.`);
-  lines.push(`- **Targeted Model Selection:** Reserve flagship Opus/Sonnet 3.5 models for planning and architecture; use lighter models for small single-turn edits.`);
+  if (d.toolPicks && d.toolPicks.length > 0) {
+    for (const p of d.toolPicks) {
+      lines.push(`- **${p.name}** (${p.kind.toUpperCase()}): ${p.description}`);
+      if (p.installCommand) lines.push(`  - Run: \`${p.installCommand}\``);
+    }
+  } else {
+    lines.push(`- **Fast In-Process Compaction:** Port hot context into skills or rules to avoid re-sending large repetitive files.`);
+    lines.push(`- **Targeted Model Selection:** Reserve flagship Opus/Sonnet 3.5 models for planning and architecture; use lighter models for small single-turn edits.`);
+  }
   lines.push('');
 
   // Section 6
@@ -665,10 +726,16 @@ function renderHtml(d: WeeklyReportData, md: string): string {
 
   <h2>5. Tool Picks & Optimizations</h2>
   <div class="card">
-    <ul>
-      <li><strong>Fast In-Process Compaction:</strong> Port hot context into skills or rules to avoid re-sending large repetitive files.</li>
-      <li><strong>Targeted Model Selection:</strong> Reserve flagship Opus/Sonnet 3.5 models for planning and architecture; use lighter models for small single-turn edits.</li>
-    </ul>
+    ${d.toolPicks && d.toolPicks.length > 0 ? `
+      <ul>
+        ${d.toolPicks.map((p) => `<li><strong><a href="${p.url}" target="_blank">${p.name}</a></strong> (${p.kind.toUpperCase()}): ${p.description} ${p.installCommand ? `<br><code>${p.installCommand}</code>` : ''}</li>`).join('')}
+      </ul>
+    ` : `
+      <ul>
+        <li><strong>Fast In-Process Compaction:</strong> Port hot context into skills or rules to avoid re-sending large repetitive files.</li>
+        <li><strong>Targeted Model Selection:</strong> Reserve flagship Opus/Sonnet 3.5 models for planning and architecture; use lighter models for small single-turn edits.</li>
+      </ul>
+    `}
   </div>
 
   <h2>6. Top Three Actions for Next Week</h2>
