@@ -18,10 +18,29 @@
     "workflow-optimizer",
     "local-first"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sohail/agentlens.git"
+  },
+  "files": [
+    "bin",
+    "src",
+    "web",
+    "assets",
+    "catalog.json",
+    "catalog.yaml",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "test": "node --no-warnings=ExperimentalWarning --test \"test/**/*.test.ts\"",
     "typecheck": "tsc",
     "start": "node --no-warnings=ExperimentalWarning src/cli.ts serve",
+    "status": "node --no-warnings=ExperimentalWarning src/cli.ts status",
+    "audit": "node --no-warnings=ExperimentalWarning src/cli.ts audit",
+    "report": "node --no-warnings=ExperimentalWarning src/cli.ts report",
+    "track": "node --no-warnings=ExperimentalWarning src/cli.ts track",
+    "catalog": "node --no-warnings=ExperimentalWarning src/cli.ts catalog",
     "update-prices": "node scripts/update-prices.ts"
   },
   "devDependencies": { "typescript": "5.9.3", "@types/node": "24.10.1" }

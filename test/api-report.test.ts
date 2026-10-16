@@ -62,6 +62,8 @@ test('Reports and Tracking API endpoints work correctly', async () => {
     assert.equal(repRes.status, 200);
     const repData = (await repRes.json()) as any;
     assert.equal(repData.data.week, '2026-W42');
+    assert.ok(repData.data.summary != null, 'Report data must include summary');
+    assert.equal(typeof repData.data.summary.totalTokens, 'number');
     assert.ok(repData.markdown.includes('# Custom Historical Report Marker'));
     assert.ok(repData.html.length > 0);
 

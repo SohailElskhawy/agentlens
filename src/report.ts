@@ -147,6 +147,7 @@ export function generateWeeklyReport(
   html: string;
   filePathMd: string;
   filePathHtml: string;
+  filePathJson: string;
 } {
   const bounds = getIsoWeekBounds(weekStr);
   const reportsDir = join(home ?? HOME, '.local/share/agentlens/reports');
@@ -438,15 +439,19 @@ export function generateWeeklyReport(
 
   const filePathMd = join(reportsDir, `${bounds.week}.md`);
   const filePathHtml = join(reportsDir, `${bounds.week}.html`);
+  const filePathJson = join(reportsDir, `${bounds.week}.json`);
 
   const tmpMd = `${filePathMd}.tmp.${Date.now()}`;
   const tmpHtml = `${filePathHtml}.tmp.${Date.now()}`;
+  const tmpJson = `${filePathJson}.tmp.${Date.now()}`;
   writeFileSync(tmpMd, markdown, 'utf-8');
   renameSync(tmpMd, filePathMd);
   writeFileSync(tmpHtml, html, 'utf-8');
   renameSync(tmpHtml, filePathHtml);
+  writeFileSync(tmpJson, JSON.stringify(data, null, 2), 'utf-8');
+  renameSync(tmpJson, filePathJson);
 
-  return { data, markdown, html, filePathMd, filePathHtml };
+  return { data, markdown, html, filePathMd, filePathHtml, filePathJson };
 }
 
 function fmtTok(n: number): string {

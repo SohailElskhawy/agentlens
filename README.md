@@ -4,6 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![Privacy First](https://img.shields.io/badge/privacy-local--first-orange.svg)](#privacy--security-guarantees)
+[![Tests Passing](https://img.shields.io/badge/tests-119%20passing-success.svg)](test/)
 
 **agentlens** is a lightweight, local-first Linux usage and workflow optimizer for AI coding agents:
 - **Claude Code** (Pro)
@@ -13,18 +14,44 @@
 
 It monitors how you use AI coding agents to **save tokens, avoid hitting subscription usage limits, and eliminate repetitive agent workflows** — globally and per project.
 
+![agentlens Overview Dashboard](assets/screenshots/overview.png)
+
 ---
 
-## ⚡ Core Capabilities
+## ⚡ Key Capabilities
 
-1. **Unified Usage Dashboard:** Historical and live token consumption, session replays, model tier breakdowns, per-project costs, and active quotas.
-2. **Quota Guard & Statusline:** Live 5-hour and 7-day rate-limit tracking for Claude Code (< 10ms latency) and Codex with reset countdowns and limit warnings.
-3. **Workflow Waste Detectors:** 10 deterministic analyzers that detect retry loops, repetitive file reads, runaway context growth, idle cache misses, large tool dumps, and model mismatch.
-4. **Configuration Audit:** Scans global and project instructions (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`), MCP servers, skills, and plugins. Calculates fixed session token overhead and detects unused (30d), duplicate, or conflicting configurations.
-5. **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked, copyable actions enriched with vetted open-source tools from `catalog.yaml`.
-6. **Automated Weekly Usage Reports:** Generates comprehensive Monday reports in GitHub-flavored Markdown and standalone dark/light HTML (`~/.local/share/agentlens/reports/`), with desktop notifications.
-7. **Improvement Tracking with Quality Guardrails:** Tracks accepted recommendations across 14-day before/after windows, verifying real token savings while ensuring error rates and interaction turns don't regress.
-8. **Opt-In Tool Discovery:** Searches GitHub for relevant agent tools and MCPs using generic search queries without transmitting private code or prompts.
+* **Unified Usage Dashboard:** Historical and continuous token consumption, session replays, model tier breakdowns, per-project costs, and active quotas.
+* **Quota Guard & Statusline:** Live 5-hour and 7-day rate-limit tracking for Claude Code (< 10ms latency) and Codex with reset countdowns and limit warnings.
+* **Workflow Waste Detectors:** 10 deterministic analyzers that detect retry loops, repetitive file reads, runaway context growth, idle cache misses, large tool dumps, and model mismatch.
+* **Configuration Audit:** Scans global and project instructions (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`), MCP servers, skills, and plugins. Calculates fixed session token overhead and detects unused (30d), duplicate, or conflicting configurations.
+* **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked, copyable actions enriched with vetted open-source tools from `catalog.yaml`.
+* **Automated Weekly Usage Reports:** Generates comprehensive Monday reports in GitHub-flavored Markdown and standalone dark/light HTML (`~/.local/share/agentlens/reports/`), with desktop notifications.
+* **Improvement Tracking with Quality Guardrails:** Tracks accepted recommendations across 14-day before/after windows, verifying real token savings while ensuring error rates and interaction turns don't regress.
+* **Opt-In Tool Discovery:** Searches GitHub for relevant agent tools and MCPs using generic search queries without transmitting private code or prompts.
+
+---
+
+## 📸 Visual Tour
+
+### 1. Recommendations & Improvement Tracking
+Synthesizes findings into actionable recommendations with copyable snippets. Accepts recommendations and tracks 14-day before/after token deltas while enforcing error-rate guardrails.
+
+![Workflow Recommendations](assets/screenshots/recommendations.png)
+
+### 2. Configuration Audit
+Calculates fixed instruction token tax per session, audits 30-day usage of MCP tools and skills, and flags duplicate configurations across agents.
+
+![Configuration Audit](assets/screenshots/audit.png)
+
+### 3. Automated Weekly Usage Reports
+Comprehensive weekly executive summary: week-over-week trends, quota near-misses, top wasting patterns, and top 3 priorities for next week.
+
+![Weekly Usage Reports](assets/screenshots/reports.png)
+
+### 4. Curated Catalog & Privacy-Safe Tool Discovery
+Browse vetted tools mapped to token-waste rules (Serena, Repomix, Context7, ccusage), or discover new tools from GitHub using privacy-safe generic queries.
+
+![Tool Catalog and Discovery](assets/screenshots/catalog.png)
 
 ---
 
@@ -79,14 +106,16 @@ flowchart TD
 - Zero runtime npm dependencies required
 
 ### 2. Installation & Running
+
 ```bash
 # Clone the repository
-git clone https://github.com/sohail/agentlens.git && cd agentlens
+git clone https://github.com/sohail/agentlens.git
+cd agentlens
 
-# Install dev dependencies (TypeScript compiler for test suite)
+# Install devDependencies (TypeScript for typechecking/tests)
 npm install
 
-# Perform an initial one-shot backfill from agent logs
+# Perform an initial one-shot backfill from your agent logs
 ./bin/agentlens ingest
 
 # Start the continuous watcher and dashboard
@@ -95,19 +124,34 @@ npm install
 
 Open **http://127.0.0.1:4711** in your browser.
 
-### 3. Background Daemon (Systemd)
-To keep agentlens continuously running in the background from user login:
+### 3. Optional: Global CLI Install
+To make `agentlens` available anywhere in your terminal:
 ```bash
-./bin/agentlens install-service
-systemctl --user daemon-reload && systemctl --user enable --now agentlens
+npm link
+# Or install globally from checkout:
+npm install -g .
 ```
 
-### 4. Claude Code Live Statusline
-Configure Claude Code to display real-time token usage and quota status in your prompt bar:
+### 4. Background Service (Systemd)
+To keep agentlens continuously running in the background on user login:
 ```bash
-./bin/agentlens install-statusline
+agentlens install-service
+systemctl --user daemon-reload
+systemctl --user enable --now agentlens
 ```
-Add the snippet to `~/.claude/settings.json` or your project's `.claude/settings.json`:
+
+To restart or stop:
+```bash
+systemctl --user restart agentlens
+systemctl --user stop agentlens
+```
+
+### 5. Claude Code Live Statusline
+Configure Claude Code to display real-time token usage and quota status in your prompt bar (< 10ms latency):
+```bash
+agentlens install-statusline
+```
+Add this snippet to `~/.claude/settings.json`:
 ```json
 {
   "statusLine": {
@@ -115,7 +159,6 @@ Add the snippet to `~/.claude/settings.json` or your project's `.claude/settings
   }
 }
 ```
-*Latency is < 10ms because statusline reads from memory-mapped state rather than querying SQLite.*
 
 ---
 
@@ -184,7 +227,7 @@ agentlens strictly distinguishes three distinct metrics to avoid confusion:
 ## 🧪 Testing & Verification
 
 ```bash
-# Run test suite (115 unit & integration tests)
+# Run test suite (119 unit & integration tests)
 npm test
 
 # Run TypeScript typecheck
@@ -196,6 +239,16 @@ node --check web/app.js
 # Update bundled LiteLLM price snapshot (dev only)
 npm run update-prices
 ```
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) to learn about our architecture, coding guidelines, and PR workflow.
+
+1. Fork the repo and create your branch from `master`.
+2. Ensure `npm test && npm run typecheck && node --check web/app.js` passes.
+3. Submit a Pull Request!
 
 ---
 

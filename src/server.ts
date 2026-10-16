@@ -211,6 +211,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
               week: rep.data.week,
               filePathMd: rep.filePathMd,
               filePathHtml: rep.filePathHtml,
+              filePathJson: rep.filePathJson,
             }));
           } catch (e) {
             send(res, 500, 'application/json', JSON.stringify({ error: (e as Error).message }));
@@ -266,12 +267,16 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
             const reportsDir = join(home, '.local/share/agentlens/reports');
             const filePathMd = join(reportsDir, `${week}.md`);
             const filePathHtml = join(reportsDir, `${week}.html`);
-            if (existsSync(filePathMd) && existsSync(filePathHtml)) {
-              return send(res, 200, 'application/json', JSON.stringify({
-                data: { week },
-                markdown: readFileSync(filePathMd, 'utf8'),
-                html: readFileSync(filePathHtml, 'utf8'),
-              }));
+            const filePathJson = join(reportsDir, `${week}.json`);
+            if (existsSync(filePathJson) && existsSync(filePathMd) && existsSync(filePathHtml)) {
+              try {
+                const data = JSON.parse(readFileSync(filePathJson, 'utf8'));
+                return send(res, 200, 'application/json', JSON.stringify({
+                  data,
+                  markdown: readFileSync(filePathMd, 'utf8'),
+                  html: readFileSync(filePathHtml, 'utf8'),
+                }));
+              } catch {}
             }
             const rep = generateWeeklyReport(db, week, home);
             return send(res, 200, 'application/json', JSON.stringify({

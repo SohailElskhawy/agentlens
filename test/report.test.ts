@@ -126,7 +126,9 @@ test('generateWeeklyReport produces data, Markdown, and HTML with all 6 sections
     // Files written to disk
     assert.ok(existsSync(report.filePathMd));
     assert.ok(existsSync(report.filePathHtml));
+    assert.ok(existsSync(report.filePathJson));
     assert.equal(readFileSync(report.filePathMd, 'utf-8'), report.markdown);
+    assert.deepEqual(JSON.parse(readFileSync(report.filePathJson, 'utf-8')), report.data);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

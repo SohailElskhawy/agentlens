@@ -521,28 +521,42 @@ async function reportsPage() {
     };
   }
 
-  const d = reportDetail.data;
+  const d = reportDetail.data || {};
+  const s = d.summary || {
+    totalTokens: 0,
+    tokensDeltaPct: 0,
+    totalCost: 0,
+    costDeltaPct: 0,
+    activeSessions: 0,
+    sessionsDeltaPct: 0,
+  };
+  const q = d.quotaInsights || {
+    fiveHourPeakPct: 0,
+    limitHits: 0,
+  };
+  const weekLabel = d.week || selectedWeek || 'Current';
+  const dateRange = (d.startDate && d.endDate) ? ` (${esc(d.startDate)} to ${esc(d.endDate)})` : '';
   const tiles = `
     <div class="tiles" style="margin-bottom:20px">
       <div class="tile">
         <div class="label">Tokens (measured)</div>
-        <div class="value">${fmtTok(d.summary.totalTokens)}</div>
-        <div class="note">${fmtDelta(d.summary.tokensDeltaPct)} vs prev week</div>
+        <div class="value">${fmtTok(s.totalTokens)}</div>
+        <div class="note">${fmtDelta(s.tokensDeltaPct)} vs prev week</div>
       </div>
       <div class="tile">
         <div class="label">API Cost (estimated)</div>
-        <div class="value">${fmtUsd(d.summary.totalCost)}</div>
-        <div class="note">${fmtDelta(d.summary.costDeltaPct)} vs prev week</div>
+        <div class="value">${fmtUsd(s.totalCost)}</div>
+        <div class="note">${fmtDelta(s.costDeltaPct)} vs prev week</div>
       </div>
       <div class="tile">
         <div class="label">Active Sessions</div>
-        <div class="value">${d.summary.activeSessions}</div>
-        <div class="note">${fmtDelta(d.summary.sessionsDeltaPct)} vs prev week</div>
+        <div class="value">${s.activeSessions}</div>
+        <div class="note">${fmtDelta(s.sessionsDeltaPct)} vs prev week</div>
       </div>
       <div class="tile">
         <div class="label">5h Window Peak Quota</div>
-        <div class="value">${d.quotaInsights.fiveHourPeakPct}%</div>
-        <div class="note">${d.quotaInsights.limitHits} limit hits recorded</div>
+        <div class="value">${q.fiveHourPeakPct}%</div>
+        <div class="note">${q.limitHits} limit hits recorded</div>
       </div>
     </div>
   `;
@@ -556,17 +570,17 @@ async function reportsPage() {
       ${tiles}
       <div class="report-viewer">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <h2 style="margin:0">Report: ${esc(d.week)} (${esc(d.startDate)} to ${esc(d.endDate)})</h2>
+          <h2 style="margin:0">Report: ${esc(weekLabel)}${dateRange}</h2>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button id="btn-toggle-mode" class="btn btn-sm btn-outline">${mode === 'preview' ? 'View Markdown' : 'View Rendered HTML'}</button>
             <button id="btn-copy-md" class="btn btn-sm btn-outline">Copy Markdown</button>
-            <a href="data:text/html;charset=utf-8,${encodeURIComponent(reportDetail.html)}" download="${esc(d.week)}.html" class="btn btn-sm btn-outline">Download HTML</a>
-            <a href="/api/reports/${encodeURIComponent(d.week)}" target="_blank" class="btn btn-sm btn-outline">View Raw JSON</a>
+            <a href="data:text/html;charset=utf-8,${encodeURIComponent(reportDetail.html || '')}" download="${esc(weekLabel)}.html" class="btn btn-sm btn-outline">Download HTML</a>
+            <a href="/api/reports/${encodeURIComponent(weekLabel)}" target="_blank" class="btn btn-sm btn-outline">View Raw JSON</a>
           </div>
         </div>
         ${mode === 'preview'
-          ? `<iframe srcdoc="${esc(reportDetail.html)}" style="width:100%;min-height:600px;border:1px solid var(--border);border-radius:6px;background:var(--bg)"></iframe>`
-          : `<pre><code>${esc(reportDetail.markdown)}</code></pre>`
+          ? `<iframe srcdoc="${esc(reportDetail.html || '')}" style="width:100%;min-height:600px;border:1px solid var(--border);border-radius:6px;background:var(--bg)"></iframe>`
+          : `<pre><code>${esc(reportDetail.markdown || '')}</code></pre>`
         }
       </div>
     `,
