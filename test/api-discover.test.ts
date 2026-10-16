@@ -94,6 +94,15 @@ test('Catalog and Discovery API endpoints work correctly', async () => {
       assert.equal(discData.ok, true);
       assert.equal(discData.candidates.length, 1);
       assert.equal(discData.candidates[0].name, 'live-tool');
+
+      // 5. POST /api/discover with payload > 16 KB returns 413
+      const largePayload = JSON.stringify({ query: 'mcp', padding: 'x'.repeat(20_000) });
+      const largeRes = await fetch(`${base}/api/discover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: largePayload,
+      });
+      assert.equal(largeRes.status, 413);
     } finally {
       globalThis.fetch = origFetch;
     }

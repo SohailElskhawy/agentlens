@@ -14,12 +14,16 @@ import {
 test('validateSearchQuery blocks queries with potential private file paths or sensitive tokens', () => {
   assert.equal(validateSearchQuery('mcp server postgres'), true);
   assert.equal(validateSearchQuery('claude code skills'), true);
+  assert.equal(validateSearchQuery('token tracker'), true);
+  assert.equal(validateSearchQuery('token optimizer'), true);
 
-  // Private path / home leak
+  // Private path / credential leak
   assert.equal(validateSearchQuery('/home/user/project'), false);
   assert.equal(validateSearchQuery('C:\\Users\\dev'), false);
   assert.equal(validateSearchQuery('.env'), false);
   assert.equal(validateSearchQuery('bearer secret_token_123'), false);
+  assert.equal(validateSearchQuery('sk-proj-1234567890abcdef'), false);
+  assert.equal(validateSearchQuery('api_key 123'), false);
   assert.equal(validateSearchQuery('a'.repeat(80)), false); // Length > 60 cap
 });
 
@@ -103,6 +107,61 @@ test('discoverGitHubCandidates handles rate limit 403 gracefully without throwin
       },
       /rate limit/i
     );
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('discoverGitHubCandidates deduplicates against curated catalog entries', async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          total_count: 2,
+          items: [
+            {
+              id: 1,
+              name: 'serena',
+              full_name: 'orai-sh/serena',
+              description: 'Already in curated catalog',
+              html_url: 'https://github.com/orai-sh/serena',
+              stargazers_count: 500,
+              topics: ['mcp'],
+            },
+            {
+              id: 2,
+              name: 'brand-new-tool',
+              full_name: 'acme/brand-new-tool',
+              description: 'A new unvetted tool',
+              html_url: 'https://github.com/acme/brand-new-tool',
+              stargazers_count: 100,
+              topics: ['mcp'],
+            },
+          ],
+        }),
+        { status: 200, headers: { 'x-ratelimit-remaining': '30' } }
+      );
+    }) as any;
+
+    const res = await discoverGitHubCandidates({ dryRun: true });
+    // serena is in catalog.json, so it must be filtered out! Only brand-new-tool remains
+    assert.equal(res.candidates.length, 1);
+    assert.equal(res.candidates[0].fullName, 'acme/brand-new-tool');
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('discoverGitHubCandidates handles non-string query safely without TypeError', async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () => {
+      return new Response(JSON.stringify({ total_count: 0, items: [] }), { status: 200 });
+    }) as any;
+
+    const res = await discoverGitHubCandidates({ query: 123 as any, dryRun: true });
+    assert.ok(Array.isArray(res.candidates));
   } finally {
     globalThis.fetch = origFetch;
   }

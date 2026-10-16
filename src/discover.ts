@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { getCuratedCatalog } from './catalog.ts';
 
 export interface DiscoveredCandidate {
   id: string; // e.g. "github:owner/repo"
@@ -28,7 +29,7 @@ export function validateSearchQuery(query: string): boolean {
   const trimmed = query.trim();
   if (trimmed.length === 0 || trimmed.length > 60) return false;
 
-  // Reject paths, tokens, URLs, environment files
+  // Reject paths, credentials, tokens, URLs, environment files
   const forbidden = [
     '/',
     '\\',
@@ -36,9 +37,11 @@ export function validateSearchQuery(query: string): boolean {
     'bearer',
     'ghp_',
     'github_pat_',
-    'token',
+    'sk-',
     'secret',
     'password',
+    'api_key',
+    'apikey',
     'http:',
     'https:',
   ];
@@ -70,7 +73,13 @@ function inferRelevanceRule(name: string, desc: string, topics: string[]): strin
 }
 
 export function getCandidatesFilePath(customHome?: string): string {
-  const home = customHome || process.env.AGENTLENS_SOURCE_HOME || process.env.AGENTLENS_HOME || homedir();
+  if (customHome) {
+    return join(customHome, '.local/share/agentlens/discovery_candidates.json');
+  }
+  if (process.env.AGENTLENS_DATA_DIR) {
+    return join(process.env.AGENTLENS_DATA_DIR, 'discovery_candidates.json');
+  }
+  const home = process.env.AGENTLENS_SOURCE_HOME || process.env.AGENTLENS_HOME || homedir();
   return join(home, '.local/share/agentlens/discovery_candidates.json');
 }
 
@@ -99,7 +108,7 @@ export async function discoverGitHubCandidates(options: DiscoverOptions = {}): P
   source: string;
   rateLimitRemaining?: number;
 }> {
-  const rawQuery = options.query?.trim() || 'modelcontextprotocol server';
+  const rawQuery = (typeof options.query === 'string' ? options.query.trim() : '') || 'modelcontextprotocol server';
   if (!validateSearchQuery(rawQuery)) {
     throw new Error(`Invalid or disallowed search query: "${rawQuery}". Query must be generic alphanumeric keywords under 60 characters with no paths or tokens.`);
   }
@@ -134,24 +143,36 @@ export async function discoverGitHubCandidates(options: DiscoverOptions = {}): P
   const data = (await res.json()) as any;
   const items = Array.isArray(data.items) ? data.items : [];
 
-  const candidates: DiscoveredCandidate[] = items.map((it: any) => {
-    const name = it.name || '';
-    const desc = it.description || '';
-    const topics: string[] = Array.isArray(it.topics) ? it.topics : [];
+  const curated = getCuratedCatalog();
+  const curatedUrls = new Set(
+    curated.map((c) => c.url.trim().toLowerCase().replace(/\/+$/, ''))
+  );
 
-    return {
-      id: `github:${it.full_name || it.name}`,
-      name,
-      fullName: it.full_name || name,
-      description: desc,
-      url: it.html_url || `https://github.com/${it.full_name}`,
-      stars: it.stargazers_count || 0,
-      topics,
-      suggestedKind: classifyKind(name, desc, topics),
-      relevanceRule: inferRelevanceRule(name, desc, topics),
-      discoveredAt: Date.now(),
-    };
-  });
+  const candidates: DiscoveredCandidate[] = items
+    .map((it: any): DiscoveredCandidate => {
+      const name = it.name || '';
+      const desc = it.description || '';
+      const topics: string[] = Array.isArray(it.topics) ? it.topics : [];
+      const itemUrl = it.html_url || `https://github.com/${it.full_name || name}`;
+
+      return {
+        id: `github:${it.full_name || it.name}`,
+        name,
+        fullName: it.full_name || name,
+        description: desc,
+        url: itemUrl,
+        stars: it.stargazers_count || 0,
+        topics,
+        suggestedKind: classifyKind(name, desc, topics),
+        relevanceRule: inferRelevanceRule(name, desc, topics),
+        discoveredAt: Date.now(),
+      };
+    })
+    .filter((c: DiscoveredCandidate) => {
+      const normUrl = c.url.trim().toLowerCase().replace(/\/+$/, '');
+      const altUrl = `https://github.com/${c.fullName.toLowerCase()}`.replace(/\/+$/, '');
+      return !curatedUrls.has(normUrl) && !curatedUrls.has(altUrl);
+    });
 
   if (!options.dryRun && candidates.length > 0) {
     const existing = loadDiscoveredCandidates(options.home);

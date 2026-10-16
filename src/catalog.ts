@@ -116,6 +116,29 @@ const FALLBACK_CATALOG: CatalogItem[] = [
 
 let cachedCatalog: CatalogItem[] | null = null;
 
+export function isValidCatalogItem(it: any): it is CatalogItem {
+  return (
+    Boolean(it) &&
+    typeof it === 'object' &&
+    typeof it.id === 'string' &&
+    it.id.length > 0 &&
+    typeof it.name === 'string' &&
+    it.name.length > 0 &&
+    ['mcp', 'skill', 'plugin', 'tool'].includes(it.kind) &&
+    typeof it.description === 'string' &&
+    typeof it.url === 'string' &&
+    Array.isArray(it.targetRules) &&
+    typeof it.estSavingsPct === 'number' &&
+    typeof it.recommendedAction === 'string' &&
+    typeof it.installCommand === 'string' &&
+    typeof it.safeToSuggest === 'boolean'
+  );
+}
+
+export function _setCatalogCacheForTesting(items: CatalogItem[] | null): void {
+  cachedCatalog = items;
+}
+
 export function getCuratedCatalog(): CatalogItem[] {
   if (cachedCatalog) return cachedCatalog;
 
@@ -125,7 +148,7 @@ export function getCuratedCatalog(): CatalogItem[] {
     if (existsSync(jsonPath)) {
       const raw = readFileSync(jsonPath, 'utf8');
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isValidCatalogItem)) {
         cachedCatalog = parsed;
         return cachedCatalog;
       }
@@ -138,7 +161,7 @@ export function getCuratedCatalog(): CatalogItem[] {
 
 export function findCatalogItemsForRule(rule: string): CatalogItem[] {
   const catalog = getCuratedCatalog();
-  return catalog.filter((item) => item.targetRules.includes(rule));
+  return catalog.filter((item) => item.targetRules?.includes(rule) ?? false);
 }
 
 export function getCatalogItem(id: string): CatalogItem | undefined {

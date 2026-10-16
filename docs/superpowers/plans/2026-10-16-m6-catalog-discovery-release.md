@@ -249,18 +249,18 @@ git commit -m "feat: add catalog and discovery CLI commands and REST endpoints"
   - "Discover New Tools" button triggering `POST /api/discover` with loading indicator.
   - Clear notice explaining privacy preservation and opt-in nature.
 
-- [ ] **Step 1: Implement UI changes**
+- [x] **Step 1: Implement UI changes**
 
 1. In `web/index.html`: add `<a href="#/catalog">Catalog</a>` to `<nav>`.
 2. In `web/style.css`: add styles for catalog grid, candidate items, and discovery action bar.
 3. In `web/app.js`: implement `catalogPage()` route with tabs for "Curated Tools" and "Discovered Candidates".
 
-- [ ] **Step 2: Syntax and verification**
+- [x] **Step 2: Syntax and verification**
 
 1. Verify JS syntax: `node --check web/app.js`.
 2. Run full test suite: `npm test && npm run typecheck`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add web/index.html web/style.css web/app.js
@@ -276,10 +276,10 @@ git commit -m "feat: add Catalog and Tool Discovery page to web dashboard"
 - Modify: `README.md`
 - Modify: `package.json`
 
-- [ ] **Step 1: Create MIT License**
+- [x] **Step 1: Create MIT License**
   Create `LICENSE` with standard MIT terms (2026, agentlens authors).
 
-- [ ] **Step 2: Write comprehensive `README.md`**
+- [x] **Step 2: Write comprehensive `README.md`**
   Cover:
   - Title, badges, and high-level description.
   - Key capabilities (Token Tracking, Quota Guard, Workflow Findings, Config Audit, Weekly Reports, Tracked Improvements, Curated Catalog & Discovery).
@@ -291,7 +291,7 @@ git commit -m "feat: add Catalog and Tool Discovery page to web dashboard"
   - Systemd background service setup (`agentlens install-service`).
   - Privacy & Security guarantees (strictly local, read-only on agent files, SHA-256 hashes only, 127.0.0.1 loopback bind).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add LICENSE README.md package.json
@@ -302,10 +302,12 @@ git commit -m "docs: add MIT license, complete architecture documentation, and r
 
 ### Task 6: Milestone 6 Verification & Senior Code Review
 
-- [ ] **Step 1: End-to-end test and validation**
+- [x] **Step 1: End-to-end test and validation**
   Run full test suite across all 6 milestones:
   `npm test && npm run typecheck && node --check web/app.js`
 
-- [ ] **Step 2: Dispatch Senior Code Review subagent**
+- [x] **Step 2: Dispatch Senior Code Review subagent**
   Generate diff package and dispatch Senior Code Review subagent to verify Milestone 6 against spec and plan.
   Address all review findings before declaring final completion.
+  - Resolved 3 Important findings: candidate deduplication against curated catalog, catalog schema validation + defensive targetRules check, search query keyword refinement (`sk-`, allow `token`).
+  - Resolved 4 Minor findings: HTML report entity escaping (`escHtml`), 16KB payload cap on `/api/discover` and `/api/reports/generate`, candidate store path resolution (`AGENTLENS_DATA_DIR`), and non-string query safety.

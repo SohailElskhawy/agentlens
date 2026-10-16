@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getCuratedCatalog, findCatalogItemsForRule } from '../src/catalog.ts';
+import { getCuratedCatalog, findCatalogItemsForRule, isValidCatalogItem, _setCatalogCacheForTesting } from '../src/catalog.ts';
 import { generateRecommendations } from '../src/recommend.ts';
 import type { Finding } from '../src/types.ts';
 
@@ -35,6 +35,65 @@ test('findCatalogItemsForRule returns matching tools for waste pattern', () => {
 
   const unknown = findCatalogItemsForRule('non_existent_rule');
   assert.deepEqual(unknown, []);
+});
+
+test('findCatalogItemsForRule handles catalog items with missing targetRules gracefully without throwing', () => {
+  try {
+    _setCatalogCacheForTesting([
+      {
+        id: 'broken',
+        name: 'Broken Item',
+        kind: 'tool',
+        description: 'No target rules',
+        url: 'https://example.com',
+        targetRules: undefined as any,
+        estSavingsPct: 10,
+        recommendedAction: 'add',
+        installCommand: '',
+        safeToSuggest: true,
+      },
+    ]);
+    const matches = findCatalogItemsForRule('hot_files');
+    assert.deepEqual(matches, []);
+  } finally {
+    _setCatalogCacheForTesting(null);
+  }
+});
+
+test('isValidCatalogItem validates items strictly', () => {
+  assert.equal(isValidCatalogItem(null), false);
+  assert.equal(isValidCatalogItem(''), false);
+  assert.equal(isValidCatalogItem({ id: 'bad' }), false);
+  assert.equal(
+    isValidCatalogItem({
+      id: 'tool1',
+      name: 'Tool One',
+      kind: 'tool',
+      description: 'Desc',
+      url: 'https://github.com/org/repo',
+      targetRules: ['hot_files'],
+      estSavingsPct: 20,
+      recommendedAction: 'add',
+      installCommand: 'npm i',
+      safeToSuggest: true,
+    }),
+    true
+  );
+  assert.equal(
+    isValidCatalogItem({
+      id: 'tool1',
+      name: 'Tool One',
+      kind: 'invalid-kind',
+      description: 'Desc',
+      url: 'https://github.com/org/repo',
+      targetRules: ['hot_files'],
+      estSavingsPct: 20,
+      recommendedAction: 'add',
+      installCommand: 'npm i',
+      safeToSuggest: true,
+    }),
+    false
+  );
 });
 
 test('generateRecommendations enriches recommendations with catalogRef', () => {

@@ -138,10 +138,11 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
         let body = '';
         let tooLarge = false;
         req.on('data', (c) => {
+          if (tooLarge) return;
           body += c;
           if (body.length > 16384) {
             tooLarge = true;
-            req.destroy();
+            req.resume();
             send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
           }
         });
@@ -184,8 +185,18 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
 
       if (req.method === 'POST' && url.pathname === '/api/reports/generate') {
         let body = '';
-        req.on('data', (c) => { body += c; });
+        let tooLarge = false;
+        req.on('data', (c) => {
+          if (tooLarge) return;
+          body += c;
+          if (body.length > 16384) {
+            tooLarge = true;
+            req.resume();
+            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+          }
+        });
         req.on('end', () => {
+          if (tooLarge) return;
           let week: string | undefined;
           try {
             if (body.trim()) {
@@ -210,8 +221,18 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
 
       if (req.method === 'POST' && url.pathname === '/api/discover') {
         let body = '';
-        req.on('data', (c) => { body += c; });
+        let tooLarge = false;
+        req.on('data', (c) => {
+          if (tooLarge) return;
+          body += c;
+          if (body.length > 16384) {
+            tooLarge = true;
+            req.resume();
+            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+          }
+        });
         req.on('end', async () => {
+          if (tooLarge) return;
           let opts: any = {};
           try {
             if (body.trim()) opts = JSON.parse(body);

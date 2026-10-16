@@ -567,13 +567,23 @@ function renderMarkdown(d: WeeklyReportData): string {
   return lines.join('\n');
 }
 
+function escHtml(str: unknown): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function renderHtml(d: WeeklyReportData, md: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>agentlens Weekly Report: ${d.week}</title>
+  <title>agentlens Weekly Report: ${escHtml(d.week)}</title>
   <style>
     :root {
       --bg: #0e1117;
@@ -667,7 +677,7 @@ function renderHtml(d: WeeklyReportData, md: string): string {
 </head>
 <body>
   <h1>agentlens Weekly Usage Report</h1>
-  <p style="color: var(--text-dim);">Period: <strong>${d.startDate}</strong> to <strong>${d.endDate}</strong> (${d.week})</p>
+  <p style="color: var(--text-dim);">Period: <strong>${escHtml(d.startDate)}</strong> to <strong>${escHtml(d.endDate)}</strong> (${escHtml(d.week)})</p>
 
   <div class="grid">
     <div class="tile">
@@ -696,7 +706,7 @@ function renderHtml(d: WeeklyReportData, md: string): string {
   <table>
     <thead><tr><th>Agent</th><th>Tokens</th><th>Est. Cost</th><th>Sessions</th><th>WoW</th></tr></thead>
     <tbody>
-      ${d.byAgent.map((a) => `<tr><td><strong>${a.agent}</strong></td><td>${fmtTok(a.tokens)}</td><td>$${a.cost.toFixed(2)}</td><td>${a.sessions}</td><td>${fmtDelta(a.deltaPct)}</td></tr>`).join('')}
+      ${d.byAgent.map((a) => `<tr><td><strong>${escHtml(a.agent)}</strong></td><td>${fmtTok(a.tokens)}</td><td>$${a.cost.toFixed(2)}</td><td>${a.sessions}</td><td>${fmtDelta(a.deltaPct)}</td></tr>`).join('')}
     </tbody>
   </table>
 
@@ -705,7 +715,7 @@ function renderHtml(d: WeeklyReportData, md: string): string {
     <p>5-Hour Peak: <strong>${d.quotaInsights.fiveHourPeakPct}%</strong> · 7-Day Peak: <strong>${d.quotaInsights.sevenDayPeakPct}%</strong> · Limit Hits: <strong>${d.quotaInsights.limitHits}</strong></p>
     ${d.quotaInsights.topConsumers.length > 0 ? `
       <h4>Top Consumers in Window:</h4>
-      <ul>${d.quotaInsights.topConsumers.map((c) => `<li><code>${c.sessionId}</code> (${c.agent}) — ${fmtTok(c.tokens)} tokens</li>`).join('')}</ul>
+      <ul>${d.quotaInsights.topConsumers.map((c) => `<li><code>${escHtml(c.sessionId)}</code> (${escHtml(c.agent)}) — ${fmtTok(c.tokens)} tokens</li>`).join('')}</ul>
     ` : ''}
   </div>
 
@@ -714,7 +724,7 @@ function renderHtml(d: WeeklyReportData, md: string): string {
     <table>
       <thead><tr><th>Rule</th><th>Count</th><th>Est. Weekly Waste</th><th>Description</th></tr></thead>
       <tbody>
-        ${d.topWastePatterns.map((w) => `<tr><td><code>${w.rule}</code></td><td>${w.count}</td><td>~${fmtTok(w.estTokensWeek)}</td><td>${w.description}</td></tr>`).join('')}
+        ${d.topWastePatterns.map((w) => `<tr><td><code>${escHtml(w.rule)}</code></td><td>${w.count}</td><td>~${fmtTok(w.estTokensWeek)}</td><td>${escHtml(w.description)}</td></tr>`).join('')}
       </tbody>
     </table>
   ` : '<p>No token-wasting patterns detected this week.</p>'}
@@ -728,7 +738,7 @@ function renderHtml(d: WeeklyReportData, md: string): string {
   <div class="card">
     ${d.toolPicks && d.toolPicks.length > 0 ? `
       <ul>
-        ${d.toolPicks.map((p) => `<li><strong><a href="${p.url}" target="_blank">${p.name}</a></strong> (${p.kind.toUpperCase()}): ${p.description} ${p.installCommand ? `<br><code>${p.installCommand}</code>` : ''}</li>`).join('')}
+        ${d.toolPicks.map((p) => `<li><strong><a href="${escHtml(p.url)}" target="_blank" rel="noopener noreferrer">${escHtml(p.name)}</a></strong> (${escHtml(p.kind.toUpperCase())}): ${escHtml(p.description)} ${p.installCommand ? `<br><code>${escHtml(p.installCommand)}</code>` : ''}</li>`).join('')}
       </ul>
     ` : `
       <ul>
@@ -741,9 +751,9 @@ function renderHtml(d: WeeklyReportData, md: string): string {
   <h2>6. Top Three Actions for Next Week</h2>
   ${d.topActions.length > 0 ? d.topActions.map((act, i) => `
     <div class="card">
-      <h3>${i + 1}. ${act.title}</h3>
-      <p>Action: <code>${act.action}</code> ${act.estSavingsTokens > 0 ? `· Est. Savings: <strong>~${fmtTok(act.estSavingsTokens)} tokens/week</strong>` : ''}</p>
-      ${act.actionSnippet ? `<pre><code>${act.actionSnippet}</code></pre>` : ''}
+      <h3>${i + 1}. ${escHtml(act.title)}</h3>
+      <p>Action: <code>${escHtml(act.action)}</code> ${act.estSavingsTokens > 0 ? `· Est. Savings: <strong>~${fmtTok(act.estSavingsTokens)} tokens/week</strong>` : ''}</p>
+      ${act.actionSnippet ? `<pre><code>${escHtml(act.actionSnippet)}</code></pre>` : ''}
     </div>
   `).join('') : '<p>No pending high-priority actions. Check back next week!</p>'}
 </body>
