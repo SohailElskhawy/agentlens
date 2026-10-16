@@ -77,9 +77,25 @@ export function projects(db: DB, f: Filter) {
       group_concat(DISTINCT e.agent) AS agents
     ${FROM} JOIN projects p ON p.id = s.project_id WHERE 1 = 1${w.sql} GROUP BY s.project_id`).all(w.params) as Row[])
     .map((r) => [r.projectId, { ...r }]));
+
+  const settingsRows = db.prepare(`SELECT key, value FROM settings WHERE key LIKE 'budget_%'`).all() as Array<{ key: string; value: string }>;
+  const budgets = new Map<string, string>();
+  for (const s of settingsRows) budgets.set(s.key, s.value);
+
   return grouped(db, f, { projectId: 's.project_id' })
     .filter((g) => meta.has(g.projectId))
-    .map((g) => ({ ...meta.get(g.projectId), ...g }))
+    .map((g) => {
+      const budgetTokens = Number(budgets.get(`budget_tokens_${g.projectId}`)) || undefined;
+      const budgetCost = Number(budgets.get(`budget_cost_${g.projectId}`)) || undefined;
+      const budgetPct = budgetTokens ? Math.round((g.tokens / budgetTokens) * 100) : undefined;
+      return {
+        ...meta.get(g.projectId),
+        ...g,
+        budgetTokens,
+        budgetCost,
+        budgetPct,
+      } as Row;
+    })
     .sort((a, b) => b.tokens - a.tokens);
 }
 

@@ -97,6 +97,26 @@ const projectCols = [
   { label: 'Agents', get: (r) => (r.agents ?? '').split(',').filter(Boolean).map((a) => AGENTS[a] ?? a).join(', ') },
   { label: 'Sessions', num: true, get: (r) => r.sessions },
   ...tokCols,
+  {
+    label: 'Weekly Budget',
+    get: (r) => {
+      if (!r.budgetTokens) return '<span style="color:var(--text-muted)">—</span>';
+      const pct = r.budgetPct ?? Math.round((r.tokens / r.budgetTokens) * 100);
+      const color = pct >= 100 ? 'var(--danger)' : pct >= 80 ? 'var(--warn)' : 'var(--success)';
+      const clamped = Math.min(pct, 100);
+      return `
+        <div style="min-width:110px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+            <span style="font-weight:600;color:${color}">${pct}%</span>
+            <span style="color:var(--text-muted)">${fmtTok(r.tokens)} / ${fmtTok(r.budgetTokens)}</span>
+          </div>
+          <div style="width:100%;height:6px;background:var(--surface-subtle);border-radius:3px;overflow:hidden">
+            <div style="width:${clamped}%;height:100%;background:${color};border-radius:3px"></div>
+          </div>
+        </div>
+      `;
+    },
+  },
   { label: 'Last active', get: (r) => fmtTime(r.lastActive) },
 ];
 
@@ -462,6 +482,51 @@ async function projectPage(projectId) {
         ${tile('Last active', fmtTime(p.lastActive))}
       </section>
 
+      <!-- Weekly Budget Card -->
+      <div class="card" style="margin-top:var(--space-4)">
+        <div class="card-header" style="align-items:flex-start">
+          <div>
+            <h3 class="card-title">Weekly Token Budget</h3>
+            <span class="card-subtitle">Set a 7-day token and cost limit for this project</span>
+          </div>
+          <button id="btn-toggle-budget-form" class="btn btn-sm btn-outline">${p.budgetTokens ? 'Edit Budget' : 'Set Budget'}</button>
+        </div>
+        ${p.budgetTokens ? `
+          <div style="margin-top:12px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+              <div>
+                <span style="font-size:20px;font-weight:700;color:${p.budgetPct >= 100 ? 'var(--danger)' : p.budgetPct >= 80 ? 'var(--warn)' : 'var(--success)'}">${p.budgetPct}%</span>
+                <span style="color:var(--text-muted);font-size:13px;margin-left:6px">(${fmtTok(p.tokens)} used of ${fmtTok(p.budgetTokens)} budget)</span>
+              </div>
+              <div style="font-size:12px;color:var(--text-muted)">
+                ${p.budgetCost ? `Budgeted cost: $${p.budgetCost.toFixed(2)} · ` : ''}
+                ${p.budgetPct >= 100 ? '<span class="badge" style="background:var(--danger-bg);color:var(--danger)">Budget Exceeded</span>' : p.budgetPct >= 80 ? '<span class="badge" style="background:var(--warn-bg);color:var(--warn)">Warning &gt;80%</span>' : '<span class="badge" style="background:var(--success-bg);color:var(--success)">Within Budget</span>'}
+              </div>
+            </div>
+            <div style="width:100%;height:10px;background:var(--surface-subtle);border-radius:5px;overflow:hidden">
+              <div style="width:${Math.min(p.budgetPct, 100)}%;height:100%;background:${p.budgetPct >= 100 ? 'var(--danger)' : p.budgetPct >= 80 ? 'var(--warn)' : 'var(--success)'};border-radius:5px"></div>
+            </div>
+          </div>
+        ` : `
+          <p style="color:var(--text-muted);font-size:13px;margin-top:8px">No budget configured. Set a weekly token budget to track consumption and receive alerts.</p>
+        `}
+
+        <form id="form-project-budget" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+              <span>Weekly Tokens (e.g. 1000000)</span>
+              <input type="number" id="input-budget-tokens" class="form-input" style="width:180px" value="${p.budgetTokens || ''}" placeholder="Tokens limit" min="0" step="1000" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+              <span>Weekly Cost limit ($ USD, optional)</span>
+              <input type="number" id="input-budget-cost" class="form-input" style="width:180px" value="${p.budgetCost || ''}" placeholder="Cost limit ($)" min="0" step="1" />
+            </label>
+            <button type="submit" class="btn btn-sm">Save Budget</button>
+            ${p.budgetTokens ? `<button type="button" id="btn-clear-budget" class="btn btn-sm btn-outline" style="color:var(--danger)">Remove Budget</button>` : ''}
+          </div>
+        </form>
+      </div>
+
       <!-- Recent Sessions -->
       <div class="card" style="margin-top:var(--space-4)">
         <div class="card-header">
@@ -594,6 +659,30 @@ async function projectPage(projectId) {
             setTimeout(() => { btn.disabled = false; btn.textContent = 'Send to agent'; }, 2500);
           }
         });
+      });
+
+      $('#btn-toggle-budget-form')?.addEventListener('click', () => {
+        const form = $('#form-project-budget');
+        if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
+      });
+      $('#form-project-budget')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const tokens = Number($('#input-budget-tokens').value) || null;
+        const costVal = Number($('#input-budget-cost').value) || null;
+        await fetch('/api/project/budget', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, budgetTokens: tokens, budgetCost: costVal }),
+        });
+        render();
+      });
+      $('#btn-clear-budget')?.addEventListener('click', async () => {
+        await fetch('/api/project/budget', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, budgetTokens: 0, budgetCost: 0 }),
+        });
+        render();
       });
     },
   };
@@ -1402,9 +1491,14 @@ async function healthPage() {
 async function settingsPage() {
   const theme = document.documentElement.getAttribute('data-theme') || 'dark';
   let settings = {};
+  let projectsList = [];
   try {
-    const res = await fetch('/api/settings').then((r) => r.json());
-    settings = res.settings || {};
+    const [sRes, pRes] = await Promise.all([
+      fetch('/api/settings').then((r) => r.json()),
+      fetch('/api/projects').then((r) => r.json()),
+    ]);
+    settings = sRes.settings || {};
+    projectsList = Array.isArray(pRes) ? pRes : (pRes.projects || []);
   } catch {}
   const allowAgentLaunch = settings.allow_agent_launch === 'true';
 
@@ -1471,6 +1565,29 @@ async function settingsPage() {
             </label>
           </div>
         </div>
+
+        <div class="col-6 card" style="margin-top:var(--space-4)">
+          <div class="card-header"><h3 class="card-title">Project Weekly Budgets</h3></div>
+          <p style="margin-bottom:12px;color:var(--text-muted)">Configure weekly token limits to monitor consumption and trigger budget warnings.</p>
+          ${projectsList.length === 0 ? '<p style="color:var(--text-muted);font-size:13px">No projects discovered yet.</p>' : `
+            <div style="display:flex;flex-direction:column;gap:12px">
+              ${projectsList.map((pr) => `
+                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <span style="font-weight:600;font-size:13px">${esc(pr.name)}</span>
+                    <a href="#/project/${pr.projectId}" class="btn btn-sm btn-outline" style="font-size:11px;padding:2px 6px">View Project</a>
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <input type="number" class="form-input setting-budget-tok" data-proj="${pr.projectId}" placeholder="Weekly Tokens" value="${pr.budgetTokens || ''}" style="width:140px;font-size:12px" step="1000" />
+                    <input type="number" class="form-input setting-budget-cost" data-proj="${pr.projectId}" placeholder="Cost ($)" value="${pr.budgetCost || ''}" style="width:90px;font-size:12px" step="1" />
+                    <button class="btn btn-sm btn-save-proj-budget" data-proj="${pr.projectId}">Save</button>
+                    ${pr.budgetTokens ? `<button class="btn btn-sm btn-outline btn-clear-proj-budget" data-proj="${pr.projectId}" style="color:var(--danger)">Clear</button>` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
       </div>
     `,
     after: () => {
@@ -1507,6 +1624,35 @@ async function settingsPage() {
       $('#chk-alert-retry')?.addEventListener('change', (e) => saveAlertSetting('alert_retry_loop', e.target.checked));
       $('#chk-alert-quota')?.addEventListener('change', (e) => saveAlertSetting('alert_quota_forecast', e.target.checked));
       $('#chk-alert-budget')?.addEventListener('change', (e) => saveAlertSetting('alert_budget', e.target.checked));
+
+      document.querySelectorAll('.btn-save-proj-budget').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const projId = e.currentTarget.dataset.proj;
+          const container = e.currentTarget.closest('div');
+          const tokVal = Number(container.querySelector('.setting-budget-tok')?.value) || null;
+          const costVal = Number(container.querySelector('.setting-budget-cost')?.value) || null;
+          btn.disabled = true;
+          await fetch('/api/project/budget', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId: projId, budgetTokens: tokVal, budgetCost: costVal }),
+          });
+          btn.textContent = 'Saved!';
+          setTimeout(() => render(), 400);
+        });
+      });
+      document.querySelectorAll('.btn-clear-proj-budget').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const projId = e.currentTarget.dataset.proj;
+          btn.disabled = true;
+          await fetch('/api/project/budget', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId: projId, budgetTokens: 0, budgetCost: 0 }),
+          });
+          render();
+        });
+      });
     },
   };
 }

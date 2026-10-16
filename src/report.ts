@@ -34,6 +34,9 @@ export interface WeeklyReportData {
     cost: number;
     sessions: number;
     deltaPct: number;
+    budgetTokens?: number;
+    budgetPct?: number;
+    budgetStatus?: string;
   }>;
   quotaInsights: {
     fiveHourPeakPct: number;
@@ -195,7 +198,7 @@ export function generateWeeklyReport(
   let currCost = 0;
   const currSessions = new Set<string>();
   const currByAgent = new Map<string, { tokens: number; cost: number; sessions: Set<string> }>();
-  const currByProject = new Map<string, { tokens: number; cost: number; sessions: Set<string> }>();
+  const currByProject = new Map<string, { name?: string; projectId?: string; tokens: number; cost: number; sessions: Set<string> }>();
   const sessionTokenMap = new Map<string, { agent: string; tokens: number }>();
 
   for (const r of currEventRows) {
@@ -221,10 +224,11 @@ export function generateWeeklyReport(
 
     // Project map
     const proj = r.projectName || 'global / unassigned';
-    const pr = currByProject.get(proj) || { tokens: 0, cost: 0, sessions: new Set() };
+    const pr = currByProject.get(proj) || { name: proj, projectId: r.projectId != null ? String(r.projectId) : undefined, tokens: 0, cost: 0, sessions: new Set<string>() };
     pr.tokens += tokens;
     pr.cost += cost;
     pr.sessions.add(r.sessionId);
+    if (!pr.projectId && r.projectId != null) pr.projectId = String(r.projectId);
     currByProject.set(proj, pr);
 
     // Session consumer tracker
@@ -281,15 +285,31 @@ export function generateWeeklyReport(
     };
   }).sort((a, b) => b.tokens - a.tokens);
 
+  const settingsRows = db.prepare(`SELECT key, value FROM settings WHERE key LIKE 'budget_%'`).all() as Array<{ key: string; value: string }>;
+  const budgets = new Map<string, string>();
+  for (const s of settingsRows) budgets.set(s.key, s.value);
+
   const byProjectList = Array.from(currByProject.entries()).map(([name, data]) => {
     const prev = prevByProject.get(name);
-    return {
+    const budgetTokens = data.projectId ? Number(budgets.get(`budget_tokens_${data.projectId}`)) || undefined : undefined;
+    const budgetPct = budgetTokens ? Math.round((data.tokens / budgetTokens) * 100) : undefined;
+    const budgetStatus = budgetTokens
+      ? (data.tokens > budgetTokens ? `${budgetPct}% (Over budget)` : `${budgetPct}% (Within budget)`)
+      : undefined;
+
+    const item: WeeklyReportData['byProject'][number] = {
       name,
       tokens: data.tokens,
       cost: Number(data.cost.toFixed(2)),
       sessions: data.sessions.size,
       deltaPct: calcDelta(data.tokens, prev?.tokens || 0),
     };
+    if (budgetTokens !== undefined) {
+      item.budgetTokens = budgetTokens;
+      item.budgetPct = budgetPct;
+      item.budgetStatus = budgetStatus;
+    }
+    return item;
   }).sort((a, b) => b.tokens - a.tokens);
 
   // 2. Quota Insights
@@ -499,10 +519,10 @@ function renderMarkdown(d: WeeklyReportData): string {
   if (d.byProject.length === 0) {
     lines.push(`*No project sessions recorded this week.*`);
   } else {
-    lines.push(`| Project | Tokens (measured) | Est. Cost | Sessions | WoW Change |`);
-    lines.push(`|---|---|---|---|---|`);
+    lines.push(`| Project | Tokens (measured) | Est. Cost | Sessions | WoW Change | Weekly Budget |`);
+    lines.push(`|---|---|---|---|---|---|`);
     for (const p of d.byProject) {
-      lines.push(`| ${p.name} | ${fmtTok(p.tokens)} | $${p.cost.toFixed(2)} | ${p.sessions} | ${fmtDelta(p.deltaPct)} |`);
+      lines.push(`| ${p.name} | ${fmtTok(p.tokens)} | $${p.cost.toFixed(2)} | ${p.sessions} | ${fmtDelta(p.deltaPct)} | ${p.budgetStatus || '—'} |`);
     }
   }
   lines.push('');
@@ -715,6 +735,16 @@ function renderHtml(d: WeeklyReportData, md: string): string {
       ${d.byAgent.map((a) => `<tr><td><strong>${escHtml(a.agent)}</strong></td><td>${fmtTok(a.tokens)}</td><td>$${a.cost.toFixed(2)}</td><td>${a.sessions}</td><td>${fmtDelta(a.deltaPct)}</td></tr>`).join('')}
     </tbody>
   </table>
+
+  <h3>Project Usage & Weekly Budgets</h3>
+  ${d.byProject.length > 0 ? `
+    <table>
+      <thead><tr><th>Project</th><th>Tokens</th><th>Est. Cost</th><th>Sessions</th><th>WoW</th><th>Weekly Budget Status</th></tr></thead>
+      <tbody>
+        ${d.byProject.map((p) => `<tr><td><strong>${escHtml(p.name)}</strong></td><td>${fmtTok(p.tokens)}</td><td>$${p.cost.toFixed(2)}</td><td>${p.sessions}</td><td>${fmtDelta(p.deltaPct)}</td><td>${escHtml(p.budgetStatus || '—')}</td></tr>`).join('')}
+      </tbody>
+    </table>
+  ` : '<p>No project sessions recorded this week.</p>'}
 
   <h2>2. Quota Near-Misses & Limit Hits</h2>
   <div class="card">

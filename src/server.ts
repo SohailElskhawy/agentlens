@@ -362,6 +362,44 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
         return;
       }
 
+      if (req.method === 'POST' && url.pathname === '/api/project/budget') {
+        let body = '';
+        let tooLarge = false;
+        req.on('data', (c) => {
+          if (tooLarge) return;
+          body += c;
+          if (body.length > 16384) {
+            tooLarge = true;
+            req.resume();
+            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+          }
+        });
+        req.on('end', () => {
+          if (tooLarge) return;
+          try {
+            const json = JSON.parse(body || '{}');
+            const { projectId, budgetTokens, budgetCost } = json;
+            if (projectId == null) {
+              return send(res, 400, 'application/json', JSON.stringify({ error: 'Missing projectId' }));
+            }
+            if (budgetTokens != null && Number(budgetTokens) > 0) {
+              setSetting(db, `budget_tokens_${projectId}`, String(budgetTokens));
+            } else if (budgetTokens === 0 || budgetTokens === null) {
+              db.prepare('DELETE FROM settings WHERE key = ?').run(`budget_tokens_${projectId}`);
+            }
+            if (budgetCost != null && Number(budgetCost) > 0) {
+              setSetting(db, `budget_cost_${projectId}`, String(budgetCost));
+            } else if (budgetCost === 0 || budgetCost === null) {
+              db.prepare('DELETE FROM settings WHERE key = ?').run(`budget_cost_${projectId}`);
+            }
+            send(res, 200, 'application/json', JSON.stringify({ ok: true, projectId }));
+          } catch {
+            send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+          }
+        });
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname.startsWith('/api/reports/')) {
         const week = url.pathname.slice('/api/reports/'.length);
         if (/^\d{4}-W\d{1,2}$/.test(week)) {
