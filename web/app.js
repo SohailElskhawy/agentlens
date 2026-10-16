@@ -5,6 +5,7 @@ const fmtTok = (n) => { n = n ?? 0; return n >= 1e9 ? `${(n / 1e9).toFixed(2)}B`
 const fmtInt = (n) => (n ?? 0).toLocaleString();
 const fmtUsd = (n) => `$${(n ?? 0).toFixed(2)}`;
 const fmtTime = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+const fmtDelta = (n) => ((n ?? 0) > 0 ? `+${n}%` : `${n ?? 0}%`);
 const AGENTS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', antigravity: 'Antigravity' };
 // Categorical hues, validated with the dataviz palette validator in light and dark (claude orange nudged from #d97757 to pass the dark lightness band).
 const COLORS = { claude: '#d4724f', codex: '#4f7cff', opencode: '#2fa37a', antigravity: '#a35fd6' };
@@ -210,17 +211,19 @@ async function healthPage() {
 }
 
 async function recommendationsPage() {
-  const [recData, findData] = await Promise.all([
+  const [recData, findData, trackData] = await Promise.all([
     api('recommendations'),
     api('findings'),
+    api('tracking'),
   ]);
 
   const recs = recData.recommendations || [];
   const findings = findData.findings || [];
   const savings = findData.totalEstWeeklySavings || 0;
+  const trackedItems = trackData.items || [];
 
   const openRecs = recs.filter((r) => r.status === 'open');
-  const acceptedRecs = recs.filter((r) => r.status === 'accepted');
+  const acceptedRecs = recs.filter((r) => r.status === 'accepted' || r.status === 'measuring');
 
   const ACTION_COLORS = {
     add: '#22c55e',
@@ -245,7 +248,7 @@ async function recommendationsPage() {
       <div class="tile">
         <div class="label">Open Recommendations</div>
         <div class="value">${openRecs.length}</div>
-        <div class="note">${acceptedRecs.length} accepted</div>
+        <div class="note">${acceptedRecs.length} tracking / accepted</div>
       </div>
       <div class="tile">
         <div class="label">Flagged Findings</div>
@@ -254,6 +257,35 @@ async function recommendationsPage() {
       </div>
     </div>
   `;
+
+  const trackedSection = trackedItems.length > 0 ? `
+    <h2>Tracked Improvements (${trackedItems.length})</h2>
+    <p class="hint">14-day pre- vs post-adoption verification with quality guardrails (tool errors, corrections, turns/session).</p>
+    <div class="rec-grid">
+      ${trackedItems.map((r) => {
+        const res = r.result;
+        const delta = res ? (res.deltaPct <= 0 ? `${res.deltaPct}%` : `+${res.deltaPct}%`) : '0%';
+        const isBetter = res && res.deltaPct <= -10;
+        const isWorse = res && res.deltaPct >= 10;
+        const deltaClass = isBetter ? 'positive' : (isWorse ? 'negative' : '');
+        return `
+          <div class="rec-card">
+            <div class="rec-header">
+              <span class="pill pill-${esc(r.status)}">${esc(r.status.toUpperCase())}</span>
+              <span class="badge" style="border:1px solid #e5e7eb;color:var(--text)">${esc(r.findingRule.replace(/_/g, ' '))}</span>
+              <span class="track-delta ${deltaClass}" style="margin-left:auto">${esc(delta)}</span>
+            </div>
+            <h3 style="margin:8px 0 4px;font-size:15px">${esc(r.title)}</h3>
+            ${res ? `
+              <div class="track-metric">Target: <strong>${esc(res.metricName)}</strong> (${fmtTok(res.baselineVal)} &rarr; ${fmtTok(res.currentVal)})</div>
+              <div class="track-metric">Samples: ${res.sampleBefore} sessions before &middot; ${res.sampleAfter} after (min 5)</div>
+              <div class="track-metric">Guardrails: <span style="font-weight:600;color:${res.guardrails?.passed ? '#15803d' : '#b91c1c'}">${res.guardrails?.passed ? 'PASSED' : 'REGRESSED'}</span></div>
+            ` : `<p style="color:var(--muted);font-size:12px">Tracking initialized &middot; gathering sessions...</p>`}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  ` : '';
 
   const recList = openRecs.length === 0
     ? '<p class="empty">No open recommendations! All active patterns resolved or dismissed.</p>'
@@ -269,7 +301,7 @@ async function recommendationsPage() {
             <p style="margin:0 0 12px;color:var(--muted);font-size:13px">${esc(r.body)}</p>
             ${r.actionSnippet ? `<div><code class="action-snippet">${esc(r.actionSnippet)}</code></div>` : ''}
             <div class="rec-actions">
-              <button class="btn btn-sm btn-accept" data-id="${esc(r.id)}">Accept</button>
+              <button class="btn btn-sm btn-accept" data-id="${esc(r.id)}">Accept & Track</button>
               <button class="btn btn-sm btn-outline btn-dismiss" data-id="${esc(r.id)}">Dismiss</button>
             </div>
           </div>
@@ -293,6 +325,7 @@ async function recommendationsPage() {
       <h1>Recommendations & Findings</h1>
       <p class="hint">Deterministic workflow waste detection, potential savings, and actionable configuration suggestions.</p>
       ${tiles}
+      ${trackedSection}
       <h2>Active Recommendations</h2>
       ${recList}
       <h2>Workflow Findings (${findings.length})</h2>
@@ -303,10 +336,8 @@ async function recommendationsPage() {
       document.querySelectorAll('.btn-accept').forEach((btn) => {
         btn.addEventListener('click', async (e) => {
           const id = e.currentTarget.dataset.id;
-          await fetch(`/api/recommendations/${encodeURIComponent(id)}/status`, {
+          await fetch(`/api/recommendations/${encodeURIComponent(id)}/accept`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'accepted' }),
           });
           render();
         });
@@ -438,7 +469,115 @@ async function auditPage() {
   };
 }
 
-const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, recommendations: recommendationsPage, audit: auditPage, health: healthPage };
+async function reportsPage() {
+  const reportsList = await api('reports');
+  const reports = reportsList.reports || [];
+
+  let selectedWeek = state.reportWeek || (reports[0]?.week);
+  let reportDetail = null;
+
+  if (selectedWeek) {
+    try {
+      const r = await fetch(`/api/reports/${encodeURIComponent(selectedWeek)}`);
+      if (r.ok) reportDetail = await r.json();
+    } catch {}
+  }
+
+  const selector = `
+    <div class="report-bar">
+      <div style="display:flex;align-items:center;gap:10px">
+        <label for="rep-select" style="font-weight:600;font-size:14px">Select Report:</label>
+        <select id="rep-select" style="max-width:300px">
+          ${reports.length === 0 ? '<option value="">No reports yet</option>' : ''}
+          ${reports.map((r) => `<option value="${esc(r.week)}" ${r.week === selectedWeek ? 'selected' : ''}>${esc(r.week)} (${fmtTime(r.generatedAt)})</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-sm" id="btn-gen-report">Generate Current Report</button>
+    </div>
+  `;
+
+  if (!reportDetail) {
+    return {
+      html: `
+        <h1>Weekly Usage Reports</h1>
+        <p class="hint">Automated weekly usage, cost trends, quota peaks, token-wasting patterns, and action items.</p>
+        ${selector}
+        <div class="card" style="margin-top:20px;text-align:center;padding:40px">
+          <p class="empty">No weekly report available yet.</p>
+          <button class="btn" id="btn-gen-first" style="margin-top:12px">Generate Report Now</button>
+        </div>
+      `,
+      after: () => {
+        const genBtn = $('#btn-gen-report') || $('#btn-gen-first');
+        if (genBtn) {
+          genBtn.addEventListener('click', async () => {
+            genBtn.disabled = true;
+            genBtn.textContent = 'Generating...';
+            await fetch('/api/reports/generate', { method: 'POST' });
+            render();
+          });
+        }
+      },
+    };
+  }
+
+  const d = reportDetail.data;
+  const tiles = `
+    <div class="tiles" style="margin-bottom:20px">
+      <div class="tile">
+        <div class="label">Tokens (measured)</div>
+        <div class="value">${fmtTok(d.summary.totalTokens)}</div>
+        <div class="note">${fmtDelta(d.summary.tokensDeltaPct)} vs prev week</div>
+      </div>
+      <div class="tile">
+        <div class="label">API Cost (estimated)</div>
+        <div class="value">${fmtUsd(d.summary.totalCost)}</div>
+        <div class="note">${fmtDelta(d.summary.costDeltaPct)} vs prev week</div>
+      </div>
+      <div class="tile">
+        <div class="label">Active Sessions</div>
+        <div class="value">${d.summary.activeSessions}</div>
+        <div class="note">${fmtDelta(d.summary.sessionsDeltaPct)} vs prev week</div>
+      </div>
+      <div class="tile">
+        <div class="label">5h Window Peak Quota</div>
+        <div class="value">${d.quotaInsights.fiveHourPeakPct}%</div>
+        <div class="note">${d.quotaInsights.limitHits} limit hits recorded</div>
+      </div>
+    </div>
+  `;
+
+  return {
+    html: `
+      <h1>Weekly Usage Reports</h1>
+      <p class="hint">Automated weekly usage, cost trends, quota peaks, token-wasting patterns, and action items.</p>
+      ${selector}
+      ${tiles}
+      <div class="report-viewer">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h2 style="margin:0">Report: ${esc(d.week)} (${esc(d.startDate)} to ${esc(d.endDate)})</h2>
+          <a href="/api/reports/${encodeURIComponent(d.week)}" target="_blank" class="btn btn-sm btn-outline">View Raw JSON</a>
+        </div>
+        <pre><code>${esc(reportDetail.markdown)}</code></pre>
+      </div>
+    `,
+    after: () => {
+      $('#rep-select')?.addEventListener('change', (e) => {
+        state.reportWeek = e.target.value;
+        render();
+      });
+      $('#btn-gen-report')?.addEventListener('click', async (e) => {
+        const btn = e.target;
+        btn.disabled = true;
+        btn.textContent = 'Generating...';
+        await fetch('/api/reports/generate', { method: 'POST' });
+        render();
+      });
+    },
+  };
+}
+
+const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, recommendations: recommendationsPage, audit: auditPage, reports: reportsPage, health: healthPage };
 
 async function render() {
   const [, name = 'overview', arg = ''] = location.hash.split('/');

@@ -54,4 +54,17 @@ a { color: var(--accent); }
 .pill-unused { background: #fee2e2; color: #b91c1c; }
 .pill-duplicate { background: #fef3c7; color: #b45309; }
 .pill-conflict { background: #ffedd5; color: #c2410c; }
+.pill-verified { background: #dcfce7; color: #15803d; }
+.pill-measuring { background: #e0f2fe; color: #0369a1; }
+.pill-no_effect { background: #f3f4f6; color: #4b5563; }
+.pill-regressed { background: #fee2e2; color: #b91c1c; }
+
+.report-viewer { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-top: 16px; }
+.report-viewer pre { background: var(--bg); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+.report-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.track-metric { font-size: 13px; margin: 4px 0; color: var(--muted); }
+.track-delta { font-weight: 600; font-size: 14px; }
+.track-delta.positive { color: #15803d; }
+.track-delta.negative { color: #b91c1c; }
+
 
