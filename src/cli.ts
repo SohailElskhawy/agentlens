@@ -7,19 +7,25 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './db.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
 import { startServer } from './server.ts';
+import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from './summary.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
 const DATA_DIR = env.AGENTLENS_DATA_DIR ?? join(env.XDG_DATA_HOME ?? join(homedir(), '.local/share'), 'agentlens');
+const STATE_DIR = env.AGENTLENS_STATE_DIR ?? join(env.XDG_STATE_HOME ?? join(homedir(), '.local/state'), 'agentlens');
 const DB_PATH = join(DATA_DIR, 'agentlens.db');
+const SUMMARY_PATH = join(STATE_DIR, 'summary.json');
+const SPOOL_PATH = join(STATE_DIR, 'claude-quota.jsonl');
 const PORT = Number(env.AGENTLENS_PORT ?? 4711);
 
 const HELP = `Usage: agentlens <command>
 
-  serve            ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
-  ingest           one-shot ingest of new agent log data, then exit
-  install-service  write a systemd user unit so serve starts at login (you enable it)
-  help             show this message
+  serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
+  ingest              one-shot ingest of new agent log data, then exit
+  statusline          process Claude Code statusline stdin, spool quota, and print status
+  install-statusline  show configuration instructions for Claude Code statusline
+  install-service     write a systemd user unit so serve starts at login (you enable it)
+  help                show this message
 
 Data: ${DB_PATH}`;
 
@@ -29,10 +35,18 @@ async function serve() {
   let again = false;
   // One ingest at a time; a trigger during a run schedules exactly one follow-up run.
   const run = async () => {
-    if (running) { again = true; return; }
+    if (running) {
+      again = true;
+      return;
+    }
     running = true;
     try {
-      do { again = false; await ingest(db, HOME); } while (again);
+      do {
+        again = false;
+        drainQuotaSpool(db, SPOOL_PATH);
+        await ingest(db, HOME);
+        writeSummary(db, SUMMARY_PATH);
+      } while (again);
     } catch (e) {
       console.error('agentlens: ingest failed:', e);
     } finally {
@@ -51,11 +65,20 @@ async function serve() {
 
   // Throttle, not debounce: agents write continuously during a session, and a debounce would never fire.
   let timer: NodeJS.Timeout | undefined;
-  const soon = () => { timer ??= setTimeout(() => { timer = undefined; run(); }, 2000); };
+  const soon = () => {
+    timer ??= setTimeout(() => {
+      timer = undefined;
+      run();
+    }, 2000);
+  };
   for (const a of ADAPTERS) {
     const root = a.root(HOME);
     if (existsSync(root)) {
-      try { watch(root, { recursive: true }, soon); } catch (e) { console.error(`agentlens: cannot watch ${root}, relying on polling:`, (e as Error).message); }
+      try {
+        watch(root, { recursive: true }, soon);
+      } catch (e) {
+        console.error(`agentlens: cannot watch ${root}, relying on polling:`, (e as Error).message);
+      }
     }
   }
   setInterval(run, 60_000); // fallback for missed watch events and for roots created after startup
@@ -88,8 +111,32 @@ enable it with:  systemctl --user daemon-reload && systemctl --user enable --now
 const commands: Record<string, () => unknown> = {
   serve,
   async ingest() {
-    const s = await ingest(openDb(DB_PATH), HOME);
-    console.log(`${s.read}/${s.files} files read, ${s.events} events, ${s.errors} bad lines, ${s.skipped} oversized lines skipped`);
+    const db = openDb(DB_PATH);
+    drainQuotaSpool(db, SPOOL_PATH);
+    const s = await ingest(db, HOME);
+    writeSummary(db, SUMMARY_PATH);
+    console.log(
+      `${s.read}/${s.files} files read, ${s.events} events, ${s.errors} bad lines, ${s.skipped} oversized lines skipped`,
+    );
+  },
+  statusline: async () => {
+    let input = '';
+    for await (const chunk of process.stdin) {
+      input += chunk;
+    }
+    spoolQuota(SPOOL_PATH, input);
+    const out = formatStatusline(SUMMARY_PATH, process.cwd());
+    process.stdout.write(out + '\n');
+  },
+  'install-statusline': () => {
+    console.log(`Add this to ~/.claude/settings.json or project .claude/settings.json:
+
+{
+  "statusLine": {
+    "command": "agentlens statusline"
+  }
+}
+`);
   },
   'install-service': installService,
   help: () => console.log(HELP),
