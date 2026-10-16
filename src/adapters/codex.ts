@@ -7,6 +7,12 @@ import type { Adapter, NormalizedEvent, QuotaSnapshot } from '../types.ts';
 
 const WINDOWS: Record<number, '5h' | '7d'> = { 300: '5h', 10080: '7d' };
 
+// ~40% of codex bytes are record types the adapter discards (item_completed, reasoning, world_state, ...);
+// parsing only what is used keeps a full-history backfill inside the 200M service memory cap.
+// A head with no type marker at all is parsed anyway, so a reordered schema degrades to full parsing, never to lost data.
+const WANTED = /"(?:session_meta|turn_context|token_count|user_message|function_call|custom_tool_call|function_call_output|custom_tool_call_output)"/;
+const HEAD = 300; // covers timestamp + ordinal + type + payload type with 2x margin
+
 export const codex: Adapter = {
   agent: 'codex',
   // The env override only applies to the real home; a custom source home (AGENTLENS_SOURCE_HOME, tests) is honored as given.
@@ -22,7 +28,9 @@ export const codex: Adapter = {
     const quotas: QuotaSnapshot[] = [];
     let errors = 0;
 
-    const offset = readLines(path, cursor.offset, (line) => {
+    const { offset, dropped } = readLines(path, cursor.offset, (line) => {
+      const head = line.slice(0, HEAD);
+      if (head.includes('"type":"') && !WANTED.test(head)) return;
       let r: any;
       try { r = JSON.parse(line); } catch { errors++; return; }
       if (!r || typeof r !== 'object') { errors++; return; }
@@ -61,6 +69,6 @@ export const codex: Adapter = {
       }
     });
 
-    return { events, sessions: [{ id: sessionId, agent: 'codex', cwd: state.cwd }], quotas, cursor: { offset, state }, errors };
+    return { events, sessions: [{ id: sessionId, agent: 'codex', cwd: state.cwd }], quotas, cursor: { offset, state }, errors, skipped: dropped };
   },
 };

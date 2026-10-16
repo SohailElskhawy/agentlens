@@ -41,6 +41,7 @@ export interface ReadResult {
   quotas: QuotaSnapshot[];
   cursor: Cursor;
   errors: number;        // lines that failed to parse and were skipped
+  skipped: number;       // lines over the size cap, dropped un-parsed (pastes and outputs; no tokens live there)
 }
 
 export interface Adapter {

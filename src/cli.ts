@@ -89,7 +89,7 @@ const commands: Record<string, () => unknown> = {
   serve,
   async ingest() {
     const s = await ingest(openDb(DB_PATH), HOME);
-    console.log(`${s.read}/${s.files} files read, ${s.events} events, ${s.errors} bad lines`);
+    console.log(`${s.read}/${s.files} files read, ${s.events} events, ${s.errors} bad lines, ${s.skipped} oversized lines skipped`);
   },
   'install-service': installService,
   help: () => console.log(HELP),

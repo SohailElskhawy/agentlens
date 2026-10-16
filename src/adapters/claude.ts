@@ -5,6 +5,13 @@ import { readLines } from '../jsonl.ts';
 import { hash } from '../util.ts';
 import type { Adapter, NormalizedEvent, SessionInfo } from '../types.ts';
 
+// A third of claude bytes are record types the adapter discards (api-request bodies, attachments, prompt
+// snapshots); skipping them before JSON.parse trims the backfill's peak heap. A line is skipped only when
+// its head shows a known-discardable type and no user/assistant marker, so reordered logs (type after the
+// message object) and unknown record types fall back to full parsing, never to lost data.
+const DISCARD = /"type":"(?:api-request|api-request-blob|attachment|prompt_snapshot|skill_listing|hook_success|deferred_tools_delta)"/;
+const WANTED = /"type":"(?:user|assistant)"/;
+
 export const claude: Adapter = {
   agent: 'claude',
   // The env override only applies to the real home; a custom source home (AGENTLENS_SOURCE_HOME, tests) is honored as given.
@@ -18,7 +25,9 @@ export const claude: Adapter = {
     const sessions = new Map<string, SessionInfo>();
     let errors = 0;
 
-    const offset = readLines(path, cursor.offset, (line) => {
+    const { offset, dropped } = readLines(path, cursor.offset, (line) => {
+      const head = line.slice(0, 400); // bounds the scan; correctness never depends on this window
+      if (DISCARD.test(head) && !WANTED.test(head)) return;
       let r: any;
       try { r = JSON.parse(line); } catch { errors++; return; }
       if (!r || typeof r !== 'object') { errors++; return; }
@@ -64,6 +73,6 @@ export const claude: Adapter = {
       }
     });
 
-    return { events, sessions: [...sessions.values()], quotas: [], cursor: { offset, state: {} }, errors };
+    return { events, sessions: [...sessions.values()], quotas: [], cursor: { offset, state: {} }, errors, skipped: dropped };
   },
 };

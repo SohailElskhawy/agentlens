@@ -70,6 +70,30 @@ test('codex root ignores an ambient CODEX_HOME unless home is the real home', ()
   }
 });
 
+test('codex: record types the adapter ignores are not parsed; wanted records around them still ingest', () => {
+  const home = tmp();
+  const file = put(join(home, `.codex/sessions/2026/10/15/rollout-2026-10-15T10-00-00-${ID}.jsonl`),
+    jsonl(head[0], rest[2])
+    + jsonl({ timestamp: t(9), type: 'event_msg', payload: { type: 'item_completed', item: { type: 'reasoning', summary: 'y'.repeat(999) } } })
+    + jsonl(rest[3], rest[4]));
+  const r = codex.read(file, { offset: 0, state: {} });
+  assert.deepEqual(r.events.map((e) => [e.id, e.kind]), [
+    ['codex:c1', 'tool_call'],
+    ['codex:c1:result', 'tool_result'],
+    ['codex:c2', 'tool_call'],
+  ]);
+  assert.ok(!JSON.stringify(r).includes('yyyy'));
+});
+
+test('codex: a line whose head shows no type marker is parsed anyway (no silent data loss)', () => {
+  const home = tmp();
+  const line = JSON.stringify({ junk: 'z'.repeat(400), ...rest[6] });
+  const file = put(join(home, `.codex/sessions/2026/10/15/rollout-2026-10-15T10-00-00-${ID}.jsonl`), jsonl(head[0]) + line + '\n');
+  const r = codex.read(file, { offset: 0, state: {} });
+  assert.equal(r.events.filter((e) => e.kind === 'assistant').length, 1);
+  assert.equal(r.sessions[0].cwd, '/work/app');
+});
+
 test('codex: a non-object JSON line is counted and skipped; later records still ingest', () => {
   const home = tmp();
   const file = put(join(home, `.codex/sessions/2026/10/15/rollout-2026-10-15T10-00-00-${ID}.jsonl`),

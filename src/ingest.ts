@@ -7,14 +7,14 @@ import type { Adapter, Cursor, ReadResult } from './types.ts';
 
 export const ADAPTERS: Adapter[] = [claude, codex];
 
-export interface IngestStats { files: number; read: number; events: number; errors: number }
+export interface IngestStats { files: number; read: number; events: number; errors: number; skipped: number }
 
 /**
  * Reads only what was appended since the last run (a file that shrank is re-read from 0; upserts keep that
  * idempotent). Yields to the event loop between files so the dashboard stays responsive during the first backfill.
  */
 export async function ingest(db: DB, home: string, adapters = ADAPTERS): Promise<IngestStats> {
-  const stats: IngestStats = { files: 0, read: 0, events: 0, errors: 0 };
+  const stats: IngestStats = { files: 0, read: 0, events: 0, errors: 0, skipped: 0 };
   for (const a of adapters) {
     for (const path of a.discover(a.root(home))) {
       stats.files++;
@@ -48,6 +48,7 @@ export async function ingest(db: DB, home: string, adapters = ADAPTERS): Promise
       stats.read++;
       stats.events += r.events.length;
       stats.errors += r.errors;
+      stats.skipped += r.skipped;
       await new Promise((resolve) => setImmediate(resolve));
     }
   }

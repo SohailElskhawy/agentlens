@@ -49,6 +49,38 @@ test('claude adapter normalizes usage, tools, prompts and subagents', () => {
   assert.deepEqual(r.sessions.map((s) => [s.id, s.parentId]), [['s1', undefined], ['a1', 's1']]);
 });
 
+test('discardable record types are not parsed; a reordered assistant line (type after message) still ingests', () => {
+  const home = tmp();
+  const reordered = JSON.stringify({
+    parentUuid: null, isSidechain: false,
+    message: { id: 'mR', model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 2 } },
+    filler: 'q'.repeat(500), // pushes the outer type marker past any head window
+    type: 'assistant', sessionId: 's1', cwd: '/tmp/agentlens-proj', timestamp: '2026-10-15T10:00:00.000Z',
+  });
+  const file = put(join(home, '.claude/projects/-p/r.jsonl'),
+    jsonl({ type: 'api-request', sessionId: 's1', request: { body: 'x'.repeat(600) } })
+    + reordered + '\n'
+    + jsonl({ type: 'attachment', sessionId: 's1', blob: 'y'.repeat(600) }, cAssistant({ msg: 'mZ', req: 'rZ', out: 5 })));
+  const r = claude.read(file, { offset: 0, state: {} });
+  assert.equal(r.errors, 0);
+  assert.ok(r.events.some((e) => e.id === 'claude:mR:'), 'reordered assistant line was parsed, not prefiltered away');
+  assert.ok(r.events.some((e) => e.id === 'claude:mZ:rZ'));
+  assert.ok(!JSON.stringify(r).includes('xxxx'));
+});
+
+test('a line over the 512KB cap is skipped whole; the tokens around it survive', () => {
+  const file = put(join(tmp(), 'giant.jsonl'), jsonl(
+    cAssistant({ msg: 'm1', out: 7 }),
+    cUser({ uuid: 'u-big', content: [{ type: 'text', text: 'x'.repeat(512 * 1024 + 100) }] }),
+    cAssistant({ msg: 'm2', req: 'r2', out: 3 }),
+  ));
+  const r = claude.read(file, { offset: 0, state: {} });
+  assert.equal(r.skipped, 1);
+  assert.equal(r.errors, 0);
+  assert.deepEqual(r.events.filter((e) => e.kind === 'assistant').map((e) => e.output), [7, 3]);
+  assert.equal(r.cursor.offset, statSync(file).size);
+});
+
 test('a malformed line is counted and skipped; the rest of the file still ingests', () => {
   const { file } = fixture();
   const r = claude.read(file, { offset: 0, state: {} });
