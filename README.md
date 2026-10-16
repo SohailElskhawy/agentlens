@@ -343,6 +343,12 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 
 ---
 
+## 🗺️ Roadmap
+
+Check out our [ROADMAP.md](ROADMAP.md) for upcoming features and architectural proposals, including in-flight guardrails via MCP, automated ignore generation, git branch cost attribution, terminal UI (`agentlens tui`), and expanded agent adapters.
+
+---
+
 ## 🤝 Open Source Acknowledgments
 
 agentlens incorporates concepts and parsing techniques inspired by open-source projects in the developer community:
