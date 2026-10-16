@@ -238,30 +238,49 @@ export function upsertAuditItems(db: DB, items: AuditItem[]): void {
       details = excluded.details,
       updated_at = excluded.updated_at
   `);
-  for (const item of items) {
-    st.run({
-      id: item.id,
-      agent: item.agent,
-      projectId: item.projectId ?? null,
-      kind: item.kind,
-      name: item.name,
-      sourcePath: item.sourcePath,
-      tokens: item.tokens,
-      invocations30d: item.invocations30d,
-      lastInvoked: item.lastInvoked ?? null,
-      status: item.status,
-      details: JSON.stringify(item.details ?? {}),
-      updatedAt: item.updatedAt,
-    });
-  }
+  tx(db, () => {
+    for (const item of items) {
+      st.run({
+        id: item.id,
+        agent: item.agent,
+        projectId: item.projectId ?? null,
+        kind: item.kind,
+        name: item.name,
+        sourcePath: item.sourcePath,
+        tokens: item.tokens,
+        invocations30d: item.invocations30d,
+        lastInvoked: item.lastInvoked ?? null,
+        status: item.status,
+        details: JSON.stringify(item.details ?? {}),
+        updatedAt: item.updatedAt,
+      });
+    }
+  });
 }
 
-export function getAuditItems(db: DB, filter?: { projectId?: number; kind?: AuditKind; status?: AuditStatus }): AuditItem[] {
+export function getAuditItems(
+  db: DB,
+  filter?: {
+    projectId?: number;
+    includeGlobal?: boolean;
+    agent?: string;
+    kind?: AuditKind;
+    status?: AuditStatus;
+  }
+): AuditItem[] {
   let sql = 'SELECT id, agent, project_id AS projectId, kind, name, source_path AS sourcePath, tokens, invocations_30d AS invocations30d, last_invoked AS lastInvoked, status, details, updated_at AS updatedAt FROM audit_items WHERE 1=1';
   const params: any[] = [];
   if (filter?.projectId != null) {
-    sql += ' AND project_id = ?';
+    if (filter.includeGlobal) {
+      sql += ' AND (project_id = ? OR project_id IS NULL)';
+    } else {
+      sql += ' AND project_id = ?';
+    }
     params.push(filter.projectId);
+  }
+  if (filter?.agent != null) {
+    sql += ' AND (agent = ? OR agent = \'all\')';
+    params.push(filter.agent);
   }
   if (filter?.kind != null) {
     sql += ' AND kind = ?';

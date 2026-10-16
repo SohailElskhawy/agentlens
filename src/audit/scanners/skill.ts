@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { CHARS_PER_TOKEN } from '../constants.ts';
@@ -34,6 +35,7 @@ function scanSkillDir(
         const content = readFileSync(skillMd, 'utf-8');
         const meta = parseSkillFrontmatter(content);
         const tokens = Math.ceil(content.length / CHARS_PER_TOKEN);
+        const contentHash = createHash('sha256').update(content).digest('hex');
         items.push({
           agent,
           projectId,
@@ -44,6 +46,7 @@ function scanSkillDir(
           details: {
             description: meta.description,
             chars: content.length,
+            contentHash,
           },
         });
       }

@@ -20,7 +20,16 @@ test('audit scanners discover instructions, MCPs, skills, and plugins safely', (
     mkdirSync(join(home, '.gemini/antigravity-cli/mcp/test-mcp'), { recursive: true });
     mkdirSync(join(home, '.gemini/config/skills/gemini-skill'), { recursive: true });
     mkdirSync(join(home, '.claude/skills/claude-skill'), { recursive: true });
-    mkdirSync(join(home, '.claude/plugins/sample-plugin'), { recursive: true });
+    mkdirSync(join(home, '.claude/plugins'), { recursive: true });
+    writeFileSync(
+      join(home, '.claude/plugins/installed_plugins.json'),
+      JSON.stringify({
+        version: 2,
+        plugins: {
+          'sample-plugin@official': [{ version: '1.0.0' }],
+        },
+      })
+    );
     mkdirSync(join(work, 'docs'), { recursive: true });
 
     // Instruction files
@@ -57,8 +66,11 @@ test('audit scanners discover instructions, MCPs, skills, and plugins safely', (
       join(home, '.codex/config.toml'),
       `
 model = "gpt-4"
-[mcp_servers.jev]
-command = "/usr/local/bin/jev-mcp"
+[  mcp_servers.jev  ] # trailing section comment
+"command" = "/usr/local/bin/jev-mcp" # inline comment
+
+[mcp_servers."quoted.name"]
+command = "quoted-cmd"
 
 [mcp_servers.node_repl.env]
 VAR = "1"
@@ -75,9 +87,12 @@ VAR = "1"
 
     // Test scanMcp
     const mcps = scanMcp(home, projects);
-    assert.ok(mcps.length >= 4);
+    assert.ok(mcps.length >= 5);
     assert.ok(mcps.find((m) => m.name === 'serena' && m.agent === 'claude'));
-    assert.ok(mcps.find((m) => m.name === 'jev' && m.agent === 'codex'));
+    const jev = mcps.find((m) => m.name === 'jev' && m.agent === 'codex');
+    assert.ok(jev);
+    assert.equal(jev?.details?.command, '/usr/local/bin/jev-mcp');
+    assert.ok(mcps.find((m) => m.name === 'quoted.name' && m.agent === 'codex'));
     assert.ok(mcps.find((m) => m.name === 'sqlite_viewer' && m.agent === 'opencode'));
     assert.ok(mcps.find((m) => m.name === 'test-mcp' && m.agent === 'antigravity'));
 

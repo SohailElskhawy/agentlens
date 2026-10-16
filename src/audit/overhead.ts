@@ -1,6 +1,8 @@
 import type { DB } from '../db.ts';
 import { INSTRUCTION_OVERHEAD_THRESHOLD } from './constants.ts';
-import type { Finding, RawConfigItem } from '../types.ts';
+import type { Agent, Finding, RawConfigItem } from '../types.ts';
+
+const AGENTS: Agent[] = ['claude', 'codex', 'opencode', 'antigravity'];
 
 export function analyzeOverhead(
   instructions: RawConfigItem[],
@@ -11,16 +13,12 @@ export function analyzeOverhead(
   const now = Date.now();
   const weekAgo = now - 7 * 86_400_000;
 
-  const globalInstructions = instructions.filter((i) => i.projectId === null);
-  const globalTokens = globalInstructions.reduce((sum, i) => sum + i.tokens, 0);
+  // Filter to core always-loaded instructions (exclude arbitrary docs)
+  const coreInstructions = instructions.filter((i) => !i.details?.isDoc);
 
-  // Per-project overhead analysis
+  // Per-project overhead analysis, evaluated PER AGENT
   for (const p of projects) {
-    const pInstructions = instructions.filter((i) => i.projectId === p.id);
-    const pTokens = pInstructions.reduce((sum, i) => sum + i.tokens, 0);
-    const totalFixed = globalTokens + pTokens;
-
-    // Estimate sessions per week
+    // Estimate sessions per week for this project
     let weeklySessions = 1;
     try {
       const row = db.prepare(`
@@ -32,56 +30,73 @@ export function analyzeOverhead(
       weeklySessions = Math.max(1, row?.count ?? 1);
     } catch {}
 
-    const weeklyTax = totalFixed * weeklySessions;
+    for (const agent of AGENTS) {
+      const agentFiles = coreInstructions.filter(
+        (i) => (i.agent === agent || i.agent === 'all') && (i.projectId === p.id || i.projectId === null)
+      );
+      const totalFixed = agentFiles.reduce((sum, i) => sum + i.tokens, 0);
+      const weeklyTax = totalFixed * weeklySessions;
 
-    if (totalFixed > INSTRUCTION_OVERHEAD_THRESHOLD) {
-      findings.push({
-        id: `instruction_bloat:proj_${p.id}`,
-        rule: 'instruction_bloat',
-        projectId: p.id,
-        sessionId: null,
-        evidence: {
-          projectName: p.name,
-          fixedTokens: totalFixed,
-          weeklySessions,
-          files: [...globalInstructions, ...pInstructions].map((f) => ({
-            name: f.name,
-            agent: f.agent,
-            tokens: f.tokens,
-            path: f.sourcePath,
-          })),
-        },
-        confidence: 'high',
-        confidenceReason: `Instruction files consume ${totalFixed.toLocaleString()} tokens per session (~${Math.round(weeklyTax / 1000)}k tokens/wk across ${weeklySessions} sessions)`,
-        estTokensWeek: weeklyTax,
-        firstSeen: now,
-        lastSeen: now,
-      });
+      if (totalFixed > INSTRUCTION_OVERHEAD_THRESHOLD) {
+        findings.push({
+          id: `instruction_bloat:${agent}:proj_${p.id}`,
+          rule: 'instruction_bloat',
+          projectId: p.id,
+          sessionId: null,
+          evidence: {
+            agent,
+            projectName: p.name,
+            fixedTokens: totalFixed,
+            weeklySessions,
+            files: agentFiles.map((f) => ({
+              name: f.name,
+              agent: f.agent,
+              tokens: f.tokens,
+              path: f.sourcePath,
+            })),
+          },
+          confidence: 'high',
+          confidenceReason: `${agent.toUpperCase()} always-loaded instructions consume ${totalFixed.toLocaleString()} tokens per session in ${p.name} (~${Math.round(weeklyTax / 1000)}k tokens/wk across ${weeklySessions} sessions)`,
+          estTokensWeek: weeklyTax,
+          firstSeen: now,
+          lastSeen: now,
+        });
+      }
     }
   }
 
-  // If no projects exist, evaluate global instructions alone
-  if (projects.length === 0 && globalTokens > INSTRUCTION_OVERHEAD_THRESHOLD) {
-    findings.push({
-      id: 'instruction_bloat:global',
-      rule: 'instruction_bloat',
-      projectId: null,
-      sessionId: null,
-      evidence: {
-        fixedTokens: globalTokens,
-        files: globalInstructions.map((f) => ({
-          name: f.name,
-          agent: f.agent,
-          tokens: f.tokens,
-          path: f.sourcePath,
-        })),
-      },
-      confidence: 'high',
-      confidenceReason: `Global instruction files consume ${globalTokens.toLocaleString()} tokens per session`,
-      estTokensWeek: globalTokens * 5,
-      firstSeen: now,
-      lastSeen: now,
-    });
+  // If no projects exist, evaluate global instructions per agent
+  if (projects.length === 0) {
+    for (const agent of AGENTS) {
+      const globalAgentFiles = coreInstructions.filter(
+        (i) => (i.agent === agent || i.agent === 'all') && i.projectId === null
+      );
+      const globalTokens = globalAgentFiles.reduce((sum, i) => sum + i.tokens, 0);
+
+      if (globalTokens > INSTRUCTION_OVERHEAD_THRESHOLD) {
+        findings.push({
+          id: `instruction_bloat:${agent}:global`,
+          rule: 'instruction_bloat',
+          projectId: null,
+          sessionId: null,
+          evidence: {
+            agent,
+            fixedTokens: globalTokens,
+            files: globalAgentFiles.map((f) => ({
+              name: f.name,
+              agent: f.agent,
+              tokens: f.tokens,
+              path: f.sourcePath,
+            })),
+          },
+          confidence: 'high',
+          confidenceReason: `Global ${agent.toUpperCase()} instruction files consume ${globalTokens.toLocaleString()} tokens per session`,
+          estTokensWeek: globalTokens * 5,
+          firstSeen: now,
+          lastSeen: now,
+        });
+      }
+    }
   }
 
   return { findings };

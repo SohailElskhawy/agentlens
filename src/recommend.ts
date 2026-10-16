@@ -90,9 +90,17 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         action = 'remove';
         title = `Remove unused ${f.evidence?.kind ?? 'config'} '${f.evidence?.name}'`;
         body = `No invocations detected in the last 30 days. Disabling unused configurations saves context overhead and eliminates tool schema pollution.`;
-        actionSnippet = f.evidence?.kind === 'mcp'
-          ? `claude mcp remove ${f.evidence?.name}`
-          : undefined;
+        if (f.evidence?.kind === 'mcp') {
+          if (f.evidence?.agent === 'claude') {
+            actionSnippet = `claude mcp remove ${f.evidence?.name}`;
+          } else if (f.evidence?.agent === 'codex') {
+            actionSnippet = `# remove [mcp_servers.${f.evidence?.name}] from ~/.codex/config.toml`;
+          } else if (f.evidence?.agent === 'opencode') {
+            actionSnippet = `# remove "${f.evidence?.name}" from opencode.json`;
+          } else if (f.evidence?.agent === 'antigravity') {
+            actionSnippet = `rm -rf ${f.evidence?.sourcePath || `~/.gemini/antigravity-cli/mcp/${f.evidence?.name}`}`;
+          }
+        }
         break;
 
       case 'duplicate_config':

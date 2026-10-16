@@ -51,9 +51,16 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
     '/api/audit': (f, sp) => {
       const kind = (sp.get('kind') || undefined) as AuditKind | undefined;
       const status = (sp.get('status') || undefined) as AuditStatus | undefined;
-      const items = getAuditItems(db, { projectId: f.projectId, kind, status });
+      const includeGlobal = sp.get('includeGlobal') !== 'false';
+      const items = getAuditItems(db, {
+        projectId: f.projectId,
+        includeGlobal: f.projectId != null ? includeGlobal : undefined,
+        agent: f.agent,
+        kind,
+        status,
+      });
       const totalFixedTokens = items
-        .filter((i) => i.kind === 'instruction')
+        .filter((i) => i.kind === 'instruction' && !i.details?.isDoc)
         .reduce((sum, i) => sum + (i.tokens || 0), 0);
       const unusedCount = items.filter((i) => i.status === 'unused').length;
       const duplicateCount = items.filter((i) => i.status === 'duplicate').length;

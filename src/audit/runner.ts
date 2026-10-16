@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { DB } from '../db.ts';
 import { getFindings, upsertAuditItems, upsertFindings, upsertRecommendations } from '../db.ts';
@@ -49,9 +50,10 @@ export function runAudit(
     ...conflictResult.findings,
   ];
 
-  // 4. Assemble AuditItems
+  // 4. Assemble AuditItems with unique IDs per source path
   const auditItems: AuditItem[] = conflictResult.items.map((item) => {
-    const id = `audit:${item.kind}:${item.agent}:${item.projectId ?? 'global'}:${item.name}`;
+    const pathSlug = createHash('sha256').update(item.sourcePath).digest('hex').slice(0, 8);
+    const id = `audit:${item.kind}:${item.agent}:${item.projectId ?? 'global'}:${item.name}:${pathSlug}`;
     return {
       id,
       agent: item.agent,
@@ -68,12 +70,15 @@ export function runAudit(
     };
   });
 
-  // 5. Persist to DB
+  // 5. Persist to DB and prune obsolete items
   if (auditItems.length > 0) {
     upsertAuditItems(db, auditItems);
+    db.prepare('DELETE FROM audit_items WHERE updated_at < ?').run(now);
   }
   if (findings.length > 0) {
     upsertFindings(db, findings);
+    const auditRules = ['instruction_bloat', 'unused_config', 'duplicate_config', 'config_conflict'];
+    db.prepare(`DELETE FROM findings WHERE rule IN ('${auditRules.join("','")}') AND last_seen < ?`).run(now);
   }
 
   // Update recommendations with newly discovered findings

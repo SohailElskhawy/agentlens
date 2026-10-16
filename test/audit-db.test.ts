@@ -64,6 +64,10 @@ test('upsertAuditItems and getAuditItems persist, update, and filter audit inven
   assert.equal(projItems[0].name, 'serena');
   assert.deepEqual(projItems[0].details, { command: 'start-mcp-server' });
 
+  // Filter by project including global configs
+  const projAndGlobal = getAuditItems(db, { projectId: projId, includeGlobal: true });
+  assert.equal(projAndGlobal.length, 3);
+
   // Filter by kind
   const instructions = getAuditItems(db, { kind: 'instruction' });
   assert.equal(instructions.length, 1);

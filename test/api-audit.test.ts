@@ -84,12 +84,19 @@ test('GET /api/audit returns audit items and summary metrics', async () => {
     assert.equal(data.summary.duplicateCount, 1);
     assert.equal(data.summary.totalFixedTokens, 1500);
 
-    // 2. Query filtered by project
+    // 2. Query filtered by project (defaults to including global configs)
     const projRes = await fetch(`${base}/api/audit?project=${projId}`);
     assert.equal(projRes.status, 200);
     const projData = (await projRes.json()) as any;
-    assert.equal(projData.items.length, 2);
-    assert.equal(projData.summary.totalItems, 2);
+    assert.equal(projData.items.length, 4);
+    assert.equal(projData.summary.totalItems, 4);
+
+    // 2b. Query filtered by project strictly (exclude global configs)
+    const strictProjRes = await fetch(`${base}/api/audit?project=${projId}&includeGlobal=false`);
+    assert.equal(strictProjRes.status, 200);
+    const strictProjData = (await strictProjRes.json()) as any;
+    assert.equal(strictProjData.items.length, 2);
+    assert.equal(strictProjData.summary.totalItems, 2);
 
     // 3. Query filtered by status
     const unusedRes = await fetch(`${base}/api/audit?status=unused`);

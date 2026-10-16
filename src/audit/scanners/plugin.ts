@@ -9,21 +9,25 @@ export function scanPlugins(
 ): RawConfigItem[] {
   const items: RawConfigItem[] = [];
 
-  // 1. Claude plugins directory (~/.claude/plugins/*)
-  const claudePluginsDir = join(home, '.claude/plugins');
+  // 1. Claude plugins: parse installed_plugins.json or plugin manifest directories
+  const installedPluginsPath = join(home, '.claude/plugins/installed_plugins.json');
   try {
-    if (existsSync(claudePluginsDir) && statSync(claudePluginsDir).isDirectory()) {
-      for (const name of readdirSync(claudePluginsDir)) {
-        const fullPath = join(claudePluginsDir, name);
-        items.push({
-          agent: 'claude',
-          projectId: null,
-          kind: 'plugin',
-          name,
-          sourcePath: fullPath,
-          tokens: 100, // base estimate
-          details: { directory: fullPath },
-        });
+    if (existsSync(installedPluginsPath)) {
+      const data = JSON.parse(readFileSync(installedPluginsPath, 'utf-8'));
+      if (data.plugins && typeof data.plugins === 'object') {
+        for (const [pluginId, installs] of Object.entries<any>(data.plugins)) {
+          const name = pluginId.includes('@') ? pluginId.split('@')[0] : pluginId;
+          const firstInstall = Array.isArray(installs) ? installs[0] : installs;
+          items.push({
+            agent: 'claude',
+            projectId: null,
+            kind: 'plugin',
+            name,
+            sourcePath: firstInstall?.installPath || installedPluginsPath,
+            tokens: 100, // base estimate
+            details: { pluginId, ...(typeof firstInstall === 'object' ? firstInstall : {}) },
+          });
+        }
       }
     }
   } catch {}

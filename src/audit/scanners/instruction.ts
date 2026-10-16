@@ -33,7 +33,8 @@ function fileItem(
 function scanDirMarkdown(
   dir: string,
   agent: Agent | 'all',
-  projectId: number | null
+  projectId: number | null,
+  isDoc = false
 ): RawConfigItem[] {
   const items: RawConfigItem[] = [];
   try {
@@ -41,7 +42,10 @@ function scanDirMarkdown(
     for (const name of readdirSync(dir)) {
       if (name.endsWith('.md')) {
         const item = fileItem(agent, projectId, join(dir, name));
-        if (item) items.push(item);
+        if (item) {
+          if (isDoc) item.details.isDoc = true;
+          items.push(item);
+        }
       }
     }
   } catch {}
@@ -90,8 +94,8 @@ export function scanInstructions(
     // Project rules
     items.push(...scanDirMarkdown(join(p.root, '.claude/rules'), 'claude', p.id));
 
-    // Project docs
-    items.push(...scanDirMarkdown(join(p.root, 'docs'), 'all', p.id));
+    // Project docs (marked isDoc so they are not counted as always-loaded core instructions)
+    items.push(...scanDirMarkdown(join(p.root, 'docs'), 'all', p.id, true));
   }
 
   return items;

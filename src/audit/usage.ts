@@ -82,36 +82,60 @@ export function analyzeUsage(
     const nameLower = item.name.toLowerCase();
 
     if (item.kind === 'mcp') {
+      const normName = nameLower.replace(/-/g, '_');
       // Check tool calls matching mcp server name
       for (const [toolName, stat] of toolStats) {
         if (
           toolName === nameLower ||
+          toolName === normName ||
           toolName.startsWith(`mcp__${nameLower}__`) ||
+          toolName.startsWith(`mcp__${normName}__`) ||
           toolName.startsWith(`mcp__claude_ai_${nameLower}__`) ||
-          toolName.startsWith(`${nameLower}_`)
+          toolName.startsWith(`mcp__claude_ai_${normName}__`) ||
+          toolName.startsWith(`mcp_${nameLower}_`) ||
+          toolName.startsWith(`mcp_${normName}_`) ||
+          toolName.startsWith(`${nameLower}__`) ||
+          toolName.startsWith(`${normName}__`)
         ) {
           invocations += stat.count;
           lastInvoked = Math.max(lastInvoked ?? 0, stat.lastTs);
         }
       }
     } else if (item.kind === 'skill') {
+      const normName = nameLower.replace(/-/g, '_');
       // Check Claude skill usage cache
       for (const [skillKey, stat] of claudeSkillUsage) {
-        if (skillKey === nameLower || skillKey.endsWith(`:${nameLower}`)) {
+        if (
+          skillKey === nameLower ||
+          skillKey === normName ||
+          skillKey.endsWith(`:${nameLower}`) ||
+          skillKey.endsWith(`:${normName}`)
+        ) {
           invocations += stat.count;
           lastInvoked = Math.max(lastInvoked ?? 0, stat.lastTs);
         }
       }
       // Check tool calls
       for (const [toolName, stat] of toolStats) {
-        if (toolName === nameLower || toolName === `skill_${nameLower}`) {
+        if (
+          toolName === nameLower ||
+          toolName === normName ||
+          toolName === `skill_${nameLower}` ||
+          toolName === `skill_${normName}`
+        ) {
           invocations += stat.count;
           lastInvoked = Math.max(lastInvoked ?? 0, stat.lastTs);
         }
       }
     } else if (item.kind === 'plugin') {
+      const normName = nameLower.replace(/-/g, '_');
       for (const [pluginKey, stat] of claudePluginUsage) {
-        if (pluginKey === nameLower || pluginKey.startsWith(`${nameLower}@`)) {
+        if (
+          pluginKey === nameLower ||
+          pluginKey === normName ||
+          pluginKey.startsWith(`${nameLower}@`) ||
+          pluginKey.startsWith(`${normName}@`)
+        ) {
           invocations += stat.count;
           lastInvoked = Math.max(lastInvoked ?? 0, stat.lastTs);
         }

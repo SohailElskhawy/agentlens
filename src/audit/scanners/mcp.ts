@@ -3,6 +3,45 @@ import { basename, join } from 'node:path';
 import { CHARS_PER_TOKEN } from '../constants.ts';
 import type { RawConfigItem } from '../../types.ts';
 
+function stripComment(str: string): string {
+  let inDouble = false;
+  let inSingle = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === '"' && !inSingle && (i === 0 || str[i - 1] !== '\\')) {
+      inDouble = !inDouble;
+    } else if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (ch === '#' && !inDouble && !inSingle) {
+      return str.slice(0, i).trim();
+    }
+  }
+  return str.trim();
+}
+
+function parseSectionParts(path: string): string[] {
+  const parts: string[] = [];
+  let cur = '';
+  let inQuote = false;
+  let quoteChar = '';
+  for (let i = 0; i < path.length; i++) {
+    const ch = path[i];
+    if ((ch === '"' || ch === "'") && !inQuote) {
+      inQuote = true;
+      quoteChar = ch;
+    } else if (ch === quoteChar && inQuote) {
+      inQuote = false;
+    } else if (ch === '.' && !inQuote) {
+      parts.push(cur.trim());
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  return parts;
+}
+
 /**
  * Parses `[mcp_servers.<name>]` sections from a TOML string without external dependencies.
  */
@@ -13,14 +52,14 @@ export function parseTomlMcpServers(content: string): Record<string, Record<stri
   let currentSubkey: string | null = null;
 
   for (let line of lines) {
-    line = line.trim();
-    if (!line || line.startsWith('#')) continue;
+    line = stripComment(line);
+    if (!line) continue;
 
-    const sectionMatch = line.match(/^\[([a-zA-Z0-9_\.\-]+)\]$/);
-    if (sectionMatch) {
-      const section = sectionMatch[1];
-      if (section.startsWith('mcp_servers.')) {
-        const parts = section.slice('mcp_servers.'.length).split('.');
+    if (line.startsWith('[') && line.endsWith(']')) {
+      const inner = line.slice(1, -1).trim();
+      if (inner.startsWith('mcp_servers.')) {
+        const rest = inner.slice('mcp_servers.'.length).trim();
+        const parts = parseSectionParts(rest);
         currentServer = parts[0];
         currentSubkey = parts.length > 1 ? parts.slice(1).join('.') : null;
         if (!servers[currentServer]) servers[currentServer] = {};
@@ -35,20 +74,27 @@ export function parseTomlMcpServers(content: string): Record<string, Record<stri
     }
 
     if (currentServer) {
-      const kvMatch = line.match(/^([a-zA-Z0-9_\-]+)\s*=\s*(.*)$/);
-      if (kvMatch) {
-        const key = kvMatch[1].trim();
-        let val: any = kvMatch[2].trim();
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
-        } else if (val === 'true') val = true;
-        else if (val === 'false') val = false;
-        else if (!isNaN(Number(val))) val = Number(val);
+      const eqIdx = line.indexOf('=');
+      if (eqIdx !== -1) {
+        let rawKey = line.slice(0, eqIdx).trim();
+        let rawVal: any = line.slice(eqIdx + 1).trim();
+        if ((rawKey.startsWith('"') && rawKey.endsWith('"')) || (rawKey.startsWith("'") && rawKey.endsWith("'"))) {
+          rawKey = rawKey.slice(1, -1);
+        }
+        if ((rawVal.startsWith('"') && rawVal.endsWith('"')) || (rawVal.startsWith("'") && rawVal.endsWith("'"))) {
+          rawVal = rawVal.slice(1, -1);
+        } else if (rawVal === 'true') {
+          rawVal = true;
+        } else if (rawVal === 'false') {
+          rawVal = false;
+        } else if (!isNaN(Number(rawVal)) && rawVal !== '') {
+          rawVal = Number(rawVal);
+        }
 
         if (currentSubkey) {
-          servers[currentServer][currentSubkey][key] = val;
+          servers[currentServer][currentSubkey][rawKey] = rawVal;
         } else {
-          servers[currentServer][key] = val;
+          servers[currentServer][rawKey] = rawVal;
         }
       }
     }
