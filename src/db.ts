@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { Cursor, Finding, NormalizedEvent, QuotaSnapshot, Recommendation, SessionInfo } from './types.ts';
+import type { AuditItem, AuditKind, AuditStatus, Cursor, Finding, NormalizedEvent, QuotaSnapshot, Recommendation, SessionInfo } from './types.ts';
 
 export type DB = DatabaseSync;
 
@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS recommendations (
 CREATE INDEX IF NOT EXISTS recs_project ON recommendations(project_id);
 CREATE INDEX IF NOT EXISTS recs_status ON recommendations(status);
 CREATE INDEX IF NOT EXISTS recs_score ON recommendations(score);
+CREATE TABLE IF NOT EXISTS audit_items (
+  id TEXT PRIMARY KEY, agent TEXT NOT NULL, project_id INTEGER REFERENCES projects(id),
+  kind TEXT NOT NULL, name TEXT NOT NULL, source_path TEXT NOT NULL, tokens INTEGER NOT NULL DEFAULT 0,
+  invocations_30d INTEGER NOT NULL DEFAULT 0, last_invoked INTEGER, status TEXT NOT NULL DEFAULT 'active',
+  details TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS audit_project ON audit_items(project_id);
+CREATE INDEX IF NOT EXISTS audit_kind ON audit_items(kind);
+CREATE INDEX IF NOT EXISTS audit_status ON audit_items(status);
 `;
 
 export function openDb(path: string): DB {
@@ -216,5 +224,58 @@ export function updateRecommendationStatus(db: DB, id: string, status: string): 
     WHERE id = ?
   `).run(status, acceptedAt, id);
   return res.changes > 0;
+}
+
+export function upsertAuditItems(db: DB, items: AuditItem[]): void {
+  const st = db.prepare(`
+    INSERT INTO audit_items (id, agent, project_id, kind, name, source_path, tokens, invocations_30d, last_invoked, status, details, updated_at)
+    VALUES ($id, $agent, $projectId, $kind, $name, $sourcePath, $tokens, $invocations30d, $lastInvoked, $status, $details, $updatedAt)
+    ON CONFLICT(id) DO UPDATE SET
+      tokens = excluded.tokens,
+      invocations_30d = excluded.invocations_30d,
+      last_invoked = excluded.last_invoked,
+      status = excluded.status,
+      details = excluded.details,
+      updated_at = excluded.updated_at
+  `);
+  for (const item of items) {
+    st.run({
+      id: item.id,
+      agent: item.agent,
+      projectId: item.projectId ?? null,
+      kind: item.kind,
+      name: item.name,
+      sourcePath: item.sourcePath,
+      tokens: item.tokens,
+      invocations30d: item.invocations30d,
+      lastInvoked: item.lastInvoked ?? null,
+      status: item.status,
+      details: JSON.stringify(item.details ?? {}),
+      updatedAt: item.updatedAt,
+    });
+  }
+}
+
+export function getAuditItems(db: DB, filter?: { projectId?: number; kind?: AuditKind; status?: AuditStatus }): AuditItem[] {
+  let sql = 'SELECT id, agent, project_id AS projectId, kind, name, source_path AS sourcePath, tokens, invocations_30d AS invocations30d, last_invoked AS lastInvoked, status, details, updated_at AS updatedAt FROM audit_items WHERE 1=1';
+  const params: any[] = [];
+  if (filter?.projectId != null) {
+    sql += ' AND project_id = ?';
+    params.push(filter.projectId);
+  }
+  if (filter?.kind != null) {
+    sql += ' AND kind = ?';
+    params.push(filter.kind);
+  }
+  if (filter?.status != null) {
+    sql += ' AND status = ?';
+    params.push(filter.status);
+  }
+  sql += ' ORDER BY tokens DESC, name ASC';
+  const rows = db.prepare(sql).all(...params) as any[];
+  return rows.map((r) => ({
+    ...r,
+    details: JSON.parse(r.details || '{}'),
+  }));
 }
 

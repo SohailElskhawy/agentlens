@@ -84,3 +84,21 @@ export interface Recommendation {
   result?: any;
   score?: number;
 }
+
+export type AuditKind = 'instruction' | 'mcp' | 'skill' | 'plugin' | 'hook';
+export type AuditStatus = 'active' | 'unused' | 'duplicate' | 'conflict';
+
+export interface AuditItem {
+  id: string;
+  agent: Agent | 'all';
+  projectId: number | null;
+  kind: AuditKind;
+  name: string;
+  sourcePath: string;
+  tokens: number;
+  invocations30d: number;
+  lastInvoked: number | null;
+  status: AuditStatus;
+  details: Record<string, any>;
+  updatedAt: number;
+}
