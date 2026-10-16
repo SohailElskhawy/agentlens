@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { existsSync, watch } from 'node:fs';
+import { existsSync, realpathSync, watch } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { openDb, getRecommendations, updateRecommendationStatus } from './db.ts';
@@ -42,7 +43,7 @@ const HELP = `Usage: agentlens <command>
   discover            opt-in discovery of AI agent tools from GitHub (--query, --dry-run, --json)
   statusline          process Claude Code statusline stdin, spool quota, and print status
   install-statusline  show configuration instructions for Claude Code statusline
-  install-service     write a systemd user unit so serve starts at login (you enable it)
+  install-service     install background service (systemd, launchd, or scheduled task) so serve starts at login
   help                show this message
 
 Data: ${DB_PATH}`;
@@ -454,14 +455,7 @@ const commands: Record<string, () => unknown> = {
     }
   },
   'install-statusline': () => {
-    console.log(`Add this to ~/.claude/settings.json or project .claude/settings.json:
-
-{
-  "statusLine": {
-    "command": "agentlens statusline"
-  }
-}
-`);
+    console.log(getStatuslineSnippet());
   },
   'install-service': () => {
     const res = installService({
@@ -477,10 +471,36 @@ const commands: Record<string, () => unknown> = {
   help: () => console.log(HELP),
 };
 
-const cmd = process.argv[2] ?? 'help';
-const fn = commands[cmd];
-if (!fn) {
-  console.error(`agentlens: unknown command "${cmd}"\n\n${HELP}`);
-  process.exit(1);
+export function getStatuslineSnippet(platform: NodeJS.Platform = process.platform): string {
+  const command = platform === 'win32' ? 'agentlens.cmd statusline' : 'agentlens statusline';
+  return `Add this to ~/.claude/settings.json or project .claude/settings.json:
+
+{
+  "statusLine": {
+    "command": "${command}"
+  }
 }
-await fn();
+`;
+}
+
+function isMain(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    const scriptPath = resolve(process.argv[1]);
+    const modulePath = fileURLToPath(import.meta.url);
+    if (scriptPath === modulePath) return true;
+    return existsSync(scriptPath) && realpathSync(scriptPath) === realpathSync(modulePath);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
+  const cmd = process.argv[2] ?? 'help';
+  const fn = commands[cmd];
+  if (!fn) {
+    console.error(`agentlens: unknown command "${cmd}"\n\n${HELP}`);
+    process.exit(1);
+  }
+  await fn();
+}
