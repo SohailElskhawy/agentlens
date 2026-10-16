@@ -1,11 +1,13 @@
 import { statSync } from 'node:fs';
+import { antigravity } from './adapters/antigravity.ts';
 import { claude } from './adapters/claude.ts';
 import { codex } from './adapters/codex.ts';
+import { opencode } from './adapters/opencode.ts';
 import { type DB, getCursor, insertQuotas, setCursor, tx, upsertEvents, upsertProject, upsertSessions } from './db.ts';
 import { projectName, projectRoot } from './project.ts';
 import type { Adapter, Cursor, ReadResult } from './types.ts';
 
-export const ADAPTERS: Adapter[] = [claude, codex];
+export const ADAPTERS: Adapter[] = [claude, codex, opencode, antigravity];
 
 export interface IngestStats { files: number; read: number; events: number; errors: number; skipped: number }
 
@@ -19,7 +21,12 @@ export async function ingest(db: DB, home: string, adapters = ADAPTERS): Promise
     for (const path of a.discover(a.root(home))) {
       stats.files++;
       let size: number;
-      try { size = statSync(path).size; } catch { continue; } // deleted between discover and read
+      try {
+        size = statSync(path).size;
+        if (path.endsWith('.db')) {
+          try { size += statSync(`${path}-wal`).size; } catch {}
+        }
+      } catch { continue; } // deleted between discover and read
       let cursor: Cursor = getCursor(db, path) ?? { offset: 0, state: {} };
       if (size === cursor.offset) continue;
       if (size < cursor.offset) cursor = { offset: 0, state: {} };
