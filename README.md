@@ -4,9 +4,9 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![Privacy First](https://img.shields.io/badge/privacy-local--first-orange.svg)](#privacy--security-guarantees)
-[![Tests Passing](https://img.shields.io/badge/tests-119%20passing-success.svg)](test/)
+[![Tests Passing](https://img.shields.io/badge/tests-153%20passing-success.svg)](test/)
 
-**agentlens** is a lightweight, local-first Linux usage and workflow optimizer for AI coding agents:
+**agentlens** is a lightweight, local-first, cross-platform usage and workflow optimizer for AI coding agents on Linux, macOS, and Windows:
 - **Claude Code** (Pro)
 - **Codex** (Plus)
 - **OpenCode** (Go)
@@ -25,7 +25,7 @@ It monitors how you use AI coding agents to **save tokens, avoid hitting subscri
 * **Workflow Waste Detectors:** 10 deterministic analyzers that detect retry loops, repetitive file reads, runaway context growth, idle cache misses, large tool dumps, and model mismatch.
 * **Configuration Audit:** Scans global and project instructions (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`), MCP servers, skills, and plugins. Calculates fixed session token overhead and detects unused (30d), duplicate, or conflicting configurations.
 * **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked, copyable actions enriched with vetted open-source tools from `catalog.yaml`.
-* **Automated Weekly Usage Reports:** Generates comprehensive Monday reports in GitHub-flavored Markdown and standalone dark/light HTML (`~/.local/share/agentlens/reports/`), with desktop notifications.
+* **Automated Weekly Usage Reports:** Generates comprehensive Monday reports in GitHub-flavored Markdown and standalone dark/light HTML (`<dataDir>/reports/`), with native desktop notifications across Linux (`notify-send`), macOS (`osascript`), and Windows (PowerShell toast).
 * **Improvement Tracking with Quality Guardrails:** Tracks accepted recommendations across 14-day before/after windows, verifying real token savings while ensuring error rates and interaction turns don't regress.
 * **Opt-In Tool Discovery:** Searches GitHub for relevant agent tools and MCPs using generic search queries without transmitting private code or prompts.
 
@@ -60,10 +60,10 @@ Browse vetted tools mapped to token-waste rules (Serena, Repomix, Context7, ccus
 ```mermaid
 flowchart TD
     subgraph AgentSources["Local Agent Data Sources (Read-Only)"]
-        CC["Claude Code\n~/.claude/projects/"]
-        CX["Codex\n~/.codex/sessions/"]
-        OC["OpenCode\n~/.local/share/opencode/opencode.db"]
-        AG["Antigravity\n~/.gemini/antigravity/"]
+        CC["Claude Code\nProjects JSONL"]
+        CX["Codex\nSessions JSONL"]
+        OC["OpenCode\nopencode.db (Multi-root)"]
+        AG["Antigravity\nconversation_summaries.db"]
     end
 
     subgraph CoreEngine["agentlens Core Engine (Zero External Deps)"]
@@ -80,7 +80,7 @@ flowchart TD
         Statusline["Live Statusline\n(< 10ms)"]
         CLI["agentlens CLI\n(status, audit, report, track, discover)"]
         WebUI["Local Web Dashboard\n(http://127.0.0.1:4711)"]
-        Systemd["systemd User Service\n(Nice=10, MemoryMax=200M)"]
+        Service["Background Service\n(systemd / launchd / schtasks)"]
     end
 
     AgentSources --> Adapters
@@ -93,7 +93,7 @@ flowchart TD
     DB --> WebUI
     DB --> CLI
     Statusline --> CC
-    Systemd --> Adapters
+    Service --> Adapters
 ```
 
 ---
@@ -101,7 +101,7 @@ flowchart TD
 ## 🚀 Quick Start
 
 ### 1. Requirements
-- Linux (Ubuntu, Debian, Fedora, Arch, etc.)
+- Operating System: Linux (Ubuntu, Debian, Fedora, Arch, etc.), macOS (Sonoma, Sequoia, etc.), or Windows 10/11
 - Node.js ≥ 22.18 (built with native SQLite and type-stripping support)
 - Zero runtime npm dependencies required
 
@@ -116,10 +116,20 @@ cd agentlens
 npm install
 
 # Perform an initial one-shot backfill from your agent logs
+# Linux / macOS:
 ./bin/agentlens ingest
+# Windows (Command Prompt):
+.\bin\agentlens.cmd ingest
+# Windows (PowerShell):
+.\bin\agentlens.ps1 ingest
 
 # Start the continuous watcher and dashboard
+# Linux / macOS:
 ./bin/agentlens serve
+# Windows (Command Prompt):
+.\bin\agentlens.cmd serve
+# Windows (PowerShell):
+.\bin\agentlens.ps1 serve
 ```
 
 Open **http://127.0.0.1:4711** in your browser.
@@ -132,30 +142,62 @@ npm link
 npm install -g .
 ```
 
-### 4. Background Service (Systemd)
-To keep agentlens continuously running in the background on user login:
+### 4. Background Service Setup (`install-service`)
+Run `agentlens install-service` to configure agentlens to start automatically in the background on user login. The installer automatically detects your operating system and creates native daemon configurations:
+
+#### Linux (`systemd`)
+Generates user unit `~/.config/systemd/user/agentlens.service` with resource caps (`Nice=10`, `MemoryMax=200M`):
 ```bash
 agentlens install-service
 systemctl --user daemon-reload
 systemctl --user enable --now agentlens
 ```
+- **Check status / logs:** `systemctl --user status agentlens` or `journalctl --user -u agentlens -f`
+- **Restart / Stop:** `systemctl --user restart agentlens` or `systemctl --user stop agentlens`
+- *(Optional)* Keep running without an active login session: `loginctl enable-linger $USER`
 
-To restart or stop:
+#### macOS (`launchd`)
+Generates LaunchAgent `~/Library/LaunchAgents/com.agentlens.plist` with output logging to `<stateDir>/agentlens.log`:
 ```bash
-systemctl --user restart agentlens
-systemctl --user stop agentlens
+agentlens install-service
+launchctl load -w ~/Library/LaunchAgents/com.agentlens.plist
 ```
+- **Check logs:** `tail -f ~/Library/Caches/agentlens/agentlens.log`
+- **To unload / stop:** `launchctl unload -w ~/Library/LaunchAgents/com.agentlens.plist`
+
+#### Windows (Task Scheduler / `schtasks`)
+Creates `%LOCALAPPDATA%\agentlens\agentlens-service.cmd` and registers an `onlogon` task via `schtasks`:
+```cmd
+agentlens install-service
+schtasks /run /tn "agentlens"
+```
+- **To stop:** `schtasks /end /tn "agentlens"`
+- **To run or inspect manually:** `%LOCALAPPDATA%\agentlens\agentlens-service.cmd`
 
 ### 5. Claude Code Live Statusline
-Configure Claude Code to display real-time token usage and quota status in your prompt bar (< 10ms latency):
+Configure Claude Code to display real-time token usage and quota status in your prompt bar (< 10ms latency).
+
+Run `agentlens install-statusline` to display the exact configuration snippet for your operating system:
 ```bash
 agentlens install-statusline
 ```
-Add this snippet to `~/.claude/settings.json`:
+
+Add the printed snippet to `~/.claude/settings.json` (or `%USERPROFILE%\.claude\settings.json` on Windows):
+
+**Linux & macOS:**
 ```json
 {
   "statusLine": {
     "command": "agentlens statusline"
+  }
+}
+```
+
+**Windows (Command Prompt & PowerShell):**
+```json
+{
+  "statusLine": {
+    "command": "agentlens.cmd statusline"
   }
 }
 ```
@@ -177,7 +219,7 @@ Add this snippet to `~/.claude/settings.json`:
 | `agentlens discover [--query <terms>] [--dry-run] [--json]` | Opt-in discovery of agent tools and MCPs from GitHub |
 | `agentlens statusline` | Streamlined stdin processor for Claude Code statusline payload |
 | `agentlens install-statusline` | Print configuration instructions for Claude Code statusline |
-| `agentlens install-service` | Install systemd user service (`~/.config/systemd/user/agentlens.service`) |
+| `agentlens install-service` | Install native background service (systemd user unit, launchd agent, or Windows scheduled task) |
 
 ---
 
@@ -201,25 +243,48 @@ agentlens strictly distinguishes three distinct metrics to avoid confusion:
 
 ---
 
-## 📁 Agent Data Sources & Compatibility
+## 📁 Platform Path Locations
 
-| Agent | Log / Database Path | Tokens Tracked | Quota Support |
+agentlens automatically adheres to platform filesystem standards across Linux, macOS, and Windows:
+
+| Path Item | Linux (XDG) | macOS (Darwin) | Windows |
 |---|---|---|---|
-| **Claude Code** | `~/.claude/projects/*/*.jsonl` | Input, output, reasoning, cache read/write (5m/1h) | Live 5h / 7d percentage & resets |
-| **Codex** | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | Input (deduped cache), output, reasoning, cache read | 5h / 7d rate limits from session events |
-| **OpenCode** | `~/.local/share/opencode/opencode.db` | Messages, tokens (input/output/reasoning/cache), tools | Session metrics (`n/a` for quota) |
-| **Antigravity** | `~/.gemini/antigravity/conversation_summaries.db` | Sessions, workspace roots, ccusage bridge | Session metrics (`n/a` for quota) |
+| **Data Directory** (`dataDir`) | `~/.local/share/agentlens` | `~/Library/Application Support/agentlens` | `%LOCALAPPDATA%\agentlens` |
+| **State Directory** (`stateDir`) | `~/.local/state/agentlens` | `~/Library/Caches/agentlens` | `%LOCALAPPDATA%\agentlens\state` |
+| **Reports Directory** (`reportsDir`) | `<dataDir>/reports` | `<dataDir>/reports` | `<dataDir>\reports` |
+| **SQLite Database** (`dbPath`) | `<dataDir>/agentlens.db` | `<dataDir>/agentlens.db` | `<dataDir>\agentlens.db` |
+| **Live Summary** (`summaryPath`) | `<stateDir>/summary.json` | `<stateDir>/summary.json` | `<stateDir>\summary.json` |
+| **Quota Spool** (`spoolPath`) | `<stateDir>/claude-quota.jsonl` | `<stateDir>/claude-quota.jsonl` | `<stateDir>\claude-quota.jsonl` |
+| **Candidates Store** (`candidatesPath`) | `<dataDir>/discovery_candidates.json` | `<dataDir>/discovery_candidates.json` | `<dataDir>\discovery_candidates.json` |
+
+> [!NOTE]
+> **Path Overrides & Backwards Compatibility:**
+> - `AGENTLENS_DATA_DIR` and `AGENTLENS_STATE_DIR` environment variables override default locations on all platforms.
+> - **Legacy fallback:** If `~/.local/share/agentlens/agentlens.db` already exists on disk, agentlens continues using the legacy XDG path regardless of OS, ensuring zero migration friction.
+
+---
+
+## 📁 Agent Data Sources & Universal Discovery
+
+agentlens performs read-only discovery of logs and session databases across Linux, macOS, and Windows:
+
+| Agent | Platform Log / Database Locations | Tokens Tracked | Quota Support |
+|---|---|---|---|
+| **Claude Code** | • `CLAUDE_CONFIG_DIR`<br>• `<home>/.claude/projects/*/*.jsonl`<br>*(Identical structure on Linux, macOS, and `%USERPROFILE%\.claude\projects` on Windows)* | Input, output, reasoning, cache read/write (5m/1h) | Live 5h / 7d percentage & resets |
+| **Codex** | • `CODEX_HOME`<br>• `<home>/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`<br>*(Identical structure on Linux, macOS, and `%USERPROFILE%\.codex\sessions` on Windows)* | Input (deduped cache), output, reasoning, cache read | 5h / 7d rate limits from session events |
+| **OpenCode** | Multi-root candidate discovery searching for `opencode.db` in priority order:<br>1. **Linux**: `~/.local/share/opencode` (or `$XDG_DATA_HOME/opencode`)<br>2. **macOS**: `~/Library/Application Support/opencode`<br>3. **Windows**: `%APPDATA%\opencode` and `%LOCALAPPDATA%\opencode`<br>*(Config audit also scans `~/.config/opencode`, `~/Library/Application Support/opencode`, and `%APPDATA%\opencode` for `opencode.json`)* | Messages, tokens (input/output/reasoning/cache), tools | Session metrics (`n/a` for quota) |
+| **Antigravity** | SQLite conversation summary database searched in priority order:<br>1. `<home>/.gemini/antigravity-cli/conversation_summaries.db`<br>2. `<home>/.gemini/antigravity/conversation_summaries.db`<br>*(Standard under user home directory on Linux, macOS, and Windows)* | Sessions, workspace roots, ccusage bridge | Session metrics (`n/a` for quota) |
 
 ---
 
 ## 🛠 Configuration
 
-| Environment Variable | Default Path | Purpose |
+| Environment Variable | Default Path (Linux / macOS / Windows) | Purpose |
 |---|---|---|
-| `AGENTLENS_DATA_DIR` | `~/.local/share/agentlens` | SQLite database (`agentlens.db`) and weekly reports |
-| `AGENTLENS_STATE_DIR` | `~/.local/state/agentlens` | Live summary (`summary.json`) and Claude quota spool |
+| `AGENTLENS_DATA_DIR` | `~/.local/share/agentlens`<br>`~/Library/Application Support/agentlens`<br>`%LOCALAPPDATA%\agentlens` | SQLite database (`agentlens.db`), reports, and discovery candidates |
+| `AGENTLENS_STATE_DIR` | `~/.local/state/agentlens`<br>`~/Library/Caches/agentlens`<br>`%LOCALAPPDATA%\agentlens\state` | Live summary (`summary.json`) and Claude quota spool |
 | `AGENTLENS_PORT` | `4711` | Dashboard HTTP listening port |
-| `AGENTLENS_SOURCE_HOME` | `$HOME` | Home directory scanned for agent logs |
+| `AGENTLENS_SOURCE_HOME` | User home directory (`$HOME` or `%USERPROFILE%`) | Base home directory scanned for agent logs |
 | `GITHUB_TOKEN` | *(optional)* | Personal access token for higher GitHub discovery rate limits |
 
 ---
@@ -227,7 +292,7 @@ agentlens strictly distinguishes three distinct metrics to avoid confusion:
 ## 🧪 Testing & Verification
 
 ```bash
-# Run test suite (119 unit & integration tests)
+# Run test suite (153 unit & integration tests)
 npm test
 
 # Run TypeScript typecheck
