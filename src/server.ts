@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DB } from './db.ts';
+import { getFindings, getRecommendations, updateRecommendationStatus } from './db.ts';
 import type { Filter } from './types.ts';
 import * as q from './queries.ts';
 
@@ -36,6 +37,17 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
     '/api/session': (_f, sp) => q.sessionDetail(db, sp.get('id') ?? ''),
     '/api/quota': (f) => q.quota(db, f),
     '/api/health': () => q.health(db),
+    '/api/findings': (f, sp) => {
+      const rule = sp.get('rule') || undefined;
+      const findings = getFindings(db, { projectId: f.projectId, rule });
+      const totalEstWeeklySavings = findings.reduce((sum, item) => sum + (item.estTokensWeek || 0), 0);
+      return { findings, totalEstWeeklySavings };
+    },
+    '/api/recommendations': (f, sp) => {
+      const status = sp.get('status') || undefined;
+      const recs = getRecommendations(db, { projectId: f.projectId, status });
+      return { recommendations: recs };
+    },
   };
 
   const server = createServer((req, res) => {
@@ -48,6 +60,23 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       return send(res, 400, 'text/plain', 'bad request'); // e.g. `GET //` is an invalid URL; must not escape the listener
     }
     try {
+      if (req.method === 'POST' && url.pathname.startsWith('/api/recommendations/') && url.pathname.endsWith('/status')) {
+        const parts = url.pathname.split('/');
+        const id = parts[3];
+        let body = '';
+        req.on('data', (c) => (body += c));
+        req.on('end', () => {
+          try {
+            const json = JSON.parse(body);
+            const ok = updateRecommendationStatus(db, id, json.status);
+            send(res, 200, 'application/json', JSON.stringify({ ok, id, status: json.status }));
+          } catch {
+            send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+          }
+        });
+        return;
+      }
+
       const handler = api[url.pathname];
       if (handler) return send(res, 200, 'application/json', JSON.stringify(handler(filterOf(url.searchParams), url.searchParams)));
       const file = normalize(join(WEB, url.pathname === '/' ? 'index.html' : url.pathname));
