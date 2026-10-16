@@ -31,9 +31,10 @@ CREATE INDEX IF NOT EXISTS findings_rule ON findings(rule);
 CREATE TABLE IF NOT EXISTS recommendations (
   id TEXT PRIMARY KEY, finding_rule TEXT NOT NULL, project_id INTEGER REFERENCES projects(id),
   action TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, catalog_ref TEXT,
-  status TEXT NOT NULL DEFAULT 'open', accepted_at INTEGER, result TEXT);
+  status TEXT NOT NULL DEFAULT 'open', accepted_at INTEGER, result TEXT, score INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS recs_project ON recommendations(project_id);
 CREATE INDEX IF NOT EXISTS recs_status ON recommendations(status);
+CREATE INDEX IF NOT EXISTS recs_score ON recommendations(score);
 `;
 
 export function openDb(path: string): DB {
@@ -41,6 +42,7 @@ export function openDb(path: string): DB {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  try { db.exec('ALTER TABLE recommendations ADD COLUMN score INTEGER NOT NULL DEFAULT 0;'); } catch {}
   return db;
 }
 
@@ -157,12 +159,13 @@ export function getFindings(db: DB, filter?: { projectId?: number; rule?: string
 
 export function upsertRecommendations(db: DB, recs: Recommendation[]): void {
   const st = db.prepare(`
-    INSERT INTO recommendations (id, finding_rule, project_id, action, title, body, catalog_ref, status, accepted_at, result)
-    VALUES ($id, $findingRule, $projectId, $action, $title, $body, $catalogRef, $status, $acceptedAt, $result)
+    INSERT INTO recommendations (id, finding_rule, project_id, action, title, body, catalog_ref, status, accepted_at, result, score)
+    VALUES ($id, $findingRule, $projectId, $action, $title, $body, $catalogRef, $status, $acceptedAt, $result, $score)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       body = excluded.body,
       catalog_ref = excluded.catalog_ref,
+      score = excluded.score,
       result = coalesce(excluded.result, recommendations.result)
   `);
   for (const r of recs) {
@@ -177,12 +180,13 @@ export function upsertRecommendations(db: DB, recs: Recommendation[]): void {
       status: r.status ?? 'open',
       acceptedAt: r.acceptedAt ?? null,
       result: r.result ? JSON.stringify(r.result) : null,
+      score: r.score ?? 0,
     });
   }
 }
 
 export function getRecommendations(db: DB, filter?: { projectId?: number; status?: string }): Recommendation[] {
-  let sql = 'SELECT id, finding_rule AS findingRule, project_id AS projectId, action, title, body, catalog_ref AS catalogRef, status, accepted_at AS acceptedAt, result FROM recommendations WHERE 1=1';
+  let sql = 'SELECT id, finding_rule AS findingRule, project_id AS projectId, action, title, body, catalog_ref AS catalogRef, status, accepted_at AS acceptedAt, result, score FROM recommendations WHERE 1=1';
   const params: any[] = [];
   if (filter?.projectId != null) {
     sql += ' AND project_id = ?';
@@ -192,6 +196,7 @@ export function getRecommendations(db: DB, filter?: { projectId?: number; status
     sql += ' AND status = ?';
     params.push(filter.status);
   }
+  sql += ' ORDER BY score DESC';
   const rows = db.prepare(sql).all(...params) as any[];
   return rows.map((r) => ({
     ...r,

@@ -39,3 +39,13 @@ tr[data-href]:hover, tr[data-href]:focus-visible { background: var(--bg); outlin
 tr[data-href]:focus-visible td:first-child { box-shadow: inset 3px 0 var(--accent); }
 a { color: var(--accent); }
 .u-legend { color: var(--text); }
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.rec-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; }
+.rec-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.rec-actions { display: flex; gap: 8px; margin-top: auto; }
+.btn { font: inherit; font-size: 13px; font-weight: 500; padding: 6px 12px; border-radius: 6px; cursor: pointer; border: none; background: var(--accent); color: #fff; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-outline:hover { background: var(--bg); }
+

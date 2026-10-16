@@ -209,7 +209,123 @@ async function healthPage() {
   };
 }
 
-const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, health: healthPage };
+async function recommendationsPage() {
+  const [recData, findData] = await Promise.all([
+    fetch(api('/api/recommendations')).then((r) => r.json()),
+    fetch(api('/api/findings')).then((r) => r.json()),
+  ]);
+
+  const recs = recData.recommendations || [];
+  const findings = findData.findings || [];
+  const savings = findData.totalEstWeeklySavings || 0;
+
+  const openRecs = recs.filter((r) => r.status === 'open');
+  const acceptedRecs = recs.filter((r) => r.status === 'accepted');
+
+  const ACTION_COLORS = {
+    add: '#22c55e',
+    remove: '#ef4444',
+    replace: '#f59e0b',
+    improve: '#3b82f6',
+  };
+
+  const CONF_COLORS = {
+    high: '#22c55e',
+    medium: '#f59e0b',
+    low: '#6b7280',
+  };
+
+  const tiles = `
+    <div class="tiles">
+      <div class="tile">
+        <div class="label">Est. Weekly Potential Savings</div>
+        <div class="value">${fmtTok(savings)}</div>
+        <div class="note">Measured token waste across patterns</div>
+      </div>
+      <div class="tile">
+        <div class="label">Open Recommendations</div>
+        <div class="value">${openRecs.length}</div>
+        <div class="note">${acceptedRecs.length} accepted</div>
+      </div>
+      <div class="tile">
+        <div class="label">Flagged Findings</div>
+        <div class="value">${findings.length}</div>
+        <div class="note">Across 10 workflow detectors</div>
+      </div>
+    </div>
+  `;
+
+  const recList = openRecs.length === 0
+    ? '<p class="empty">No open recommendations! All active patterns resolved or dismissed.</p>'
+    : `<div class="rec-grid">
+        ${openRecs.map((r) => `
+          <div class="rec-card" data-rec-id="${esc(r.id)}">
+            <div class="rec-header">
+              <span class="badge" style="background:${ACTION_COLORS[r.action] || '#3b82f6'};color:#fff">${esc(r.action.toUpperCase())}</span>
+              <span class="badge" style="border:1px solid #e5e7eb;color:var(--text)">${esc(r.findingRule.replace(/_/g, ' '))}</span>
+              <span style="margin-left:auto;font-weight:600;color:#10b981">${r.score ? `+${fmtTok(r.score)} tokens/wk` : ''}</span>
+            </div>
+            <h3 style="margin:8px 0 4px;font-size:15px">${esc(r.title)}</h3>
+            <p style="margin:0 0 12px;color:var(--muted);font-size:13px">${esc(r.body)}</p>
+            <div class="rec-actions">
+              <button class="btn btn-sm btn-accept" data-id="${esc(r.id)}">Accept</button>
+              <button class="btn btn-sm btn-outline btn-dismiss" data-id="${esc(r.id)}">Dismiss</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+
+  const findingsTable = table(
+    [
+      { label: 'Rule', get: (f) => f.rule.replace(/_/g, ' ') },
+      { label: 'Confidence', html: true, get: (f) => `<span style="color:${CONF_COLORS[f.confidence] || 'inherit'};font-weight:600">${esc(f.confidence)}</span>` },
+      { label: 'Reason', get: (f) => f.confidenceReason },
+      { label: 'Est. Waste/Wk', num: true, get: (f) => f.estTokensWeek ? fmtTok(f.estTokensWeek) : 'diagnostic' },
+      { label: 'Last Seen', get: (f) => fmtTime(f.lastSeen) },
+    ],
+    findings,
+    (f) => f.sessionId ? `#/session/${f.sessionId}` : undefined,
+  );
+
+  return {
+    html: `
+      <h1>Recommendations & Findings</h1>
+      <p class="hint">Deterministic workflow waste detection, potential savings, and actionable configuration suggestions.</p>
+      ${tiles}
+      <h2>Active Recommendations</h2>
+      ${recList}
+      <h2>Workflow Findings (${findings.length})</h2>
+      <p class="hint">Click any row with a session link to drill into per-turn context growth and tool calls.</p>
+      ${findingsTable}
+    `,
+    after: () => {
+      document.querySelectorAll('.btn-accept').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const id = e.target.dataset.id;
+          await fetch(`/api/recommendations/${encodeURIComponent(id)}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'accepted' }),
+          });
+          render();
+        });
+      });
+      document.querySelectorAll('.btn-dismiss').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const id = e.target.dataset.id;
+          await fetch(`/api/recommendations/${encodeURIComponent(id)}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'dismissed' }),
+          });
+          render();
+        });
+      });
+    },
+  };
+}
+
+const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, recommendations: recommendationsPage, health: healthPage };
 
 async function render() {
   const [, name = 'overview', arg = ''] = location.hash.split('/');
