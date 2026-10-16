@@ -77,6 +77,7 @@ export interface Recommendation {
   action: ActionType;
   title: string;
   body: string;
+  actionSnippet?: string;
   catalogRef?: string;
   status: RecommendationStatus;
   acceptedAt?: number;

@@ -17,6 +17,14 @@ test('detectContextGrowth detects runaway prompt tokens without compaction', () 
     { id: 'e3', agent: 'claude', sessionId: 's1', ts: now + 300, kind: 'assistant', input: 140_000, output: 500 },
   ]);
 
+  // Session s2 reached 120k, but user ran /compact and final turn dropped to 25k
+  upsertSessions(db, [{ id: 's2', agent: 'claude', cwd: '/work/repo', projectId: pId }]);
+  upsertEvents(db, [
+    { id: 'e2_1', agent: 'claude', sessionId: 's2', ts: now + 100, kind: 'assistant', input: 30_000, output: 500 },
+    { id: 'e2_2', agent: 'claude', sessionId: 's2', ts: now + 200, kind: 'assistant', input: 120_000, output: 500 },
+    { id: 'e2_3', agent: 'claude', sessionId: 's2', ts: now + 300, kind: 'assistant', input: 25_000, output: 500 },
+  ]);
+
   const findings = detectContextGrowth(db);
   assert.equal(findings.length, 1);
   assert.equal(findings[0].rule, 'context_growth');
@@ -25,17 +33,22 @@ test('detectContextGrowth detects runaway prompt tokens without compaction', () 
   assert.ok(findings[0].estTokensWeek > 50_000);
 });
 
-test('detectCacheMisses detects cold cache re-ingestion after idle timeout', () => {
+test('detectCacheMisses detects cold cache re-ingestion on Claude/Codex but ignores non-caching agents', () => {
   const db = openDb(':memory:');
   const pId = upsertProject(db, '/work/repo', 'repo');
-  upsertSessions(db, [{ id: 's1', agent: 'claude', cwd: '/work/repo', projectId: pId }]);
+  upsertSessions(db, [
+    { id: 's1', agent: 'claude', cwd: '/work/repo', projectId: pId },
+    { id: 's_opencode', agent: 'opencode', cwd: '/work/repo', projectId: pId },
+  ]);
 
   const now = Date.now();
   upsertEvents(db, [
-    // Turn 1
+    // Claude Turn 1 & 2
     { id: 'e1', agent: 'claude', sessionId: 's1', ts: now, kind: 'assistant', input: 40_000, output: 500, cacheWrite: 40_000 },
-    // Turn 2: 10 minutes later (> 5m TTL), 0 cache read, 40_000 input
     { id: 'e2', agent: 'claude', sessionId: 's1', ts: now + 600_000, kind: 'assistant', input: 40_000, output: 500, cacheRead: 0 },
+    // OpenCode Turn 1 & 2 (has no cache support)
+    { id: 'op1', agent: 'opencode', sessionId: 's_opencode', ts: now, kind: 'assistant', input: 40_000, output: 500, cacheRead: 0 },
+    { id: 'op2', agent: 'opencode', sessionId: 's_opencode', ts: now + 600_000, kind: 'assistant', input: 40_000, output: 500, cacheRead: 0 },
   ]);
 
   const findings = detectCacheMisses(db);

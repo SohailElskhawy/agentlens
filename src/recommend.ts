@@ -8,6 +8,7 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
     let action: ActionType = 'improve';
     let title = '';
     let body = '';
+    let actionSnippet: string | undefined;
     let catalogRef: string | undefined;
 
     switch (f.rule) {
@@ -15,6 +16,7 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         action = 'improve';
         title = 'Run /compact or reset long conversation context';
         body = 'Prompt context accumulated heavily without compaction. Run /compact periodically or break complex tasks into smaller focused sessions.';
+        actionSnippet = '/compact';
         break;
 
       case 'cache_miss':
@@ -29,6 +31,7 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
           ? 'Add a local test/check script to avoid Bash command retries'
           : `Consolidate repeated calls to '${f.evidence?.tool ?? 'tool'}'`;
         body = `Identical '${f.evidence?.tool}' calls were executed ${f.evidence?.count ?? 'multiple'} times. Script multi-step checks or add explicit failure guidance to CLAUDE.md / AGENTS.md.`;
+        actionSnippet = f.evidence?.tool === 'Bash' ? 'bash tools/check.sh' : undefined;
         break;
 
       case 'hot_files':
@@ -41,18 +44,21 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         action = 'replace';
         title = 'Truncate or stream large tool outputs';
         body = `A tool invocation produced ${Math.round((f.evidence?.resultBytes ?? 0) / 1024)} KB of output. Use line limits (e.g. head/tail/grep) to prevent flooding agent context with massive dumps.`;
+        actionSnippet = '| head -n 100';
         break;
 
       case 'repeated_prompt':
         action = 'add';
         title = 'Convert repeated prompt into a slash command or skill';
         body = `This prompt pattern was used across ${f.evidence?.sessionCount ?? 'multiple'} separate sessions. Define a project slash command or skill to automate it cleanly.`;
+        actionSnippet = '/skill <name>';
         break;
 
       case 'model_fit':
         action = 'replace';
         title = 'Use lightweight model for single-turn quick queries';
         body = `Flagship model '${f.evidence?.model}' was used on a short single-turn query producing ${f.evidence?.outputTokens} tokens. Use Sonnet, Haiku, or Flash for simple queries.`;
+        actionSnippet = '--model sonnet';
         break;
 
       case 'handoff':
@@ -71,6 +77,7 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         action = 'improve';
         title = `Pace consumption to prevent ${f.evidence?.agent} ${f.evidence?.window} quota lockout`;
         body = `${f.evidence?.agent} reached ${Math.round(f.evidence?.usedPct ?? 0)}% of its ${f.evidence?.window} quota. Check top consuming sessions and pace intensive tasks before reset.`;
+        actionSnippet = 'agentlens status';
         break;
 
       default:
@@ -90,13 +97,19 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
       action,
       title,
       body,
+      actionSnippet,
       catalogRef,
       status: 'open',
       score,
     });
   }
 
-  // Sort descending by score, tie-break by title
-  recs.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.title.localeCompare(b.title));
+  // Sort descending by score, tie-break by title and id
+  recs.sort(
+    (a, b) =>
+      (b.score ?? 0) - (a.score ?? 0) ||
+      a.title.localeCompare(b.title) ||
+      a.id.localeCompare(b.id)
+  );
   return recs;
 }

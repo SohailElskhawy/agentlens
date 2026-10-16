@@ -62,14 +62,36 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
     try {
       if (req.method === 'POST' && url.pathname.startsWith('/api/recommendations/') && url.pathname.endsWith('/status')) {
         const parts = url.pathname.split('/');
-        const id = parts[3];
+        let id: string;
+        try {
+          id = decodeURIComponent(parts.slice(3, parts.length - 1).join('/'));
+        } catch {
+          return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid id encoding' }));
+        }
+
         let body = '';
-        req.on('data', (c) => (body += c));
+        let tooLarge = false;
+        req.on('data', (c) => {
+          body += c;
+          if (body.length > 16384) {
+            tooLarge = true;
+            req.destroy();
+            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+          }
+        });
         req.on('end', () => {
+          if (tooLarge) return;
           try {
             const json = JSON.parse(body);
+            const VALID_STATUSES = new Set(['open', 'accepted', 'measuring', 'verified', 'no_effect', 'regressed', 'dismissed']);
+            if (!VALID_STATUSES.has(json.status)) {
+              return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid status' }));
+            }
             const ok = updateRecommendationStatus(db, id, json.status);
-            send(res, 200, 'application/json', JSON.stringify({ ok, id, status: json.status }));
+            if (!ok) {
+              return send(res, 404, 'application/json', JSON.stringify({ error: 'recommendation not found', id }));
+            }
+            send(res, 200, 'application/json', JSON.stringify({ ok: true, id, status: json.status }));
           } catch {
             send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
           }

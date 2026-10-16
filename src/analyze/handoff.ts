@@ -8,6 +8,7 @@ export function detectHandoffs(db: DB, options?: { sessionId?: string; projectId
            s.agent,
            s.project_id AS projectId,
            min(e.ts) AS startTs,
+           max(e.ts) AS endTs,
            sum(e.input) AS inputTokens
     FROM sessions s
     JOIN events e ON e.session_id = s.id
@@ -31,7 +32,7 @@ export function detectHandoffs(db: DB, options?: { sessionId?: string; projectId
     const curr = rows[i];
     if (curr.projectId !== prev.projectId) continue;
 
-    const gapMs = curr.startTs - prev.startTs;
+    const gapMs = curr.startTs - prev.endTs;
     if (curr.agent !== prev.agent && gapMs >= 0 && gapMs <= HANDOFF_WINDOW_MS) {
       const minutes = Math.round(gapMs / 60_000);
       const estTokensWeek = Math.max(5000, Math.round(curr.inputTokens * 0.5));

@@ -71,8 +71,9 @@ test('GET /api/findings returns findings and totalEstWeeklySavings', async () =>
 });
 
 test('GET /api/recommendations and POST /api/recommendations/:id/status updates status', async () => {
+  const recId = 'rec:context_growth:global:f1';
   const rec: Recommendation = {
-    id: 'r1',
+    id: recId,
     findingRule: 'context_growth',
     projectId: null,
     action: 'improve',
@@ -85,13 +86,23 @@ test('GET /api/recommendations and POST /api/recommendations/:id/status updates 
   const res1 = await get('/api/recommendations');
   assert.equal(res1.status, 200);
   assert.ok(Array.isArray(res1.body.recommendations));
-  assert.equal(res1.body.recommendations[0].id, 'r1');
+  assert.equal(res1.body.recommendations[0].id, recId);
   assert.equal(res1.body.recommendations[0].status, 'open');
 
-  const updateRes = await post('/api/recommendations/r1/status', { status: 'accepted' });
+  // Test URL-encoded ID
+  const updateRes = await post(`/api/recommendations/${encodeURIComponent(recId)}/status`, { status: 'accepted' });
   assert.equal(updateRes.status, 200);
   assert.equal(updateRes.body.ok, true);
+  assert.equal(updateRes.body.status, 'accepted');
 
   const res2 = await get('/api/recommendations');
   assert.equal(res2.body.recommendations[0].status, 'accepted');
+
+  // Test invalid status returns 400
+  const badStatusRes = await post(`/api/recommendations/${encodeURIComponent(recId)}/status`, { status: 'hacked_status' });
+  assert.equal(badStatusRes.status, 400);
+
+  // Test unknown ID returns 404
+  const notFoundRes = await post('/api/recommendations/rec%3Anot%3Afound/status', { status: 'dismissed' });
+  assert.equal(notFoundRes.status, 404);
 });

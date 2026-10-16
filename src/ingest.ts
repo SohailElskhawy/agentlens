@@ -3,7 +3,7 @@ import { antigravity } from './adapters/antigravity.ts';
 import { claude } from './adapters/claude.ts';
 import { codex } from './adapters/codex.ts';
 import { opencode } from './adapters/opencode.ts';
-import { type DB, getCursor, insertQuotas, setCursor, tx, upsertEvents, upsertProject, upsertRecommendations, upsertSessions } from './db.ts';
+import { type DB, getCursor, getFindings, insertQuotas, setCursor, tx, upsertEvents, upsertProject, upsertRecommendations, upsertSessions } from './db.ts';
 import { runDetectors } from './analyze/runner.ts';
 import { generateRecommendations } from './recommend.ts';
 import { projectName, projectRoot } from './project.ts';
@@ -66,8 +66,8 @@ export async function ingest(db: DB, home: string, adapters = ADAPTERS): Promise
 
   if (stats.read > 0) {
     try {
-      const findings = runDetectors(db);
-      const recs = generateRecommendations(findings);
+      runDetectors(db);
+      const recs = generateRecommendations(getFindings(db));
       upsertRecommendations(db, recs);
     } catch (e) {
       console.error(`agentlens: detector error: ${(e as Error).message}`);

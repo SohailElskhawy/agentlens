@@ -12,7 +12,7 @@ export function detectCacheMisses(db: DB, options?: { sessionId?: string; projec
            e.cache_read AS cacheRead
     FROM events e
     LEFT JOIN sessions s ON s.id = e.session_id
-    WHERE e.kind = 'assistant'
+    WHERE e.kind = 'assistant' AND e.agent IN ('claude', 'codex')
   `;
   const params: any[] = [];
   if (options?.sessionId) {

@@ -211,8 +211,8 @@ async function healthPage() {
 
 async function recommendationsPage() {
   const [recData, findData] = await Promise.all([
-    fetch(api('/api/recommendations')).then((r) => r.json()),
-    fetch(api('/api/findings')).then((r) => r.json()),
+    api('recommendations'),
+    api('findings'),
   ]);
 
   const recs = recData.recommendations || [];
@@ -267,6 +267,7 @@ async function recommendationsPage() {
             </div>
             <h3 style="margin:8px 0 4px;font-size:15px">${esc(r.title)}</h3>
             <p style="margin:0 0 12px;color:var(--muted);font-size:13px">${esc(r.body)}</p>
+            ${r.actionSnippet ? `<div><code class="action-snippet">${esc(r.actionSnippet)}</code></div>` : ''}
             <div class="rec-actions">
               <button class="btn btn-sm btn-accept" data-id="${esc(r.id)}">Accept</button>
               <button class="btn btn-sm btn-outline btn-dismiss" data-id="${esc(r.id)}">Dismiss</button>
@@ -301,7 +302,7 @@ async function recommendationsPage() {
     after: () => {
       document.querySelectorAll('.btn-accept').forEach((btn) => {
         btn.addEventListener('click', async (e) => {
-          const id = e.target.dataset.id;
+          const id = e.currentTarget.dataset.id;
           await fetch(`/api/recommendations/${encodeURIComponent(id)}/status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -312,7 +313,7 @@ async function recommendationsPage() {
       });
       document.querySelectorAll('.btn-dismiss').forEach((btn) => {
         btn.addEventListener('click', async (e) => {
-          const id = e.target.dataset.id;
+          const id = e.currentTarget.dataset.id;
           await fetch(`/api/recommendations/${encodeURIComponent(id)}/status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

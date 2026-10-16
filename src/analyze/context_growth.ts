@@ -34,6 +34,18 @@ export function detectContextGrowth(db: DB, options?: { sessionId?: string; proj
   const findings: Finding[] = [];
 
   for (const r of rows) {
+    const lastTurn = db.prepare(`
+      SELECT (input + cache_read) AS lastTokens
+      FROM events
+      WHERE session_id = ? AND kind = 'assistant'
+      ORDER BY ts DESC LIMIT 1
+    `).get(r.sessionId) as { lastTokens: number } | undefined;
+
+    // If final turn context dropped below 50k (or dropped by > 50% from peak), compaction occurred
+    if (lastTurn && (lastTurn.lastTokens < 50_000 || lastTurn.lastTokens < r.peakTokens * 0.5)) {
+      continue;
+    }
+
     const baseline = 30_000;
     const peak = r.peakTokens;
     const estTokensWeek = Math.max(0, peak - baseline);

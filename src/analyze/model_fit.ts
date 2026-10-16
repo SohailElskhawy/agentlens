@@ -7,6 +7,7 @@ export function detectModelFit(db: DB, options?: { sessionId?: string; projectId
            s.project_id AS projectId,
            e.model,
            count(*) AS turnCount,
+           (SELECT count(*) FROM events WHERE session_id = e.session_id AND kind = 'assistant') AS sessionTurns,
            sum(e.input) AS totalInput,
            sum(e.output) AS totalOutput,
            min(e.ts) AS firstTs,
@@ -26,8 +27,8 @@ export function detectModelFit(db: DB, options?: { sessionId?: string; projectId
   }
   sql += `
     GROUP BY e.session_id, s.project_id, e.model
-    HAVING count(*) = 1 AND sum(e.output) < 100 AND (
-      lower(e.model) LIKE '%opus%' OR lower(e.model) LIKE '%o1%' OR lower(e.model) LIKE '%o3%'
+    HAVING sessionTurns = 1 AND sum(e.output) < 100 AND (
+      lower(e.model) LIKE '%opus%' OR lower(e.model) LIKE '%o1%' OR lower(e.model) LIKE '%o3%' OR lower(e.model) LIKE '%gpt-4o%'
     )
   `;
 

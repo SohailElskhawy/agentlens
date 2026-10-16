@@ -50,14 +50,51 @@ test('generateRecommendations creates prioritized recommendations from findings'
   assert.equal(recs[0].findingRule, 'context_growth');
   assert.equal(recs[0].score, 150_000);
   assert.equal(recs[0].action, 'improve');
+  assert.equal(recs[0].actionSnippet, '/compact');
   assert.match(recs[0].title, /compaction|reset/i);
 
   // Second: retry_loop (10k * 1.0 = 10k)
   assert.equal(recs[1].findingRule, 'retry_loop');
   assert.equal(recs[1].score, 10_000);
+  assert.equal(recs[1].actionSnippet, 'bash tools/check.sh');
 
   // Third: repeated_prompt (6k * 0.6 = 3600)
   assert.equal(recs[2].findingRule, 'repeated_prompt');
   assert.equal(recs[2].score, 3600);
   assert.equal(recs[2].action, 'add');
+  assert.equal(recs[2].actionSnippet, '/skill <name>');
+});
+
+test('generateRecommendations breaks ties deterministically by title then id', () => {
+  const f1: Finding = {
+    id: 'f_b',
+    rule: 'context_growth',
+    projectId: 1,
+    sessionId: 's1',
+    evidence: {},
+    confidence: 'high',
+    confidenceReason: 'reason',
+    estTokensWeek: 10_000,
+    firstSeen: 1000,
+    lastSeen: 2000,
+  };
+  const f2: Finding = {
+    id: 'f_a',
+    rule: 'context_growth',
+    projectId: 1,
+    sessionId: 's2',
+    evidence: {},
+    confidence: 'high',
+    confidenceReason: 'reason',
+    estTokensWeek: 10_000,
+    firstSeen: 1000,
+    lastSeen: 2000,
+  };
+
+  const recs = generateRecommendations([f1, f2]);
+  assert.equal(recs.length, 2);
+  assert.equal(recs[0].score, recs[1].score);
+  // Titles are identical, so secondary tie-break by ID takes effect ('f_a' < 'f_b')
+  assert.equal(recs[0].id.includes('f_a'), true);
+  assert.equal(recs[1].id.includes('f_b'), true);
 });

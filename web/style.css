@@ -48,4 +48,5 @@ a { color: var(--accent); }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
 .btn-outline:hover { background: var(--bg); }
+.action-snippet { background: var(--bg); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; display: inline-block; margin-bottom: 12px; color: var(--text); word-break: break-all; }
 

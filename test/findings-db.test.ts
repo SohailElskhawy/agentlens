@@ -84,6 +84,7 @@ test('upsertRecommendations, getRecommendations, and updateRecommendationStatus 
     action: 'improve',
     title: 'Consolidate Bash retries',
     body: 'Add bash verification script in tools/check.sh',
+    actionSnippet: 'bash tools/check.sh',
     status: 'open',
   };
 
@@ -92,6 +93,7 @@ test('upsertRecommendations, getRecommendations, and updateRecommendationStatus 
   const list = getRecommendations(db);
   assert.equal(list.length, 1);
   assert.equal(list[0].id, 'r1');
+  assert.equal(list[0].actionSnippet, 'bash tools/check.sh');
   assert.equal(list[0].status, 'open');
 
   // Update status to accepted
