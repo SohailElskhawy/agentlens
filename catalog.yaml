@@ -99,6 +99,7 @@
   targetRules:
     - model_fit
     - quota_pressure
+    - cross_agent_balance
   estSavingsPct: 40
   recommendedAction: add
   installCommand: npx tokenomics analyze

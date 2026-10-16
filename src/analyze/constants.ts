@@ -7,6 +7,8 @@ export const HANDOFF_WINDOW_MS = 1_800_000; // 30 minutes
 export const SUBAGENT_MIN_INPUT = 50_000;
 export const SUBAGENT_MAX_OUTPUT = 500;
 export const QUOTA_PRESSURE_THRESHOLD = 80.0;
+export const CROSS_AGENT_TIGHT_THRESHOLD = 70.0;
+export const CROSS_AGENT_HEADROOM_DIFF = 25.0;
 
 export const CONFIDENCE_WEIGHTS = {
   high: 1.0,

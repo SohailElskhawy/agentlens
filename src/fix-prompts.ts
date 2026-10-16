@@ -71,6 +71,12 @@ export function generateFixPrompt(ctx: FixPromptContext): string {
       return `Pace consumption on ${agent}: quota reached ${used} in the ${win} window. Pause non-critical tasks or offload background work to another available agent.`;
     }
 
+    case 'cross_agent_balance': {
+      const alt = ev.altAgent ? (ev.altAgent.charAt(0).toUpperCase() + ev.altAgent.slice(1)) : 'Codex';
+      const reset = ev.resetFormatted || 'quota reset';
+      return `Route pending project tasks to ${alt} until primary agent quota resets at ${reset}. Follow repository guidelines and preserve project context.`;
+    }
+
     case 'instruction_overhead':
     case 'instruction_bloat': {
       const name = ev.name || 'project instruction files';

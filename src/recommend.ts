@@ -81,6 +81,19 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         actionSnippet = 'agentlens status';
         break;
 
+      case 'cross_agent_balance': {
+        const tight = f.evidence?.tightAgent || 'claude';
+        const alt = f.evidence?.altAgent || 'codex';
+        const resetStr = f.evidence?.resetFormatted || 'next reset';
+        const capAlt = alt.charAt(0).toUpperCase() + alt.slice(1);
+        const capTight = tight.charAt(0).toUpperCase() + tight.slice(1);
+        action = 'replace';
+        title = `Use ${capAlt} for this project until ${resetStr}`;
+        body = `${capTight}'s ${f.evidence?.window || '7d'} quota is tight (${Math.round(f.evidence?.tightUsedPct ?? 0)}% used), while ${capAlt} has headroom (${Math.round(f.evidence?.altUsedPct ?? 0)}% used). Route active tasks to ${capAlt} until ${resetStr} to prevent quota lockout.`;
+        actionSnippet = alt.toLowerCase() === 'codex' ? 'codex' : alt.toLowerCase() === 'claude' ? 'claude' : 'opencode';
+        break;
+      }
+
       case 'instruction_bloat':
         action = 'improve';
         title = 'Trim always-loaded instruction files';

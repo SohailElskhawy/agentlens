@@ -11,6 +11,7 @@ import { detectQuotaPressure } from './quota_pressure.ts';
 import { detectRepeatedPrompts } from './repeated_prompt.ts';
 import { detectRetryLoops } from './retry_loop.ts';
 import { detectSubagentShare } from './subagent_share.ts';
+import { detectCrossAgentBalance } from './cross_agent_balance.ts';
 
 export function runDetectors(db: DB, options?: { sessionId?: string; projectId?: number }): Finding[] {
   const findings: Finding[] = [
@@ -24,6 +25,7 @@ export function runDetectors(db: DB, options?: { sessionId?: string; projectId?:
     ...detectHandoffs(db, options),
     ...detectSubagentShare(db, options),
     ...detectQuotaPressure(db),
+    ...detectCrossAgentBalance(db, options),
   ];
 
   if (findings.length > 0) {

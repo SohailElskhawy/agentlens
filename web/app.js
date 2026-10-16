@@ -260,16 +260,49 @@ function renderSkeleton() {
 
 // Pages
 async function overview() {
-  const [s, daily, models, projects, quota] = await Promise.all([
+  const [s, daily, models, projects, quota, findingsRes] = await Promise.all([
     api('summary'),
     api('daily'),
     api('models'),
     api('projects'),
     api('quota'),
+    api('findings').catch(() => ({ findings: [] })),
   ]);
   const t = s.totals;
   const days = [...new Set(daily.map((d) => d.day))];
   const agents = [...new Set(daily.map((d) => d.agent))];
+
+  const findings = findingsRes?.findings || [];
+  const balanceFinding = findings.find((f) => f.rule === 'cross_agent_balance');
+
+  const balanceCard = balanceFinding ? `
+    <div class="card" style="margin-bottom:var(--space-4);border-color:var(--accent);background:var(--surface)">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--accent-subtle);display:flex;align-items:center;justify-content:center;color:var(--accent)">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 3 21 3 21 8"></polyline>
+              <line x1="4" y1="20" x2="21" y2="3"></line>
+              <polyline points="21 16 21 21 16 21"></polyline>
+              <line x1="15" y1="15" x2="21" y2="21"></line>
+              <line x1="4" y1="4" x2="9" y2="9"></line>
+            </svg>
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <h3 style="margin:0;font-size:15px;font-weight:600">Cross-Agent Workload Balancing</h3>
+              <span class="badge" style="background:var(--accent-subtle);color:var(--accent);font-weight:600">Recommendation</span>
+            </div>
+            <p style="margin:4px 0 0;font-size:13px;color:var(--text-main)">
+              <strong>${esc(balanceFinding.evidence?.suggestion || balanceFinding.confidenceReason)}</strong>
+              <span style="color:var(--text-muted);margin-left:6px">${esc(balanceFinding.confidenceReason)}</span>
+            </p>
+          </div>
+        </div>
+        <a href="#/recommendations" class="btn btn-sm btn-outline">View Recommendations &rarr;</a>
+      </div>
+    </div>
+  ` : '';
 
   return {
     html: `
@@ -279,6 +312,8 @@ async function overview() {
         ${tile('Sessions', String(s.sessions), t.tokens ? `${Math.round((t.cacheRead / t.tokens) * 100)}% of tokens were cache reads` : '')}
         ${quotaTiles(quota.latest)}
       </section>
+
+      ${balanceCard}
 
       <div class="grid-12">
         <div class="col-7 card chart-container">
