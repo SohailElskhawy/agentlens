@@ -128,6 +128,19 @@ async function updateQuotaPills() {
     const container = $('#quota-pills');
     if (!container || !q || !q.latest) return;
     const now = Date.now();
+    let forecastPills = '';
+    if (q.forecasts && q.forecasts.length > 0) {
+      for (const fc of q.forecasts) {
+        if (fc.willExhaustBeforeReset && fc.message) {
+          forecastPills += `
+            <a class="quota-pill" href="#/quota" style="border-color:var(--warn);background:var(--warn-bg);color:var(--warn)" title="${esc(fc.agent)} ${esc(fc.window)}: ${esc(fc.message)}">
+              <span class="quota-pill-dot" style="background:var(--warn)"></span>
+              <span style="font-weight:600">${esc(fc.message)}</span>
+            </a>
+          `;
+        }
+      }
+    }
     const pills = q.latest
       .filter((l) => (l.agent === 'claude' || l.agent === 'codex') && l.resetsAt > now)
       .map((l) => {
@@ -141,7 +154,7 @@ async function updateQuotaPills() {
           </a>
         `;
       }).join('');
-    container.innerHTML = pills;
+    container.innerHTML = forecastPills + pills;
   } catch {}
 }
 

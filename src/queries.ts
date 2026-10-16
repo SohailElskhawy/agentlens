@@ -111,9 +111,12 @@ export function sessionDetail(db: DB, id: string) {
   };
 }
 
+import { computeQuotaForecasts } from './quota-forecast.ts';
+
 export function quota(db: DB, f: Filter) {
   const p = { from: f.from ?? 0, to: f.to ?? Number.MAX_SAFE_INTEGER, agent: f.agent ?? '' };
   const agentSql = `($agent = '' OR agent = $agent)`;
+  const forecasts = computeQuotaForecasts(db).filter((fc) => !p.agent || fc.agent === p.agent);
   return {
     latest: plain(db.prepare(`SELECT agent, win, used_pct AS usedPct, resets_at AS resetsAt, ts FROM quota_snapshots q
       WHERE ts = (SELECT max(ts) FROM quota_snapshots WHERE agent = q.agent AND win = q.win) AND ${agentSql}
@@ -123,6 +126,7 @@ export function quota(db: DB, f: Filter) {
     limitHits: plain(db.prepare(`SELECT agent, win, resets_at AS resetsAt, min(ts) AS firstHit FROM quota_snapshots
       WHERE used_pct >= 100 AND ts >= $from AND ts < $to AND ${agentSql}
       GROUP BY agent, win, resets_at ORDER BY firstHit DESC`).all(p)),
+    forecasts,
   };
 }
 

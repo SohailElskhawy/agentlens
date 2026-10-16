@@ -19,6 +19,7 @@ import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates } from './discover.ts';
 import { getPlatformPaths } from './paths.ts';
 import { installService } from './service.ts';
+import { computeQuotaForecasts } from './quota-forecast.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -214,11 +215,14 @@ const commands: Record<string, () => unknown> = {
     if (quotaRows.length === 0) {
       console.log(`  n/a`);
     } else {
+      const forecasts = computeQuotaForecasts(db);
       for (const q of quotaRows) {
         const agentName = q.agent.charAt(0).toUpperCase() + q.agent.slice(1);
         const minsLeft = Math.max(0, Math.round((q.resetsAt - Date.now()) / 60_000));
         const resetStr = minsLeft >= 60 ? `${Math.floor(minsLeft / 60)}h ${minsLeft % 60}m` : `${minsLeft}m`;
-        console.log(`  ${agentName} ${q.win}: ${Math.round(q.usedPct)}% (resets in ${resetStr})`);
+        const f = forecasts.find((x) => x.agent === q.agent && x.window === q.win);
+        const forecastStr = f?.willExhaustBeforeReset && f?.message ? ` -- ${f.message}` : '';
+        console.log(`  ${agentName} ${q.win}: ${Math.round(q.usedPct)}% (resets in ${resetStr})${forecastStr}`);
       }
     }
     console.log(`==================================================\n`);

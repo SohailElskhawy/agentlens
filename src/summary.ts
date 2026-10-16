@@ -4,6 +4,7 @@ import type { DB } from './db.ts';
 import { insertQuotas, tx } from './db.ts';
 import { projectName, projectRoot } from './project.ts';
 import type { QuotaSnapshot } from './types.ts';
+import { computeQuotaForecasts, type QuotaForecastResult } from './quota-forecast.ts';
 
 export interface ProjectSummary {
   projectId: number;
@@ -22,6 +23,8 @@ export interface SummaryData {
     claude?: { '5h'?: number; '7d'?: number };
     codex?: { '5h'?: number; '7d'?: number };
   };
+  forecasts?: QuotaForecastResult[];
+  statuslineForecast?: string;
 }
 
 export function formatTokens(tokens: number): string {
@@ -157,11 +160,17 @@ export function writeSummary(db: DB, targetPath: string): void {
     quotas[a]![q.win] = q.usedPct;
   }
 
+  const forecasts = computeQuotaForecasts(db);
+  const activeExhaustion = forecasts.find((f) => f.willExhaustBeforeReset && f.message);
+  const statuslineForecast = activeExhaustion?.message;
+
   const data: SummaryData = {
     updatedAt: Date.now(),
     totals: { tokensToday: totalTokensToday },
     projects,
     quotas,
+    forecasts,
+    statuslineForecast,
   };
 
   mkdirSync(dirname(targetPath), { recursive: true });
@@ -190,5 +199,9 @@ export function formatStatusline(summaryPath: string, projectCwd: string): strin
   const h5Str = claude5h != null ? `${Math.round(claude5h)}%` : '--';
   const d7Str = claude7d != null ? `${Math.round(claude7d)}%` : '--';
 
-  return `${name} · ${tokensTodayStr} · 5h ${h5Str} · 7d ${d7Str}`;
+  const base = `${name} · ${tokensTodayStr} · 5h ${h5Str} · 7d ${d7Str}`;
+  if (data?.statuslineForecast) {
+    return `${base} · ${data.statuslineForecast}`;
+  }
+  return base;
 }
