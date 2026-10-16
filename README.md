@@ -237,6 +237,7 @@ agentlens is engineered from the ground up to respect developer privacy and syst
 - **Strict Network Isolation:** Dashboard binds exclusively to loopback (`127.0.0.1`) with DNS rebinding host protection. No analytics, telemetry, or external AI model calls are made.
 - **Zero Agent Token Allowance:** agentlens never injects prompt instructions or SessionStart hooks into active coding sessions.
 - **Privacy-Safe Discovery:** The optional GitHub discovery engine operates strictly on generic alphanumeric keyword queries. Local paths, project names, or token metrics are never transmitted.
+- **Opt-In Agent Automation (`Fix Now`):** Executing automated fixes via local agent CLIs (`claude`, `codex`, `opencode`) is strictly opt-in and disabled by default until explicitly enabled in Settings (`Allow agentlens to launch agents`). All CLI commands require confirmation displaying the exact command array and verified project folder, and are executed via direct `execFile`/`spawn` argument arrays (never a shell string) restricted solely to repositories already tracked by agentlens.
 
 ---
 

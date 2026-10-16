@@ -4,13 +4,15 @@ import { extname, join, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { DB } from './db.ts';
-import { getAuditItems, getFindings, getRecommendations, updateRecommendationStatus } from './db.ts';
+import { getAllSettings, getAuditItems, getFindings, getRecommendations, setSetting, updateRecommendationStatus } from './db.ts';
 import type { AuditKind, AuditStatus, Filter } from './types.ts';
 import { generateWeeklyReport } from './report.ts';
 import { evaluateRecommendations } from './track.ts';
 import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates, loadDiscoveredCandidates } from './discover.ts';
 import { getPlatformPaths } from './paths.ts';
+import { generateFixPrompt } from './fix-prompts.ts';
+import { runFix } from './fix-runner.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -115,6 +117,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
     },
     '/api/catalog': () => ({ catalog: getCuratedCatalog() }),
     '/api/candidates': () => ({ candidates: loadDiscoveredCandidates(process.env.AGENTLENS_SOURCE_HOME || homedir()) }),
+    '/api/settings': () => ({ settings: getAllSettings(db) }),
   };
 
   const server = createServer((req, res) => {
@@ -255,6 +258,105 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
             }));
           } catch (e) {
             send(res, 400, 'application/json', JSON.stringify({ error: (e as Error).message }));
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/settings') {
+        let body = '';
+        let tooLarge = false;
+        req.on('data', (c) => {
+          if (tooLarge) return;
+          body += c;
+          if (body.length > 16384) {
+            tooLarge = true;
+            req.resume();
+            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+          }
+        });
+        req.on('end', () => {
+          if (tooLarge) return;
+          try {
+            const json = JSON.parse(body || '{}');
+            if (json.key && typeof json.value === 'string') {
+              setSetting(db, json.key, json.value);
+            } else if (typeof json.allowAgentLaunch === 'boolean') {
+              setSetting(db, 'allow_agent_launch', json.allowAgentLaunch ? 'true' : 'false');
+            }
+            send(res, 200, 'application/json', JSON.stringify({ ok: true, settings: getAllSettings(db) }));
+          } catch {
+            send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/fix/prompt') {
+        let body = '';
+        let tooLarge = false;
+        req.on('data', (c) => {
+          if (tooLarge) return;
+          body += c;
+          if (body.length > 16384) {
+            tooLarge = true;
+            req.resume();
+            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+          }
+        });
+        req.on('end', () => {
+          if (tooLarge) return;
+          try {
+            const json = JSON.parse(body || '{}');
+            const prompt = generateFixPrompt(json);
+            send(res, 200, 'application/json', JSON.stringify({ ok: true, prompt }));
+          } catch (e: any) {
+            send(res, 400, 'application/json', JSON.stringify({ error: e.message || 'invalid payload' }));
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/fix/run') {
+        let body = '';
+        let tooLarge = false;
+        req.on('data', (c) => {
+          if (tooLarge) return;
+          body += c;
+          if (body.length > 16384) {
+            tooLarge = true;
+            req.resume();
+            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+          }
+        });
+        req.on('end', async () => {
+          if (tooLarge) return;
+          try {
+            const json = JSON.parse(body || '{}');
+            const { agent, prompt, projectId, recommendationId, headless } = json;
+            if (!agent || !prompt || projectId == null) {
+              return send(res, 400, 'application/json', JSON.stringify({ error: 'Missing required fields: agent, prompt, projectId' }));
+            }
+            const proj = db.prepare('SELECT id, root FROM projects WHERE id = ?').get(projectId) as { id: number; root: string } | undefined;
+            if (!proj) {
+              return send(res, 400, 'application/json', JSON.stringify({ error: 'Unknown project' }));
+            }
+            const result = await runFix(db, {
+              agent,
+              prompt,
+              projectId,
+              projectPath: proj.root,
+              headless: Boolean(headless),
+            });
+            if (recommendationId) {
+              updateRecommendationStatus(db, recommendationId, 'accepted');
+              evaluateRecommendations(db);
+            }
+            send(res, 200, 'application/json', JSON.stringify(result));
+          } catch (e: any) {
+            const msg = e.message || String(e);
+            const status = msg.includes('Permission denied') ? 403 : msg.includes('currently in progress') ? 429 : 400;
+            send(res, status, 'application/json', JSON.stringify({ error: msg }));
           }
         });
         return;

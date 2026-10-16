@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS audit_items (
 CREATE INDEX IF NOT EXISTS audit_project ON audit_items(project_id);
 CREATE INDEX IF NOT EXISTS audit_kind ON audit_items(kind);
 CREATE INDEX IF NOT EXISTS audit_status ON audit_items(status);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `;
 
 export function openDb(path: string): DB {
@@ -296,5 +297,21 @@ export function getAuditItems(
     ...r,
     details: JSON.parse(r.details || '{}'),
   }));
+}
+
+export function getSetting(db: DB, key: string, defaultValue = ''): string {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row ? row.value : defaultValue;
+}
+
+export function setSetting(db: DB, key: string, value: string): void {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+}
+
+export function getAllSettings(db: DB): Record<string, string> {
+  const rows = db.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>;
+  const res: Record<string, string> = {};
+  for (const r of rows) res[r.key] = r.value;
+  return res;
 }
 

@@ -313,6 +313,279 @@ async function projectsPage() {
   };
 }
 
+async function projectPage(projectId) {
+  const [projects, recData, findData, auditData, sessions, settingsRes] = await Promise.all([
+    api('projects'),
+    api('recommendations', { project: projectId }),
+    api('findings', { project: projectId }),
+    api('audit', { project: projectId }),
+    api('sessions', { project: projectId, limit: '20' }),
+    fetch('/api/settings').then((r) => r.json()).catch(() => ({ settings: {} })),
+  ]);
+
+  const p = projects.find((x) => String(x.projectId) === String(projectId));
+  if (!p) return { html: emptyState('Project not found', 'Project is not recognized or has no recorded sessions.') };
+
+  const recs = recData.recommendations || [];
+  const findings = findData.findings || [];
+  const auditItems = auditData.items || [];
+  const settings = settingsRes.settings || {};
+  const allowAgentLaunch = settings.allow_agent_launch === 'true';
+
+  const fixItems = [];
+
+  for (const r of recs) {
+    if (r.status === 'dismissed') continue;
+    const f = findings.find((x) => x.rule === r.findingRule && (x.projectId == null || String(x.projectId) === String(projectId)));
+    const agent = f?.evidence?.agent || (p.agents ? p.agents.split(',')[0] : 'claude');
+    const evidenceOneLine = f ? (f.confidenceReason || JSON.stringify(f.evidence)) : (r.body || 'Identified workflow waste');
+    fixItems.push({
+      type: 'recommendation',
+      id: r.id,
+      title: r.title,
+      evidence: evidenceOneLine,
+      agent,
+      rule: r.findingRule,
+      estSavings: r.score || f?.estTokensWeek || 2000,
+      status: r.status,
+      actionSnippet: r.actionSnippet,
+      finding: f,
+      rec: r,
+    });
+  }
+
+  for (const item of auditItems) {
+    if (item.status === 'unused' || item.status === 'duplicate' || item.status === 'conflict') {
+      const estSavings = (item.tokens || 100) * 10;
+      fixItems.push({
+        type: 'audit',
+        id: item.id,
+        title: `Remove or resolve ${item.status} ${item.kind} '${item.name}'`,
+        evidence: `Source: ${item.sourcePath} (${item.status})`,
+        agent: item.agent === 'all' ? (p.agents ? p.agents.split(',')[0] : 'claude') : item.agent,
+        rule: `unused_${item.kind}`,
+        estSavings,
+        status: 'open',
+        auditItem: item,
+      });
+    }
+  }
+
+  fixItems.sort((a, b) => (b.estSavings || 0) - (a.estSavings || 0));
+
+  const fixNowRows = fixItems.length === 0
+    ? `<div style="padding:24px;text-align:center;color:var(--text-muted)">All clear! No open recommendations or audit issues detected for this project.</div>`
+    : `
+      <div class="table-card-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Fix Action</th>
+              <th>Evidence</th>
+              <th class="num">Est. Savings</th>
+              <th>Agent</th>
+              <th>Status</th>
+              <th style="text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fixItems.map((item) => `
+              <tr data-fix-id="${esc(item.id)}" data-rule="${esc(item.rule)}" data-agent="${esc(item.agent)}">
+                <td style="font-weight:500">${esc(item.title)}</td>
+                <td style="color:var(--text-muted);font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis">${esc(item.evidence)}</td>
+                <td class="num" style="font-weight:600;color:var(--success)">+${fmtTok(item.estSavings)}/wk</td>
+                <td><span class="badge" style="background:var(--surface-subtle);border:1px solid var(--border)">${esc(item.agent)}</span></td>
+                <td><span class="pill pill-${esc(item.status)} status-pill">${esc(item.status.toUpperCase())}</span></td>
+                <td style="text-align:right">
+                  <div style="display:inline-flex;gap:6px">
+                    <button class="btn btn-sm btn-outline btn-copy-fix" data-id="${esc(item.id)}" data-rule="${esc(item.rule)}" data-agent="${esc(item.agent)}" title="Copy generated prompt to clipboard">Copy Prompt</button>
+                    <button class="btn btn-sm btn-send-agent ${allowAgentLaunch ? '' : 'btn-outline'}" data-id="${esc(item.id)}" data-rule="${esc(item.rule)}" data-agent="${esc(item.agent)}" ${allowAgentLaunch ? '' : 'data-disabled-reason="launch_disabled"'} title="${allowAgentLaunch ? 'Send fix to agent CLI' : 'Enable agent launching in Settings'}">
+                      ${allowAgentLaunch ? 'Send to agent' : 'Send (Disabled)'}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+  return {
+    html: `
+      <div class="card-header" style="margin-bottom:var(--space-4);flex-wrap:wrap;gap:12px">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <h1 style="margin:0;font-size:18px;font-weight:600">${esc(p.name)}</h1>
+            <span class="badge" style="background:var(--surface-subtle);border:1px solid var(--border)">${esc(p.agents)}</span>
+          </div>
+          <p class="hint" style="margin:4px 0 0;font-family:var(--font-mono);font-size:12px">${esc(p.root)}</p>
+        </div>
+        <a href="#/projects" class="btn btn-sm btn-outline">&larr; All projects</a>
+      </div>
+
+      <!-- Fix Now Panel -->
+      <div class="card" style="margin-bottom:var(--space-4);border-color:var(--accent-subtle)">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title" style="color:var(--accent)">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+              Fix Now
+            </h3>
+            <span class="card-subtitle">Prioritized actions to eliminate token waste in this project. Ranked by weekly savings.</span>
+          </div>
+          ${!allowAgentLaunch ? `<a href="#/settings" class="badge" style="background:var(--warn-bg);color:var(--warn);text-decoration:none">Agent Launch Disabled in Settings</a>` : ''}
+        </div>
+        ${fixNowRows}
+      </div>
+
+      <!-- Project KPIs -->
+      <section class="tiles-row">
+        ${tile('Tokens (measured)', fmtTok(p.tokens), `${fmtTok(p.cacheRead)} cache read`)}
+        ${tile('API-equivalent cost (estimated)', cost(p))}
+        ${tile('Sessions', String(p.sessions))}
+        ${tile('Last active', fmtTime(p.lastActive))}
+      </section>
+
+      <!-- Recent Sessions -->
+      <div class="card" style="margin-top:var(--space-4)">
+        <div class="card-header">
+          <h3 class="card-title">Recent Project Sessions</h3>
+          <span class="card-subtitle">Sessions associated with this workspace</span>
+        </div>
+        ${table([
+          { label: 'Last activity', get: (r) => fmtTime(r.ended) },
+          agentCol,
+          { label: 'Turns', num: true, get: (r) => r.turns },
+          { label: 'Tool calls', num: true, get: (r) => r.toolCalls },
+          ...tokCols,
+        ], sessions, (r) => `#/session/${encodeURIComponent(r.id)}`)}
+      </div>
+    `,
+    after: () => {
+      document.querySelectorAll('.btn-copy-fix').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const id = e.currentTarget.dataset.id;
+          const rule = e.currentTarget.dataset.rule;
+          const agent = e.currentTarget.dataset.agent;
+          const row = e.currentTarget.closest('tr');
+          btn.disabled = true;
+
+          try {
+            const promptRes = await fetch('/api/fix/prompt', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                rule,
+                agent,
+                projectId,
+                projectName: p.name,
+                projectRoot: p.root,
+              }),
+            }).then((r) => r.json());
+
+            const prompt = promptRes.prompt;
+            await navigator.clipboard.writeText(prompt);
+
+            if (id.startsWith('rec:')) {
+              await fetch(`/api/recommendations/${encodeURIComponent(id)}/accept`, { method: 'POST' });
+            }
+
+            btn.textContent = 'Copied!';
+            const statusPill = row?.querySelector('.status-pill');
+            if (statusPill) {
+              statusPill.textContent = 'MEASURING';
+              statusPill.className = 'pill pill-measuring status-pill';
+            }
+
+            setTimeout(() => { btn.textContent = 'Copy Prompt'; btn.disabled = false; }, 2000);
+          } catch (err) {
+            alert(`Failed to copy prompt: ${err.message}`);
+            btn.disabled = false;
+          }
+        });
+      });
+
+      document.querySelectorAll('.btn-send-agent').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          if (btn.dataset.disabledReason === 'launch_disabled') {
+            alert('Agent execution is disabled by default for privacy & safety.\n\nPlease enable "Allow agentlens to launch agents" on the Settings page first.');
+            location.hash = '#/settings';
+            return;
+          }
+
+          const id = e.currentTarget.dataset.id;
+          const rule = e.currentTarget.dataset.rule;
+          const agent = e.currentTarget.dataset.agent;
+          const row = e.currentTarget.closest('tr');
+
+          const promptRes = await fetch('/api/fix/prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              rule,
+              agent,
+              projectId,
+              projectName: p.name,
+              projectRoot: p.root,
+            }),
+          }).then((r) => r.json());
+
+          const prompt = promptRes.prompt;
+          const defaultCli = agent === 'claude' ? 'claude' : agent === 'codex' ? 'codex' : 'opencode run';
+
+          const confirmText = `Send Fix to Agent?\n\nCommand: ${defaultCli} "${prompt.slice(0, 80)}..."\nFolder: ${p.root}\n\nClick OK to launch in background terminal (or Cancel to abort).`;
+          if (!confirm(confirmText)) return;
+
+          btn.disabled = true;
+          btn.textContent = 'Launching...';
+
+          try {
+            const runRes = await fetch('/api/fix/run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                agent,
+                prompt,
+                projectId,
+                recommendationId: id.startsWith('rec:') ? id : undefined,
+                headless: false,
+              }),
+            });
+            const data = await runRes.json();
+
+            if (!runRes.ok) {
+              alert(`Launch failed: ${data.error || runRes.statusText}`);
+            } else {
+              btn.textContent = 'Dispatched!';
+              const statusPill = row?.querySelector('.status-pill');
+              if (statusPill) {
+                statusPill.textContent = 'MEASURING';
+                statusPill.className = 'pill pill-measuring status-pill';
+              }
+              if (data.mode === 'headless' && data.diffStat) {
+                openSlideOver(`Fix Output: ${p.name}`, `
+                  <h4>Command Executed</h4>
+                  <pre><code>${esc(data.command)}</code></pre>
+                  <h4>Git Changes (git diff --stat)</h4>
+                  <pre><code>${esc(data.diffStat || 'No working tree changes recorded.')}</code></pre>
+                  ${data.output ? `<h4>Output</h4><pre><code>${esc(data.output)}</code></pre>` : ''}
+                `);
+              }
+            }
+          } catch (err) {
+            alert(`Error running fix: ${err.message}`);
+          } finally {
+            setTimeout(() => { btn.disabled = false; btn.textContent = 'Send to agent'; }, 2500);
+          }
+        });
+      });
+    },
+  };
+}
+
 async function sessionsPage() {
   const rows = await api('sessions', { limit: '300' });
   return {
@@ -1115,6 +1388,13 @@ async function healthPage() {
 
 async function settingsPage() {
   const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+  let settings = {};
+  try {
+    const res = await fetch('/api/settings').then((r) => r.json());
+    settings = res.settings || {};
+  } catch {}
+  const allowAgentLaunch = settings.allow_agent_launch === 'true';
+
   return {
     html: `
       <div class="card-header" style="margin-bottom:var(--space-4)">
@@ -1149,13 +1429,14 @@ async function settingsPage() {
 
         <div class="col-6 card">
           <div class="card-header"><h3 class="card-title">Agent Automation (Opt-In)</h3></div>
-          <p style="margin-bottom:12px;color:var(--text-muted)">Allow agentlens to execute fix prompts with local CLI agents (claude, codex, opencode).</p>
+          <p style="margin-bottom:12px;color:var(--text-muted)">Allow agentlens to dispatch fixes directly to local CLI agents (claude, codex, opencode).</p>
           <div id="settings-agent-automation-section">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="chk-allow-agent-launch" />
-              <span>Allow agentlens to launch agents</span>
+              <input type="checkbox" id="chk-allow-agent-launch" ${allowAgentLaunch ? 'checked' : ''} />
+              <span style="font-weight:500">Allow agentlens to launch agents</span>
             </label>
             <p class="hint" style="margin-top:8px">When disabled, fix actions only offer "Copy Prompt". When enabled, fixes can be dispatched directly to your agent CLI.</p>
+            <div id="settings-save-status" style="font-size:12px;color:var(--success);margin-top:6px;display:none">Settings saved successfully.</div>
           </div>
         </div>
       </div>
@@ -1171,6 +1452,19 @@ async function settingsPage() {
       });
       $('#settings-toggle-sidebar')?.addEventListener('click', toggleSidebar);
       $('#settings-show-shortcuts')?.addEventListener('click', openShortcutsModal);
+      $('#chk-allow-agent-launch')?.addEventListener('change', async (e) => {
+        const checked = e.target.checked;
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ allowAgentLaunch: checked }),
+        });
+        const statusEl = $('#settings-save-status');
+        if (statusEl) {
+          statusEl.style.display = 'block';
+          setTimeout(() => { statusEl.style.display = 'none'; }, 2000);
+        }
+      });
     },
   };
 }
@@ -1178,6 +1472,7 @@ async function settingsPage() {
 const routes = {
   overview,
   projects: projectsPage,
+  project: projectPage,
   sessions: sessionsPage,
   session: sessionPage,
   quota: quotaPage,
@@ -1191,12 +1486,10 @@ const routes = {
 
 async function render() {
   const [, name = 'overview', arg = ''] = location.hash.split('/');
-  if (name === 'project') {
+  if (name === 'project' && arg) {
     state.project = arg;
     const fProj = $('#f-project');
     if (fProj) fProj.value = arg;
-    location.replace('#/overview');
-    return;
   }
 
   document.querySelectorAll('#sidebar a').forEach((a) => {
