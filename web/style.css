@@ -67,4 +67,16 @@ a { color: var(--accent); }
 .track-delta.positive { color: #15803d; }
 .track-delta.negative { color: #b91c1c; }
 
+.catalog-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0; flex-wrap: wrap; }
+.catalog-tabs { display: flex; gap: 8px; }
+.catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; margin-top: 16px; }
+.catalog-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; }
+.catalog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.catalog-title { font-size: 15px; font-weight: 600; margin: 0; }
+.catalog-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.catalog-desc { color: var(--text); font-size: 13px; line-height: 1.4; margin-bottom: 12px; flex: 1; }
+.catalog-install { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-family: monospace; font-size: 12px; word-break: break-all; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.stars-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: #fef3c7; color: #b45309; font-weight: 600; font-size: 12px; }
+
+
 

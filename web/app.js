@@ -599,7 +599,165 @@ async function reportsPage() {
   };
 }
 
-const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, recommendations: recommendationsPage, audit: auditPage, reports: reportsPage, health: healthPage };
+async function catalogPage() {
+  const [catRes, candRes] = await Promise.all([
+    fetch('/api/catalog').then((r) => r.json()).catch(() => ({ catalog: [] })),
+    fetch('/api/candidates').then((r) => r.json()).catch(() => ({ candidates: [] })),
+  ]);
+
+  const catalog = catRes.catalog || [];
+  const candidates = candRes.candidates || [];
+  const tab = state.catalogTab || 'curated';
+  const kindFilter = state.catalogKind || 'all';
+
+  let filteredCatalog = catalog;
+  if (kindFilter !== 'all') {
+    filteredCatalog = catalog.filter((c) => c.kind === kindFilter);
+  }
+
+  const tabsHtml = `
+    <div class="catalog-bar">
+      <div class="catalog-tabs">
+        <button id="tab-curated" class="btn btn-sm ${tab === 'curated' ? '' : 'btn-outline'}">Curated Tools & MCPs (${catalog.length})</button>
+        <button id="tab-candidates" class="btn btn-sm ${tab === 'candidates' ? '' : 'btn-outline'}">Discovered Candidates (${candidates.length})</button>
+      </div>
+      ${tab === 'curated' ? `
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:12px;color:var(--muted)">Kind:
+            <select id="sel-cat-kind" style="font-size:12px;padding:2px 6px">
+              <option value="all" ${kindFilter === 'all' ? 'selected' : ''}>All Types</option>
+              <option value="mcp" ${kindFilter === 'mcp' ? 'selected' : ''}>MCP Servers</option>
+              <option value="tool" ${kindFilter === 'tool' ? 'selected' : ''}>CLI Tools</option>
+              <option value="plugin" ${kindFilter === 'plugin' ? 'selected' : ''}>Plugins</option>
+              <option value="skill" ${kindFilter === 'skill' ? 'selected' : ''}>Skills</option>
+            </select>
+          </label>
+        </div>
+      ` : ''}
+    </div>
+  `;
+
+  let contentHtml = '';
+  if (tab === 'curated') {
+    contentHtml = `
+      <div class="catalog-grid">
+        ${filteredCatalog.map((item) => `
+          <div class="catalog-card">
+            <div class="catalog-header">
+              <div>
+                <h3 class="catalog-title">${esc(item.name)}</h3>
+                <div class="catalog-meta">
+                  <span class="badge" style="background:var(--grid)">${esc(item.kind.toUpperCase())}</span>
+                  <span class="pill pill-active">~${item.estSavingsPct}% Potential Savings</span>
+                </div>
+              </div>
+            </div>
+            <div class="catalog-desc">${esc(item.description)}</div>
+            <div style="margin-bottom:12px">
+              <span style="font-size:11px;color:var(--muted)">Targets Waste Patterns:</span>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+                ${item.targetRules.map((r) => `<span class="pill" style="background:var(--bg)">${esc(r)}</span>`).join('')}
+              </div>
+            </div>
+            ${item.installCommand ? `
+              <div class="catalog-install">
+                <code>${esc(item.installCommand)}</code>
+              </div>
+            ` : ''}
+            <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center">
+              <a href="${esc(item.url)}" target="_blank" class="btn btn-sm btn-outline">View Repository ↗</a>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } else {
+    contentHtml = `
+      <div class="card" style="margin-top:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px">
+        <h3 style="margin:0 0 8px 0;font-size:14px">Opt-In GitHub Discovery</h3>
+        <p class="hint" style="margin-bottom:12px">
+          Search GitHub for public AI developer tools and MCPs. <strong>Privacy Guarantee:</strong> Searches use only generic keywords. Your code, prompts, project names, and tokens are never sent.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input type="text" id="inp-discover-q" placeholder="Search keywords (e.g. mcp server postgres)" style="flex:1;min-width:240px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit" />
+          <button id="btn-run-discover" class="btn btn-sm">Discover Tools</button>
+        </div>
+      </div>
+      ${candidates.length === 0 ? `
+        <div class="empty" style="text-align:center;padding:40px">
+          No candidate tools discovered yet. Click "Discover Tools" above or run <code>agentlens discover</code>.
+        </div>
+      ` : `
+        <div class="catalog-grid">
+          ${candidates.map((c) => `
+            <div class="catalog-card">
+              <div class="catalog-header">
+                <div>
+                  <h3 class="catalog-title">${esc(c.fullName)}</h3>
+                  <div class="catalog-meta">
+                    <span class="stars-pill">★ ${c.stars.toLocaleString()}</span>
+                    <span class="badge" style="background:var(--grid)">${esc(c.suggestedKind.toUpperCase())}</span>
+                    ${c.relevanceRule ? `<span class="pill" style="background:var(--bg)">${esc(c.relevanceRule)}</span>` : ''}
+                  </div>
+                </div>
+              </div>
+              <div class="catalog-desc">${esc(c.description || 'No description provided')}</div>
+              <div style="margin-top:auto">
+                <a href="${esc(c.url)}" target="_blank" class="btn btn-sm btn-outline">View on GitHub ↗</a>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    `;
+  }
+
+  return {
+    html: `
+      <h1>Tool Catalog & Discovery</h1>
+      <p class="hint">Curated AI tools, MCPs, and skills mapped to workflow waste patterns, with privacy-preserving tool discovery.</p>
+      ${tabsHtml}
+      ${contentHtml}
+    `,
+    after: () => {
+      $('#tab-curated')?.addEventListener('click', () => {
+        state.catalogTab = 'curated';
+        render();
+      });
+      $('#tab-candidates')?.addEventListener('click', () => {
+        state.catalogTab = 'candidates';
+        render();
+      });
+      $('#sel-cat-kind')?.addEventListener('change', (e) => {
+        state.catalogKind = e.target.value;
+        render();
+      });
+      $('#btn-run-discover')?.addEventListener('click', async (e) => {
+        const btn = e.target;
+        const q = $('#inp-discover-q')?.value?.trim();
+        btn.disabled = true;
+        btn.textContent = 'Discovering...';
+        try {
+          const res = await fetch('/api/discover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: q || undefined }),
+          });
+          const data = await res.json();
+          if (!res.ok) alert(`Discovery error: ${data.error || res.statusText}`);
+          else render();
+        } catch (err) {
+          alert(`Network error: ${err.message}`);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Discover Tools';
+        }
+      });
+    },
+  };
+}
+
+const routes = { overview, projects: projectsPage, sessions: sessionsPage, session: sessionPage, quota: quotaPage, recommendations: recommendationsPage, audit: auditPage, reports: reportsPage, catalog: catalogPage, health: healthPage };
 
 async function render() {
   const [, name = 'overview', arg = ''] = location.hash.split('/');
