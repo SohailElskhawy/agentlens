@@ -61,6 +61,9 @@
   targetRules:
     - repeated_prompt
     - context_growth
+    - outcome_efficiency
+    - abandoned_session
+    - compaction_churn
   estSavingsPct: 25
   recommendedAction: add
   installCommand: git clone https://github.com/obra/superpowers.git ~/.gemini/config/plugins/superpowers
@@ -100,6 +103,7 @@
     - model_fit
     - quota_pressure
     - cross_agent_balance
+    - reasoning_overuse
   estSavingsPct: 40
   recommendedAction: add
   installCommand: npx tokenomics analyze

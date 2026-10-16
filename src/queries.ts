@@ -149,3 +149,84 @@ export function quota(db: DB, f: Filter) {
 export function health(db: DB) {
   return checkHealth(db);
 }
+
+import { readGitNumstat } from './analyze/outcome_efficiency.ts';
+
+export function outcomeEfficiency(db: DB, f: Filter, gitReader?: typeof readGitNumstat) {
+  const reader = gitReader ?? readGitNumstat;
+  const projs = projects(db, f);
+  return projs.map((p) => {
+    const commits = reader(p.root);
+    const projSessions = db.prepare(`
+      SELECT s.id, s.agent, min(e.ts) AS started, max(e.ts) AS ended,
+             sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens
+      FROM sessions s
+      JOIN events e ON e.session_id = s.id
+      WHERE s.project_id = ?
+      GROUP BY s.id
+    `).all(p.projectId) as Array<{ id: string; agent: string; started: number; ended: number; tokens: number }>;
+
+    let attrCommits = 0;
+    let attrLines = 0;
+    const byAgentMap = new Map<string, { tokens: number; commits: number; lines: number }>();
+
+    for (const c of commits) {
+      const match = projSessions.find((s) => c.ts >= s.started - 60_000 && c.ts <= s.ended + 600_000);
+      if (match) {
+        attrCommits++;
+        const lines = c.added + c.deleted;
+        attrLines += lines;
+        const ag = byAgentMap.get(match.agent) || { tokens: 0, commits: 0, lines: 0 };
+        ag.commits++;
+        ag.lines += lines;
+        byAgentMap.set(match.agent, ag);
+      }
+    }
+
+    for (const s of projSessions) {
+      const ag = byAgentMap.get(s.agent) || { tokens: 0, commits: 0, lines: 0 };
+      ag.tokens += s.tokens;
+      byAgentMap.set(s.agent, ag);
+    }
+
+    const effCommits = attrCommits > 0 ? attrCommits : commits.length;
+    const effLines = attrLines > 0 ? attrLines : commits.reduce((acc, c) => acc + c.added + c.deleted, 0);
+
+    const tokensPerCommit = Math.round(p.tokens / Math.max(1, effCommits));
+    const tokensPerChangedLine = Math.round(p.tokens / Math.max(1, effLines));
+
+    const byAgent = Array.from(byAgentMap.entries()).map(([agent, data]) => ({
+      agent,
+      tokens: data.tokens,
+      commits: data.commits,
+      linesChanged: data.lines,
+      tokensPerCommit: Math.round(data.tokens / Math.max(1, data.commits)),
+      tokensPerChangedLine: Math.round(data.tokens / Math.max(1, data.lines)),
+    }));
+
+    const dayMap = new Map<string, { commits: number; lines: number }>();
+    for (const c of commits) {
+      const day = new Date(c.ts).toISOString().slice(0, 10);
+      const dm = dayMap.get(day) || { commits: 0, lines: 0 };
+      dm.commits++;
+      dm.lines += c.added + c.deleted;
+      dayMap.set(day, dm);
+    }
+    const trend = Array.from(dayMap.entries())
+      .map(([date, d]) => ({ date, commits: d.commits, linesChanged: d.lines }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      projectId: p.projectId,
+      name: p.name,
+      root: p.root,
+      tokens: p.tokens,
+      commits: effCommits,
+      linesChanged: effLines,
+      tokensPerCommit,
+      tokensPerChangedLine,
+      byAgent,
+      trend,
+    };
+  });
+}

@@ -382,17 +382,20 @@ async function projectsPage() {
 }
 
 async function projectPage(projectId) {
-  const [projects, recData, findData, auditData, sessions, settingsRes] = await Promise.all([
+  const [projects, recData, findData, auditData, sessions, settingsRes, outcomesRes] = await Promise.all([
     api('projects'),
     api('recommendations', { project: projectId }),
     api('findings', { project: projectId }),
     api('audit', { project: projectId }),
     api('sessions', { project: projectId, limit: '20' }),
     fetch('/api/settings').then((r) => r.json()).catch(() => ({ settings: {} })),
+    api('outcomes').catch(() => []),
   ]);
 
   const p = projects.find((x) => String(x.projectId) === String(projectId));
   if (!p) return { html: emptyState('Project not found', 'Project is not recognized or has no recorded sessions.') };
+
+  const outcome = Array.isArray(outcomesRes) ? outcomesRes.find((o) => String(o.projectId) === String(projectId)) : null;
 
   const recs = recData.recommendations || [];
   const findings = findData.findings || [];
@@ -562,6 +565,64 @@ async function projectPage(projectId) {
         </form>
       </div>
 
+      <!-- Outcome Efficiency Card -->
+      ${outcome ? `
+        <div class="card" style="margin-top:var(--space-4)">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Git Outcome Efficiency</h3>
+              <span class="card-subtitle">Tokens expended per git commit and changed line</span>
+            </div>
+            <span class="badge" style="background:var(--surface-subtle);border:1px solid var(--border)">${outcome.commits} commits · ${fmtTok(outcome.linesChanged)} lines</span>
+          </div>
+          <div class="tiles-row" style="margin-top:12px;margin-bottom:12px">
+            <div class="tile">
+              <div class="tile-lbl">Tokens / Commit</div>
+              <div class="tile-val" style="font-size:20px;font-weight:700;color:var(--text-main)">${fmtTok(outcome.tokensPerCommit)}</div>
+              <div class="tile-lbl">${outcome.commits} total commits</div>
+            </div>
+            <div class="tile">
+              <div class="tile-lbl">Tokens / Changed Line</div>
+              <div class="tile-val" style="font-size:20px;font-weight:700;color:var(--text-main)">${fmtTok(outcome.tokensPerChangedLine)}</div>
+              <div class="tile-lbl">${fmtTok(outcome.linesChanged)} lines changed</div>
+            </div>
+          </div>
+          ${outcome.byAgent && outcome.byAgent.length > 0 ? `
+            <div style="margin-top:12px">
+              <h4 style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">By Agent</h4>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th class="num">Tokens</th>
+                    <th class="num">Commits</th>
+                    <th class="num">Tokens / Commit</th>
+                    <th class="num">Tokens / Line</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${outcome.byAgent.map((ag) => `
+                    <tr>
+                      <td><strong>${esc(AGENTS[ag.agent] ?? ag.agent)}</strong></td>
+                      <td class="num">${fmtTok(ag.tokens)}</td>
+                      <td class="num">${ag.commits}</td>
+                      <td class="num">${fmtTok(ag.tokensPerCommit)}</td>
+                      <td class="num">${fmtTok(ag.tokensPerChangedLine)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : ''}
+          ${outcome.trend && outcome.trend.length > 1 ? `
+            <div style="margin-top:16px">
+              <h4 style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Commit Activity Trend</h4>
+              <div id="c-outcome-trend" style="height:140px"></div>
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
+
       <!-- Recent Sessions -->
       <div class="card" style="margin-top:var(--space-4)">
         <div class="card-header">
@@ -719,6 +780,14 @@ async function projectPage(projectId) {
         });
         render();
       });
+
+      if (outcome?.trend && outcome.trend.length > 1) {
+        const trendDays = outcome.trend.map((t) => Date.parse(`${t.date}T00:00:00`) / 1000);
+        chart('c-outcome-trend', trendDays, [
+          { label: 'Commits', color: 'var(--accent)', data: outcome.trend.map((t) => t.commits) },
+          { label: 'Lines changed', color: 'var(--success)', data: outcome.trend.map((t) => t.linesChanged) },
+        ]);
+      }
     },
   };
 }

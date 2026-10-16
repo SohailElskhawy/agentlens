@@ -129,6 +129,34 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         body = `Instructions in ${f.evidence?.projectName ?? 'project'} specify conflicting package managers (${f.evidence?.managers?.join(', ')}). Standardize on a single package manager.`;
         break;
 
+      case 'outcome_efficiency':
+        action = 'improve';
+        title = 'Improve outcome efficiency with focused task scoping';
+        body = `Project consumed ${f.evidence?.tokensPerCommit?.toLocaleString() ?? 'elevated'} tokens per commit (${f.evidence?.tokensPerChangedLine ?? 'many'} tokens/changed line). Break tasks into atomic milestones to raise commit frequency and reduce wasted turns.`;
+        actionSnippet = 'git commit -m "feat: atomic milestone"';
+        break;
+
+      case 'abandoned_session':
+        action = 'improve';
+        title = 'Define clear task goals to avoid abandoned sessions';
+        body = `Session consumed ${Math.round((f.evidence?.tokens ?? 0) / 1000)}k tokens over ${f.evidence?.turns ?? 'multiple'} turns without producing edits or commits. Formulate targeted specs before starting exploratory sessions.`;
+        actionSnippet = '/plan <task>';
+        break;
+
+      case 'compaction_churn':
+        action = 'improve';
+        title = 'Narrow session scope to reduce compaction churn';
+        body = `Session compacted context ${f.evidence?.compactions ?? 'multiple'} times. Running sprawling sessions loses vital context upon compaction; start fresh sessions per feature or bugfix.`;
+        actionSnippet = '/new';
+        break;
+
+      case 'reasoning_overuse':
+        action = 'improve';
+        title = 'Tune reasoning effort on routine single-turn tasks';
+        body = `Reasoning model consumed ${f.evidence?.totalReasoningTokens?.toLocaleString() ?? 'excessive'} thinking tokens for only ${f.evidence?.totalOutputTokens?.toLocaleString() ?? 'few'} output tokens (${f.evidence?.ratio ?? '5'}x ratio). Set reasoning effort to low or standard for non-complex tasks.`;
+        actionSnippet = '--thinking low';
+        break;
+
       default:
         action = 'improve';
         title = `Address ${f.rule.replace(/_/g, ' ')} workflow waste`;

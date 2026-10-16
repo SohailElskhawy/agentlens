@@ -12,6 +12,10 @@ import { detectRepeatedPrompts } from './repeated_prompt.ts';
 import { detectRetryLoops } from './retry_loop.ts';
 import { detectSubagentShare } from './subagent_share.ts';
 import { detectCrossAgentBalance } from './cross_agent_balance.ts';
+import { detectOutcomeEfficiency } from './outcome_efficiency.ts';
+import { detectAbandonedSessions } from './abandoned_session.ts';
+import { detectCompactionChurn } from './compaction_churn.ts';
+import { detectReasoningOveruse } from './reasoning_overuse.ts';
 
 export function runDetectors(db: DB, options?: { sessionId?: string; projectId?: number }): Finding[] {
   const findings: Finding[] = [
@@ -26,6 +30,10 @@ export function runDetectors(db: DB, options?: { sessionId?: string; projectId?:
     ...detectSubagentShare(db, options),
     ...detectQuotaPressure(db),
     ...detectCrossAgentBalance(db, options),
+    ...detectOutcomeEfficiency(db, options),
+    ...detectAbandonedSessions(db, options),
+    ...detectCompactionChurn(db, options),
+    ...detectReasoningOveruse(db, options),
   ];
 
   if (findings.length > 0) {
