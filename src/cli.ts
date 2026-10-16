@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { openDb, getRecommendations, updateRecommendationStatus } from './db.ts';
@@ -18,6 +17,7 @@ import { evaluateRecommendations } from './track.ts';
 import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates } from './discover.ts';
 import { getPlatformPaths } from './paths.ts';
+import { installService } from './service.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -101,30 +101,6 @@ async function serve() {
     }
   }
   setInterval(run, 60_000); // fallback for missed watch events and for roots created after startup
-}
-
-function installService() {
-  const dir = join(env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'systemd/user');
-  const path = join(dir, 'agentlens.service');
-  // ponytail: pins the current node binary path; re-run install-service after upgrading node.
-  const unit = `[Unit]
-Description=agentlens: local AI agent usage monitor
-
-[Service]
-ExecStart="${process.execPath}" --no-warnings=ExperimentalWarning "${fileURLToPath(import.meta.url)}" serve
-Restart=on-failure
-Nice=10
-IOSchedulingClass=idle
-MemoryMax=200M
-
-[Install]
-WantedBy=default.target
-`;
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(path, unit);
-  console.log(`wrote ${path}
-enable it with:  systemctl --user daemon-reload && systemctl --user enable --now agentlens
-(optional) keep it running without an active login:  loginctl enable-linger $USER`);
 }
 
 const commands: Record<string, () => unknown> = {
@@ -487,7 +463,17 @@ const commands: Record<string, () => unknown> = {
 }
 `);
   },
-  'install-service': installService,
+  'install-service': () => {
+    const res = installService({
+      cliPath: fileURLToPath(import.meta.url),
+    });
+    if (res.success) {
+      console.log(res.message);
+    } else {
+      console.error(res.message);
+      process.exitCode = 1;
+    }
+  },
   help: () => console.log(HELP),
 };
 
