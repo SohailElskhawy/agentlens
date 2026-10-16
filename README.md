@@ -4,13 +4,16 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![Privacy First](https://img.shields.io/badge/privacy-local--first-orange.svg)](#privacy--security-guarantees)
-[![Tests Passing](https://img.shields.io/badge/tests-153%20passing-success.svg)](test/)
+[![Tests Passing](https://img.shields.io/badge/tests-191%20passing-success.svg)](test/)
 
 **agentlens** is a lightweight, local-first, cross-platform usage and workflow optimizer for AI coding agents on Linux, macOS, and Windows:
 - **Claude Code** (Pro)
 - **Codex** (Plus)
 - **OpenCode** (Go)
 - **Antigravity** (Pro)
+- **Gemini CLI**
+- **Aider**
+- **Cursor**
 
 It monitors how you use AI coding agents to **save tokens, avoid hitting subscription usage limits, and eliminate repetitive agent workflows** — globally and per project.
 
@@ -20,14 +23,21 @@ It monitors how you use AI coding agents to **save tokens, avoid hitting subscri
 
 ## ⚡ Key Capabilities
 
-* **Unified Usage Dashboard:** Historical and continuous token consumption, session replays, model tier breakdowns, per-project costs, and active quotas.
-* **Quota Guard & Statusline:** Live 5-hour and 7-day rate-limit tracking for Claude Code (< 10ms latency) and Codex with reset countdowns and limit warnings.
-* **Workflow Waste Detectors:** 10 deterministic analyzers that detect retry loops, repetitive file reads, runaway context growth, idle cache misses, large tool dumps, and model mismatch.
-* **Configuration Audit:** Scans global and project instructions (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`), MCP servers, skills, and plugins. Calculates fixed session token overhead and detects unused (30d), duplicate, or conflicting configurations.
-* **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked, copyable actions enriched with vetted open-source tools from `catalog.yaml`.
+* **Unified Usage Dashboard (Fluid & Responsive):** Fluid full-width 12-column responsive layout, dense KPI bar, side-by-side uPlot canvas charts, dark/light token design system, collapsible sidebar, and slide-over drawers.
+* **"Fix Now" Project Action Runner:** Instant project fix panel ranking open recommendations by tokens saved, with one-click copyable prompts and opt-in "Send to agent" CLI dispatch (`claude`, `codex`, `opencode`) capturing live `git diff --stat`.
+* **Quota Forecasting & Live Statusline:** Burn rate extrapolation projecting 5-hour and 7-day rate-limit exhaustion times before reset (< 10ms latency in statusline, CLI status, and dashboard top bar).
+* **Live Desktop Alerts:** Proactive notifications during `serve` for active retry loops, quota exhaustion predicted within 30 minutes, or project budgets crossing 80%/100%.
+* **Per-Project Weekly Budgets:** Configurable weekly token and cost targets per project with visual progress bars and weekly report integration.
+* **Cross-Agent Quota Balancing:** Evaluates quota headroom across agents to recommend optimal agent switching.
+* **14 Workflow Waste Detectors:** Deterministic detectors covering retry loops, repetitive file reads, context runaway, idle cache misses, large tool dumps, model mismatch, git outcome efficiency, abandoned sessions, compaction churn, and reasoning overuse.
+* **Interactive Session Turn Timeline:** Per-turn stacked token charts (input, output, cache-read) with clickable detector event markers and finding slide-over views.
+* **Instruction Trimmer:** Generates non-destructive unified diffs proposing cuts for duplicate lines, conflicting rules, oversized code blocks, and stale paths across `CLAUDE.md`, `AGENTS.md`, and `GEMINI.md`.
+* **Configuration Audit:** Scans global and project instructions, MCP servers, skills, and plugins. Calculates fixed session token overhead and detects unused (30d), duplicate, or conflicting configurations.
+* **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked actions enriched with vetted open-source tools from `catalog.yaml`.
 * **Automated Weekly Usage Reports:** Generates comprehensive Monday reports in GitHub-flavored Markdown and standalone dark/light HTML (`<dataDir>/reports/`), with native desktop notifications across Linux (`notify-send`), macOS (`osascript`), and Windows (PowerShell toast).
 * **Improvement Tracking with Quality Guardrails:** Tracks accepted recommendations across 14-day before/after windows, verifying real token savings while ensuring error rates and interaction turns don't regress.
-* **Opt-In Tool Discovery:** Searches GitHub for relevant agent tools and MCPs using generic search queries without transmitting private code or prompts.
+* **Flexible Exports & Prometheus Metrics:** CLI exporter (`agentlens export --format csv|json`), `GET /api/export.csv`, Prometheus `GET /metrics` text endpoint, and in-dashboard CSV table downloads.
+* **Multi-Platform Reach:** Full Linux, macOS (`launchd`, `osascript`), and Windows (`schtasks`) support with graceful Antigravity degradation and adapters for Gemini CLI, Aider, and Cursor.
 
 ---
 
@@ -64,13 +74,16 @@ flowchart TD
         CX["Codex\nSessions JSONL"]
         OC["OpenCode\nopencode.db (Multi-root)"]
         AG["Antigravity\nconversation_summaries.db"]
+        GM["Gemini CLI\nChats & Turn Logs"]
+        AI["Aider\nChat History & Analytics"]
+        CR["Cursor\nstate.vscdb Composer Logs"]
     end
 
     subgraph CoreEngine["agentlens Core Engine (Zero External Deps)"]
         Adapters["Streaming Log & SQLite Adapters"]
         DB[("agentlens.db\n(node:sqlite)")]
-        Detectors["10 Workflow Waste Detectors"]
-        Audit["Configuration Audit Scanners"]
+        Detectors["14 Workflow Waste Detectors"]
+        Audit["Config Audit & Instruction Trimmer"]
         Catalog["Curated Catalog\n(catalog.yaml)"]
         Reports["Weekly Report Generator\n(Markdown & HTML)"]
         Tracker["14-Day Improvement Tracker\n(with Quality Guardrails)"]
@@ -78,9 +91,10 @@ flowchart TD
 
     subgraph Outputs["Interfaces & Outputs"]
         Statusline["Live Statusline\n(< 10ms)"]
-        CLI["agentlens CLI\n(status, audit, report, track, discover)"]
+        CLI["agentlens CLI\n(status, audit, report, track, export, discover)"]
         WebUI["Local Web Dashboard\n(http://127.0.0.1:4711)"]
         Service["Background Service\n(systemd / launchd / schtasks)"]
+        Metrics["Prometheus & CSV Exports\n(/metrics, /api/export.csv)"]
     end
 
     AgentSources --> Adapters
@@ -92,6 +106,7 @@ flowchart TD
     DB --> Reports
     DB --> WebUI
     DB --> CLI
+    DB --> Metrics
     Statusline --> CC
     Service --> Adapters
 ```
@@ -216,6 +231,7 @@ Add the printed snippet to `~/.claude/settings.json` (or `%USERPROFILE%\.claude\
 |---|---|
 | `agentlens serve` | Continuously ingest agent data and serve dashboard on `http://127.0.0.1:4711` |
 | `agentlens ingest` | Perform an incremental backfill of all 4 agents into SQLite and exit |
+| `agentlens export [--format csv\|json] [--type sessions\|daily\|findings] [--from <date>] [--to <date>] [--project <path>]` | Export session history, daily aggregates, or waste findings to CSV or JSON |
 | `agentlens status [--project <path>]` | Terminal summary of token usage, estimated costs, and active quotas |
 | `agentlens audit [--project <path>]` | Audit instruction overhead, unused MCPs/skills, duplicates, and conflicts |
 | `agentlens report [--week YYYY-Www] [--html] [--json]` | Generate and display weekly usage report |
@@ -234,7 +250,7 @@ Add the printed snippet to `~/.claude/settings.json` (or `%USERPROFILE%\.claude\
 agentlens is engineered from the ground up to respect developer privacy and system security:
 - **Strictly Read-Only on Agent Files:** Agent log files and SQLite databases are opened with read-only flags (`mode=ro`). agentlens **never** modifies agent configurations, installs tools, or alters session histories.
 - **Zero Raw Prompt or Output Storage:** Prompt text and tool outputs are never persisted to disk. Only SHA-256 hashes and byte lengths are recorded for repetition detection.
-- **Strict Network Isolation:** Dashboard binds exclusively to loopback (`127.0.0.1`) with DNS rebinding host protection. No analytics, telemetry, or external AI model calls are made.
+- **Strict Network Isolation:** Dashboard binds exclusively to loopback (`127.0.0.1`) with DNS rebinding host protection. Metrics (`/metrics`) and CSV exports (`/api/export.csv`) are strictly loopback-only. No analytics, telemetry, or external AI model calls are made.
 - **Zero Agent Token Allowance:** agentlens never injects prompt instructions or SessionStart hooks into active coding sessions.
 - **Privacy-Safe Discovery:** The optional GitHub discovery engine operates strictly on generic alphanumeric keyword queries. Local paths, project names, or token metrics are never transmitted.
 - **Opt-In Agent Automation (`Fix Now`):** Executing automated fixes via local agent CLIs (`claude`, `codex`, `opencode`) is strictly opt-in and disabled by default until explicitly enabled in Settings (`Allow agentlens to launch agents`). All CLI commands require confirmation displaying the exact command array and verified project folder, and are executed via direct `execFile`/`spawn` argument arrays (never a shell string) restricted solely to repositories already tracked by agentlens.
@@ -280,7 +296,10 @@ agentlens performs read-only discovery of logs and session databases across Linu
 | **Claude Code** | • `CLAUDE_CONFIG_DIR`<br>• `<home>/.claude/projects/*/*.jsonl`<br>*(Identical structure on Linux, macOS, and `%USERPROFILE%\.claude\projects` on Windows)* | Input, output, reasoning, cache read/write (5m/1h) | Live 5h / 7d percentage & resets |
 | **Codex** | • `CODEX_HOME`<br>• `<home>/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`<br>*(Identical structure on Linux, macOS, and `%USERPROFILE%\.codex\sessions` on Windows)* | Input (deduped cache), output, reasoning, cache read | 5h / 7d rate limits from session events |
 | **OpenCode** | Multi-root candidate discovery searching for `opencode.db` in priority order:<br>1. **Linux**: `~/.local/share/opencode` (or `$XDG_DATA_HOME/opencode`)<br>2. **macOS**: `~/Library/Application Support/opencode`<br>3. **Windows**: `%APPDATA%\opencode` and `%LOCALAPPDATA%\opencode`<br>*(Config audit also scans `~/.config/opencode`, `~/Library/Application Support/opencode`, and `%APPDATA%\opencode` for `opencode.json`)* | Messages, tokens (input/output/reasoning/cache), tools | Session metrics (`n/a` for quota) |
-| **Antigravity** | SQLite conversation summary database searched in priority order:<br>1. `<home>/.gemini/antigravity-cli/conversation_summaries.db`<br>2. `<home>/.gemini/antigravity/conversation_summaries.db`<br>*(Standard under user home directory on Linux, macOS, and Windows)* | Sessions, workspace roots, ccusage bridge | Session metrics (`n/a` for quota) |
+| **Antigravity** | SQLite conversation summary database searched in priority order:<br>1. `<home>/.gemini/antigravity-cli/conversation_summaries.db`<br>2. `<home>/.gemini/antigravity/conversation_summaries.db`<br>*(Standard under user home directory on Linux, macOS, and Windows; degrades gracefully with dashboard warning when `ccusage` is absent)* | Sessions, workspace roots, ccusage bridge | Session metrics (`n/a` for quota) |
+| **Gemini CLI** | Chat and turn session JSON logs searched across:<br>• `<home>/.gemini/tmp/*` and `<home>/.gemini/antigravity-cli/*` | Input, output, reasoning, cached tokens | Session metrics (`n/a` for quota) |
+| **Aider** | Chat logs and telemetry searched across workspace roots:<br>• `.aider.chat.history.md`<br>• `.aider.input.history`<br>• `.aider.analytics.jsonl` | Session history, tokens, estimated cost | Session metrics (`n/a` for quota) |
+| **Cursor** | SQLite composer state database (`state.vscdb`) searched in priority order:<br>1. **Linux**: `~/.config/Cursor/User/globalStorage/state.vscdb`<br>2. **macOS**: `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`<br>3. **Windows**: `%APPDATA%\Cursor\User\globalStorage\state.vscdb` | Composer prompts, token counters, models | Session metrics (`n/a` for quota) |
 
 ---
 
@@ -299,7 +318,7 @@ agentlens performs read-only discovery of logs and session databases across Linu
 ## 🧪 Testing & Verification
 
 ```bash
-# Run test suite (153 unit & integration tests)
+# Run test suite (191 unit & integration tests)
 npm test
 
 # Run TypeScript typecheck
