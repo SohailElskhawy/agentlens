@@ -127,6 +127,63 @@ export function sessionDetail(db: DB, id: string) {
   };
 }
 
+export function sessionTimeline(db: DB, id: string) {
+  const turns = plain(db.prepare(`
+    SELECT id, ts, model, input, output, cache_read AS cacheRead, cache_write AS cacheWrite,
+           reasoning, (input + cache_read + cache_write) AS contextSize
+    FROM events
+    WHERE session_id = ? AND kind = 'assistant'
+    ORDER BY ts ASC
+  `).all(id)) as Array<{
+    id: string;
+    ts: number;
+    model: string;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    reasoning: number;
+    contextSize: number;
+  }>;
+
+  const findingRows = plain(db.prepare(`
+    SELECT id, rule, confidence, confidence_reason AS confidenceReason, evidence,
+           est_tokens_week AS estTokensWeek, first_seen AS firstSeen, last_seen AS lastSeen
+    FROM findings
+    WHERE session_id = ?
+    ORDER BY last_seen ASC
+  `).all(id)) as any[];
+
+  const markers = findingRows.map((f) => {
+    const ev = typeof f.evidence === 'string' ? JSON.parse(f.evidence) : f.evidence;
+    let bestTurnIdx = 1;
+    let minDiff = Number.MAX_SAFE_INTEGER;
+    for (let i = 0; i < turns.length; i++) {
+      const diff = Math.abs(turns[i].ts - (f.lastSeen || f.firstSeen));
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestTurnIdx = i + 1;
+      }
+    }
+    return {
+      turnIndex: bestTurnIdx,
+      findingId: f.id,
+      rule: f.rule,
+      confidence: f.confidence,
+      confidenceReason: f.confidenceReason,
+      evidence: ev,
+      estTokensWeek: f.estTokensWeek || 0,
+      lastSeen: f.lastSeen,
+    };
+  });
+
+  return {
+    sessionId: id,
+    turns: turns.map((t, i) => ({ ...t, turnIndex: i + 1 })),
+    markers,
+  };
+}
+
 import { computeQuotaForecasts } from './quota-forecast.ts';
 
 export function quota(db: DB, f: Filter) {

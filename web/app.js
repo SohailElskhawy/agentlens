@@ -818,8 +818,14 @@ async function sessionsPage() {
 }
 
 async function sessionPage(id) {
-  const d = await api('session', { id: decodeURIComponent(id) });
+  const [d, timeline] = await Promise.all([
+    api('session', { id: decodeURIComponent(id) }),
+    api('session/timeline', { id: decodeURIComponent(id) }).catch(() => null),
+  ]);
   if (!d) return { html: emptyState('Session not found', 'It may not have been ingested yet; check Health.') };
+
+  const turns = timeline?.turns?.length ? timeline.turns : d.turns;
+  const markers = timeline?.markers || [];
 
   return {
     html: `
@@ -841,10 +847,28 @@ async function sessionPage(id) {
       <div class="grid-12">
         <div class="col-7 card chart-container">
           <div class="chart-header">
-            <h3 class="chart-title">Context size per turn</h3>
-            <span class="card-subtitle">Input plus cache tokens sent on each turn. Steady growth means no compaction occurred.</span>
+            <div>
+              <h3 class="chart-title">Turn breakdown & detector timeline</h3>
+              <span class="card-subtitle">Per-turn input, output, and cache reads with detector firing markers</span>
+            </div>
+            ${markers.length ? `<span class="badge" style="background:var(--warn-bg);color:var(--warn)">${markers.length} detector event${markers.length === 1 ? '' : 's'}</span>` : ''}
           </div>
-          <div id="c-ctx" class="chart-body"></div>
+          <div id="c-timeline" class="chart-body"></div>
+
+          ${markers.length > 0 ? `
+            <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+              <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px">Fired detector findings (click to inspect):</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                ${markers.map((m, idx) => `
+                  <button type="button" class="btn btn-sm btn-outline btn-timeline-marker" data-marker-idx="${idx}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:6px">
+                    <span class="badge" style="background:var(--accent-subtle);color:var(--accent);font-size:10px">Turn ${m.turnIndex}</span>
+                    <strong>${esc(m.rule)}</strong>
+                    <span style="color:var(--text-muted);font-size:10px">(${esc(m.confidence)})</span>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          ` : '<p class="hint" style="margin-top:8px;font-size:12px">No waste detector rules fired in this session.</p>'}
         </div>
 
         <div class="col-5 card">
@@ -869,11 +893,59 @@ async function sessionPage(id) {
       ` : ''}
     `,
     after: () => {
-      if (d.turns.length) {
-        chart('c-ctx', d.turns.map((_, i) => i + 1),
-          [{ label: 'Context tokens', color: COLORS[d.agent], data: d.turns.map((t) => t.context) }],
-          { time: false });
+      if (turns && turns.length) {
+        chart('c-timeline', turns.map((t, idx) => t.turnIndex || (idx + 1)), [
+          { label: 'Cache read', color: '#10b981', data: turns.map((t) => t.cacheRead || 0) },
+          { label: 'Input tokens', color: '#6366f1', data: turns.map((t) => t.input != null ? t.input : Math.max(0, (t.context || 0) - (t.cacheRead || 0))) },
+          { label: 'Output tokens', color: '#f59e0b', data: turns.map((t) => t.output || 0) },
+        ], { time: false });
       }
+
+      document.querySelectorAll('.btn-timeline-marker').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const idx = Number(e.currentTarget.dataset.markerIdx);
+          const m = markers[idx];
+          if (!m) return;
+          openSlideOver(`Detector Finding: ${m.rule}`, `
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;gap:8px;align-items:center">
+                <span class="badge" style="background:var(--accent-subtle);color:var(--accent);font-size:12px;padding:2px 8px">Fired on Turn ${m.turnIndex}</span>
+                <span class="badge" style="background:var(--surface-subtle);border:1px solid var(--border)">${esc(m.confidence.toUpperCase())} CONFIDENCE</span>
+              </div>
+              <p style="font-size:14px;color:var(--text-main);margin:0"><strong>${esc(m.confidenceReason)}</strong></p>
+              ${m.estTokensWeek ? `<p style="font-size:13px;color:var(--success);margin:0">Est. Wasted: <strong>+${fmtTok(m.estTokensWeek)} tokens/week</strong></p>` : ''}
+              <div>
+                <h4 style="font-size:12px;color:var(--text-muted);text-transform:uppercase;margin:0 0 4px">Evidence Details</h4>
+                <pre style="background:var(--surface);border:1px solid var(--border);padding:10px;border-radius:4px;max-height:220px;overflow:auto"><code>${esc(JSON.stringify(m.evidence, null, 2))}</code></pre>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button class="btn btn-sm btn-copy-slide-prompt" data-rule="${esc(m.rule)}">Copy Fix Prompt</button>
+                <a href="#/recommendations" class="btn btn-sm btn-outline">View in Recommendations</a>
+              </div>
+            </div>
+          `);
+
+          document.querySelector('.btn-copy-slide-prompt')?.addEventListener('click', async (evt) => {
+            const rule = evt.currentTarget.dataset.rule;
+            try {
+              const res = await fetch('/api/fix/prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  rule,
+                  agent: d.agent,
+                  evidence: m.evidence,
+                }),
+              }).then((r) => r.json());
+              await navigator.clipboard.writeText(res.prompt);
+              evt.currentTarget.textContent = 'Copied!';
+              setTimeout(() => { evt.currentTarget.textContent = 'Copy Fix Prompt'; }, 2000);
+            } catch (err) {
+              alert(`Failed to copy prompt: ${err.message}`);
+            }
+          });
+        });
+      });
     },
   };
 }

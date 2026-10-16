@@ -43,6 +43,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
     '/api/models': (f) => q.models(db, f),
     '/api/sessions': (f, sp) => q.sessions(db, f, Math.min(Math.max(num(sp, 'limit') ?? 200, 1), 1000)),
     '/api/session': (_f, sp) => q.sessionDetail(db, sp.get('id') ?? ''),
+    '/api/session/timeline': (_f, sp) => q.sessionTimeline(db, sp.get('id') ?? ''),
     '/api/quota': (f) => q.quota(db, f),
     '/api/outcomes': (f) => q.outcomeEfficiency(db, f),
     '/api/health': () => q.health(db),
