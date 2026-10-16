@@ -21,6 +21,7 @@ import { getPlatformPaths } from './paths.ts';
 import { installService } from './service.ts';
 import { computeQuotaForecasts } from './quota-forecast.ts';
 import { checkLiveAlerts } from './alerts.ts';
+import { exportData } from './export.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -37,6 +38,7 @@ const HELP = `Usage: agentlens <command>
   serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
+  export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
   report              generate and display weekly usage report (--week, --html, --json)
   track               show improvement tracking for accepted recommendations
@@ -473,6 +475,62 @@ const commands: Record<string, () => unknown> = {
       console.error(res.message);
       process.exitCode = 1;
     }
+  },
+  export: () => {
+    let format: 'csv' | 'json' = 'json';
+    let type: 'sessions' | 'daily' | 'findings' | 'all' | undefined;
+    let from: number | undefined;
+    let to: number | undefined;
+    let projectArg: string | undefined;
+    let agentArg: string | undefined;
+
+    for (let i = 3; i < process.argv.length; i++) {
+      const arg = process.argv[i];
+      if (arg === '--format' && process.argv[i + 1]) {
+        const f = process.argv[i + 1].toLowerCase();
+        if (f === 'csv' || f === 'json') format = f;
+        i++;
+      } else if (arg === '--type' && process.argv[i + 1]) {
+        const t = process.argv[i + 1].toLowerCase();
+        if (t === 'sessions' || t === 'daily' || t === 'findings' || t === 'all') type = t as any;
+        i++;
+      } else if (arg === '--from' && process.argv[i + 1]) {
+        const val = process.argv[i + 1];
+        const n = Number(val);
+        from = !Number.isNaN(n) && n > 1e11 ? n : Date.parse(val);
+        i++;
+      } else if (arg === '--to' && process.argv[i + 1]) {
+        const val = process.argv[i + 1];
+        const n = Number(val);
+        to = !Number.isNaN(n) && n > 1e11 ? n : Date.parse(val);
+        i++;
+      } else if (arg === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      } else if (arg === '--agent' && process.argv[i + 1]) {
+        agentArg = process.argv[i + 1];
+        i++;
+      }
+    }
+
+    const db = openDb(DB_PATH);
+    let projectId: number | undefined;
+    if (projectArg) {
+      const root = projectRoot(resolve(projectArg));
+      const row = db.prepare('SELECT id FROM projects WHERE root = ? OR name = ?').get(root, projectArg) as { id: number } | undefined;
+      projectId = row?.id;
+    }
+
+    const output = exportData(db, {
+      format,
+      type,
+      from,
+      to,
+      projectId,
+      agent: agentArg,
+    });
+
+    process.stdout.write(output + (output.endsWith('\n') ? '' : '\n'));
   },
   help: () => console.log(HELP),
 };

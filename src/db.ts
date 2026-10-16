@@ -142,8 +142,8 @@ export function upsertFindings(db: DB, findings: Finding[]): void {
       confidence: f.confidence,
       confidenceReason: f.confidenceReason,
       estTokensWeek: f.estTokensWeek ?? 0,
-      firstSeen: f.firstSeen,
-      lastSeen: f.lastSeen,
+      firstSeen: f.firstSeen ?? f.lastSeen ?? Date.now(),
+      lastSeen: f.lastSeen ?? Date.now(),
     });
   }
 }

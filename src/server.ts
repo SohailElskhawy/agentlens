@@ -13,6 +13,7 @@ import { discoverGitHubCandidates, loadDiscoveredCandidates } from './discover.t
 import { getPlatformPaths } from './paths.ts';
 import { generateFixPrompt } from './fix-prompts.ts';
 import { runFix } from './fix-runner.ts';
+import { exportData, generatePrometheusMetrics } from './export.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -138,6 +139,36 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       return send(res, 400, 'text/plain', 'bad request'); // e.g. `GET //` is an invalid URL; must not escape the listener
     }
     try {
+      if (req.method === 'GET' && url.pathname === '/api/export.csv') {
+        const type = (url.searchParams.get('type') || 'sessions') as 'sessions' | 'daily' | 'findings';
+        const from = num(url.searchParams, 'from');
+        const to = num(url.searchParams, 'to');
+        const projectId = num(url.searchParams, 'project');
+        const agent = url.searchParams.get('agent') || undefined;
+
+        const csvContent = exportData(db, {
+          format: 'csv',
+          type,
+          from,
+          to,
+          projectId,
+          agent,
+        });
+
+        res.writeHead(200, {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': `attachment; filename="agentlens-${type}.csv"`,
+          'cache-control': 'no-store',
+        });
+        res.end(csvContent);
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/metrics') {
+        const metrics = generatePrometheusMetrics(db);
+        return send(res, 200, 'text/plain; version=0.0.4; charset=utf-8', metrics);
+      }
+
       if (req.method === 'POST' && url.pathname.startsWith('/api/recommendations/') && url.pathname.endsWith('/status')) {
         const parts = url.pathname.split('/');
         let id: string;

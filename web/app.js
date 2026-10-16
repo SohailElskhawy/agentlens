@@ -417,11 +417,15 @@ async function projectsPage() {
   const rows = await api('projects');
   return {
     html: `
-      <div class="card-header" style="margin-bottom:var(--space-4)">
+      <div class="card-header" style="margin-bottom:var(--space-4);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
         <div>
           <h1 style="margin:0;font-size:18px;font-weight:600">Projects</h1>
           <p class="hint" style="margin:4px 0 0">Grouped by git repository; worktrees count toward their main repo. Click a row to view project details.</p>
         </div>
+        <a href="/api/export.csv?type=sessions" download="agentlens-sessions.csv" class="btn btn-sm btn-outline" style="display:inline-flex;align-items:center;gap:6px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export CSV
+        </a>
       </div>
       <div class="card">
         ${table([...projectCols, { label: 'Path', get: (r) => r.root }], rows, (r) => `#/project/${r.projectId}`)}
@@ -845,11 +849,15 @@ async function sessionsPage() {
   const rows = await api('sessions', { limit: '300' });
   return {
     html: `
-      <div class="card-header" style="margin-bottom:var(--space-4)">
+      <div class="card-header" style="margin-bottom:var(--space-4);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
         <div>
           <h1 style="margin:0;font-size:18px;font-weight:600">Sessions</h1>
           <p class="hint" style="margin:4px 0 0">Latest agent sessions ingested into local sqlite. Click a row to inspect turn-by-turn context growth.</p>
         </div>
+        <a href="/api/export.csv?type=sessions" download="agentlens-sessions.csv" class="btn btn-sm btn-outline" style="display:inline-flex;align-items:center;gap:6px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export CSV
+        </a>
       </div>
       <div class="card">
         ${table([
@@ -1180,9 +1188,15 @@ async function recommendationsPage() {
         <h2 style="margin:0;font-size:15px;font-weight:600">Active Recommendations</h2>
       </div>
       ${recList}
-      <div class="card-header" style="margin-top:var(--space-4)">
-        <h2 style="margin:0;font-size:15px;font-weight:600">Workflow Findings (${findings.length})</h2>
-        <span class="card-subtitle">Click row to drill into session turn context</span>
+      <div class="card-header" style="margin-top:var(--space-4);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="margin:0;font-size:15px;font-weight:600">Workflow Findings (${findings.length})</h2>
+          <span class="card-subtitle">Click row to drill into session turn context</span>
+        </div>
+        <a href="/api/export.csv?type=findings" download="agentlens-findings.csv" class="btn btn-sm btn-outline" style="display:inline-flex;align-items:center;gap:6px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export CSV
+        </a>
       </div>
       <div class="card">
         ${findingsTable}
