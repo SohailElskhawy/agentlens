@@ -162,6 +162,7 @@ export const opencode: Adapter = {
     let offset = 0;
     try {
       offset = statSync(path).size;
+      try { offset += statSync(`${path}-wal`).size; } catch {}
     } catch {}
 
     return {
