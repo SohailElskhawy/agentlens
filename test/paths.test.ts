@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { getPlatformPaths, getOpenCodeDataRoots, getOpenCodeConfigRoots } from '../src/paths.ts';
 
@@ -78,3 +79,35 @@ test('getOpenCodeConfigRoots: returns candidate config directories in priority o
   assert.ok(roots.length >= 2);
   assert.equal(roots[0], join('/fake/user', '.config/opencode'));
 });
+
+test('getPlatformPaths: respects ambient process.env when customHome is homedir()', () => {
+  const p = getPlatformPaths(homedir());
+  if (process.platform === 'linux' && process.env.XDG_DATA_HOME) {
+    assert.equal(p.dataDir, join(process.env.XDG_DATA_HOME, 'agentlens'));
+  } else if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    assert.equal(p.dataDir, join(process.env.LOCALAPPDATA, 'agentlens'));
+  }
+  assert.ok(p.dataDir.includes('agentlens'));
+  assert.ok(p.stateDir.includes('agentlens'));
+  assert.ok(p.dbPath.endsWith('agentlens.db'));
+});
+
+test('getPlatformPaths: respects custom XDG_DATA_HOME and LOCALAPPDATA when legacy db does not exist', () => {
+  const cleanHome = '/fake/clean-user';
+  const mockXdg = join(cleanHome, '.test-xdg-share');
+  const pLinux = getPlatformPaths(cleanHome, { XDG_DATA_HOME: mockXdg }, 'linux');
+  assert.equal(pLinux.dataDir, join(mockXdg, 'agentlens'));
+
+  const mockLocal = 'C:\\fake\\AppData\\Local';
+  const pWin = getPlatformPaths(cleanHome, { LOCALAPPDATA: mockLocal }, 'win32');
+  assert.equal(pWin.dataDir, join(mockLocal, 'agentlens'));
+  assert.equal(pWin.stateDir, join(mockLocal, 'agentlens/state'));
+});
+
+test('getPlatformPaths: no-arg call uses ambient env and homedir()', () => {
+  const p = getPlatformPaths();
+  assert.ok(p.dataDir.includes('agentlens'));
+  assert.ok(p.stateDir.includes('agentlens'));
+  assert.ok(p.dbPath.endsWith('agentlens.db'));
+});
+

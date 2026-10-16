@@ -83,7 +83,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       };
     },
     '/api/reports': () => {
-      const reportsDir = getPlatformPaths(process.env.AGENTLENS_SOURCE_HOME || homedir()).reportsDir;
+      const reportsDir = getPlatformPaths().reportsDir;
       const reports: Array<{ week: string; filePathMd: string; filePathHtml: string; generatedAt: number }> = [];
       if (existsSync(reportsDir)) {
         const files = readdirSync(reportsDir);
@@ -264,8 +264,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
         const week = url.pathname.slice('/api/reports/'.length);
         if (/^\d{4}-W\d{1,2}$/.test(week)) {
           try {
-            const home = process.env.AGENTLENS_SOURCE_HOME || homedir();
-            const reportsDir = getPlatformPaths(home).reportsDir;
+            const reportsDir = getPlatformPaths().reportsDir;
             const filePathMd = join(reportsDir, `${week}.md`);
             const filePathHtml = join(reportsDir, `${week}.html`);
             const filePathJson = join(reportsDir, `${week}.json`);
@@ -279,7 +278,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
                 }));
               } catch {}
             }
-            const rep = generateWeeklyReport(db, week, home);
+            const rep = generateWeeklyReport(db, week);
             return send(res, 200, 'application/json', JSON.stringify({
               data: rep.data,
               markdown: rep.markdown,

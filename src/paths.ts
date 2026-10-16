@@ -19,7 +19,7 @@ export function getPlatformPaths(
 ): PlatformPaths {
   const defaultHome = homedir();
   const home = customHome ?? env.AGENTLENS_SOURCE_HOME ?? env.AGENTLENS_HOME ?? defaultHome;
-  const isCustomHome = customHome != null || env.AGENTLENS_SOURCE_HOME != null || env.AGENTLENS_HOME != null;
+  const isCustomHome = (customHome != null && customHome !== defaultHome) || env.AGENTLENS_SOURCE_HOME != null || env.AGENTLENS_HOME != null;
   const useAmbientEnv = !isCustomHome || env !== process.env;
 
   const legacyDb = join(home, '.local/share/agentlens/agentlens.db');

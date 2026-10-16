@@ -21,7 +21,7 @@ import { getPlatformPaths } from './paths.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
-const platformPaths = getPlatformPaths(HOME);
+const platformPaths = getPlatformPaths();
 const DATA_DIR = platformPaths.dataDir;
 const STATE_DIR = platformPaths.stateDir;
 const DB_PATH = platformPaths.dbPath;
