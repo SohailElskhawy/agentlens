@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { getCuratedCatalog } from './catalog.ts';
+import { getPlatformPaths } from './paths.ts';
 
 export interface DiscoveredCandidate {
   id: string; // e.g. "github:owner/repo"
@@ -73,14 +73,7 @@ function inferRelevanceRule(name: string, desc: string, topics: string[]): strin
 }
 
 export function getCandidatesFilePath(customHome?: string): string {
-  if (customHome) {
-    return join(customHome, '.local/share/agentlens/discovery_candidates.json');
-  }
-  if (process.env.AGENTLENS_DATA_DIR) {
-    return join(process.env.AGENTLENS_DATA_DIR, 'discovery_candidates.json');
-  }
-  const home = process.env.AGENTLENS_SOURCE_HOME || process.env.AGENTLENS_HOME || homedir();
-  return join(home, '.local/share/agentlens/discovery_candidates.json');
+  return getPlatformPaths(customHome).candidatesPath;
 }
 
 export function loadDiscoveredCandidates(customHome?: string): DiscoveredCandidate[] {

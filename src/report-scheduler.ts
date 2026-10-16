@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DB } from './db.ts';
 import { generateWeeklyReport, getIsoWeekString } from './report.ts';
+import { getPlatformPaths } from './paths.ts';
 
 export function sendDesktopNotification(title: string, body: string): boolean {
   try {
@@ -34,7 +35,7 @@ export function checkWeeklyReportSchedule(
 
   // Previous closed week (7 days ago)
   const targetWeek = getIsoWeekString(now - 7 * 86_400_000);
-  const reportsDir = join(home, '.local/share/agentlens/reports');
+  const reportsDir = getPlatformPaths(home).reportsDir;
   const reportPath = join(reportsDir, `${targetWeek}.md`);
 
   if (!existsSync(reportPath)) {

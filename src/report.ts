@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import type { DB } from './db.ts';
 import { costOf } from './pricing.ts';
 import { findCatalogItemsForRule, getCuratedCatalog } from './catalog.ts';
+import { getPlatformPaths } from './paths.ts';
 
 const HOME = process.env.AGENTLENS_SOURCE_HOME || process.env.AGENTLENS_HOME || homedir();
 
@@ -150,7 +151,7 @@ export function generateWeeklyReport(
   filePathJson: string;
 } {
   const bounds = getIsoWeekBounds(weekStr);
-  const reportsDir = join(home ?? HOME, '.local/share/agentlens/reports');
+  const reportsDir = getPlatformPaths(home ?? HOME).reportsDir;
   mkdirSync(reportsDir, { recursive: true });
 
   // 1. Gather usage in current week

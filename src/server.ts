@@ -10,6 +10,7 @@ import { generateWeeklyReport } from './report.ts';
 import { evaluateRecommendations } from './track.ts';
 import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates, loadDiscoveredCandidates } from './discover.ts';
+import { getPlatformPaths } from './paths.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -82,7 +83,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       };
     },
     '/api/reports': () => {
-      const reportsDir = join(process.env.AGENTLENS_SOURCE_HOME || homedir(), '.local/share/agentlens/reports');
+      const reportsDir = getPlatformPaths(process.env.AGENTLENS_SOURCE_HOME || homedir()).reportsDir;
       const reports: Array<{ week: string; filePathMd: string; filePathHtml: string; generatedAt: number }> = [];
       if (existsSync(reportsDir)) {
         const files = readdirSync(reportsDir);
@@ -264,7 +265,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
         if (/^\d{4}-W\d{1,2}$/.test(week)) {
           try {
             const home = process.env.AGENTLENS_SOURCE_HOME || homedir();
-            const reportsDir = join(home, '.local/share/agentlens/reports');
+            const reportsDir = getPlatformPaths(home).reportsDir;
             const filePathMd = join(reportsDir, `${week}.md`);
             const filePathHtml = join(reportsDir, `${week}.html`);
             const filePathJson = join(reportsDir, `${week}.json`);

@@ -17,14 +17,16 @@ import { generateWeeklyReport } from './report.ts';
 import { evaluateRecommendations } from './track.ts';
 import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates } from './discover.ts';
+import { getPlatformPaths } from './paths.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
-const DATA_DIR = env.AGENTLENS_DATA_DIR ?? join(env.XDG_DATA_HOME ?? join(homedir(), '.local/share'), 'agentlens');
-const STATE_DIR = env.AGENTLENS_STATE_DIR ?? join(env.XDG_STATE_HOME ?? join(homedir(), '.local/state'), 'agentlens');
-const DB_PATH = join(DATA_DIR, 'agentlens.db');
-const SUMMARY_PATH = join(STATE_DIR, 'summary.json');
-const SPOOL_PATH = join(STATE_DIR, 'claude-quota.jsonl');
+const platformPaths = getPlatformPaths(HOME);
+const DATA_DIR = platformPaths.dataDir;
+const STATE_DIR = platformPaths.stateDir;
+const DB_PATH = platformPaths.dbPath;
+const SUMMARY_PATH = platformPaths.summaryPath;
+const SPOOL_PATH = platformPaths.spoolPath;
 const PORT = Number(env.AGENTLENS_PORT ?? 4711);
 
 const HELP = `Usage: agentlens <command>
