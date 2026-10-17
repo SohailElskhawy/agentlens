@@ -54,6 +54,15 @@ export function detectAbandonedSessions(
   }>;
 
   const findings: Finding[] = [];
+  const gitCache = new Map<string, ReturnType<typeof gitReader>>();
+  const getCommits = (root: string) => {
+    let cached = gitCache.get(root);
+    if (cached === undefined) {
+      cached = gitReader(root);
+      gitCache.set(root, cached);
+    }
+    return cached;
+  };
 
   for (const s of candidateSessions) {
     // 1. Check if session used any file editing / writing tools
@@ -71,7 +80,7 @@ export function detectAbandonedSessions(
     // 2. Check if a git commit occurred during or in the 30-minute window following the session
     let hasCommit = false;
     if (s.projectRoot) {
-      const commits = gitReader(s.projectRoot);
+      const commits = getCommits(s.projectRoot);
       hasCommit = commits.some(
         (c) => c.ts >= s.started - 60_000 && c.ts <= s.ended + ABANDONED_SESSION_WINDOW_MS
       );

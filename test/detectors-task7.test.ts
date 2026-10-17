@@ -93,6 +93,43 @@ test('detectAbandonedSessions detects high-token sessions without edits or commi
   assert.ok(prompt.includes('A high-token session concluded without file edits or git commits'));
 });
 
+test('detectAbandonedSessions deduplicates gitReader calls across multiple sessions with same projectRoot', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/work/shared-root', 'shared-root');
+  const now = Date.now();
+
+  const sessions: (SessionInfo & { projectId: number | null })[] = [
+    { id: 's_ab1', agent: 'claude', projectId: projId, cwd: '/work/shared-root' },
+    { id: 's_ab2', agent: 'claude', projectId: projId, cwd: '/work/shared-root' },
+    { id: 's_ab3', agent: 'claude', projectId: projId, cwd: '/work/shared-root' },
+  ];
+  const events: NormalizedEvent[] = [
+    { id: 'e1', agent: 'claude', sessionId: 's_ab1', ts: now, kind: 'assistant', model: 'claude-3-5-sonnet', input: 50_000, output: 20_000, cacheRead: 0, cacheWrite: 0 },
+    { id: 'e2', agent: 'claude', sessionId: 's_ab2', ts: now, kind: 'assistant', model: 'claude-3-5-sonnet', input: 50_000, output: 20_000, cacheRead: 0, cacheWrite: 0 },
+    { id: 'e3', agent: 'claude', sessionId: 's_ab3', ts: now, kind: 'assistant', model: 'claude-3-5-sonnet', input: 50_000, output: 20_000, cacheRead: 0, cacheWrite: 0 },
+  ];
+  upsertSessions(db, sessions);
+  upsertEvents(db, events);
+
+  let calls = 0;
+  const mockReader = () => {
+    calls++;
+    return [];
+  };
+
+  const findings = detectAbandonedSessions(db, { gitReader: mockReader });
+  assert.equal(findings.length, 3);
+  // Despite 3 candidate sessions, mockReader should be called only ONCE for the shared root
+  assert.equal(calls, 1);
+});
+
+test('readGitNumstat returns empty array fast on non-existent or non-git directory', async () => {
+  const { readGitNumstat, clearGitNumstatCache } = await import('../src/analyze/outcome_efficiency.ts');
+  clearGitNumstatCache();
+  assert.deepEqual(readGitNumstat('/non/existent/path/at/all'), []);
+  assert.deepEqual(readGitNumstat(''), []);
+});
+
 test('detectCompactionChurn catches multiple context drops in single session', () => {
   const db = openDb(':memory:');
   const now = Date.now();

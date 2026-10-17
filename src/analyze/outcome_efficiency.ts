@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { DB } from '../db.ts';
 import type { Finding } from '../types.ts';
 import { OUTCOME_EFFICIENCY_TOKENS_PER_COMMIT, OUTCOME_EFFICIENCY_TOKENS_PER_LINE } from './constants.ts';
@@ -10,7 +12,32 @@ export interface GitCommitStat {
   deleted: number;
 }
 
+interface CacheEntry {
+  ts: number;
+  data: GitCommitStat[];
+}
+
+const gitNumstatCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 60_000;
+
+export function clearGitNumstatCache(): void {
+  gitNumstatCache.clear();
+}
+
 export function readGitNumstat(cwd: string, sinceDays = 30): GitCommitStat[] {
+  if (!cwd) return [];
+  const key = `${cwd}:${sinceDays}`;
+  const hit = gitNumstatCache.get(key);
+  if (hit && Date.now() - hit.ts < CACHE_TTL_MS) {
+    return hit.data;
+  }
+
+  // Fast path: skip if directory doesn't exist or is not a git repository
+  if (!existsSync(cwd) || !existsSync(join(cwd, '.git'))) {
+    gitNumstatCache.set(key, { ts: Date.now(), data: [] });
+    return [];
+  }
+
   try {
     const stdout = execFileSync(
       'git',
@@ -58,8 +85,10 @@ export function readGitNumstat(cwd: string, sinceDays = 30): GitCommitStat[] {
       }
     }
 
+    gitNumstatCache.set(key, { ts: Date.now(), data: commits });
     return commits;
   } catch {
+    gitNumstatCache.set(key, { ts: Date.now(), data: [] });
     return [];
   }
 }
@@ -78,6 +107,15 @@ export function detectOutcomeEfficiency(
 
   const projects = db.prepare(sql).all(...params) as Array<{ id: number; name: string; root: string }>;
   const findings: Finding[] = [];
+  const gitCache = new Map<string, GitCommitStat[]>();
+  const getCommits = (root: string) => {
+    let cached = gitCache.get(root);
+    if (cached === undefined) {
+      cached = gitReader(root);
+      gitCache.set(root, cached);
+    }
+    return cached;
+  };
 
   for (const proj of projects) {
     // 1. Gather all sessions and tokens in project
@@ -98,7 +136,7 @@ export function detectOutcomeEfficiency(
     if (totalTokens < 50_000) continue; // Only evaluate projects with meaningful token spend
 
     // 2. Read git commits
-    const commits = gitReader(proj.root);
+    const commits = getCommits(proj.root);
     if (commits.length === 0) continue; // Skip if not a git repo or no recent commits
 
     // 3. Attribute commits to sessions

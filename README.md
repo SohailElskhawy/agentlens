@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![Privacy First](https://img.shields.io/badge/privacy-local--first-orange.svg)](#privacy--security-guarantees)
-[![Tests Passing](https://img.shields.io/badge/tests-191%20passing-success.svg)](test/)
+[![Tests Passing](https://img.shields.io/badge/tests-193%20passing-success.svg)](test/)
 
 **agentlens** is a lightweight, local-first, cross-platform usage and workflow optimizer for AI coding agents on Linux, macOS, and Windows:
 - **Claude Code** (Pro)
@@ -318,7 +318,7 @@ agentlens performs read-only discovery of logs and session databases across Linu
 ## 🧪 Testing & Verification
 
 ```bash
-# Run test suite (191 unit & integration tests)
+# Run test suite (193 unit & integration tests)
 npm test
 
 # Run TypeScript typecheck

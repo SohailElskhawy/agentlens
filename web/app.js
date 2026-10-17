@@ -31,15 +31,28 @@ const cost = (t) => (t.cost === 0 && t.unpricedTokens > 0 ? 'unpriced' : fmtUsd(
 
 const state = { range: 30, agent: '', project: '' };
 let charts = [];
+const inflight = new Map();
 
 async function api(path, extra = {}) {
   const p = new URLSearchParams(extra);
   if (state.range) p.set('from', String(Date.now() - state.range * 864e5));
   if (state.agent) p.set('agent', state.agent);
   if (state.project) p.set('project', state.project);
-  const r = await fetch(`/api/${path}?${p}`);
-  if (!r.ok) throw new Error(`/api/${path} returned ${r.status}`);
-  return r.json();
+  const url = `/api/${path}?${p}`;
+  if (inflight.has(url)) return inflight.get(url);
+
+  const req = (async () => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`/api/${path} returned ${r.status}`);
+      return await r.json();
+    } finally {
+      inflight.delete(url);
+    }
+  })();
+
+  inflight.set(url, req);
+  return req;
 }
 
 function tile(label, value, note = '') {
@@ -174,7 +187,7 @@ function fmtCountdown(ms) {
 
 async function updateQuotaPills() {
   try {
-    const q = await fetch('/api/quota').then((r) => r.json());
+    const q = await api('quota');
     const container = $('#quota-pills');
     if (!container || !q || !q.latest) return;
     const now = Date.now();
@@ -2226,9 +2239,9 @@ if (localStorage.getItem('agentlens_sidebar_collapsed') === 'true') {
 }
 
 // Fetch project options
-fetch('/api/projects').then((r) => r.json()).then((ps) => {
+api('projects').then((ps) => {
   const fProj = $('#f-project');
-  if (fProj) {
+  if (fProj && Array.isArray(ps)) {
     fProj.insertAdjacentHTML('beforeend', ps.map((p) => `<option value="${p.projectId}">${esc(p.name)}</option>`).join(''));
     if (state.project) fProj.value = state.project;
   }
