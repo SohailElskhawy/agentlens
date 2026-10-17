@@ -22,6 +22,8 @@ import { installService } from './service.ts';
 import { computeQuotaForecasts } from './quota-forecast.ts';
 import { checkLiveAlerts } from './alerts.ts';
 import { exportData } from './export.ts';
+import { formatOptimizeReport, optimizeWorkspace } from './optimize.ts';
+import { getOmarchyPluginStatus, installOmarchyPlugin, uninstallOmarchyPlugin } from './omarchy-plugin.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -38,6 +40,7 @@ const HELP = `Usage: agentlens <command>
   serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
+  optimize [path]     preview or apply workspace hygiene (.claudeignore/.cursorignore, instruction trims, unused MCPs) (--apply, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
   report              generate and display weekly usage report (--week, --html, --json)
@@ -45,6 +48,7 @@ const HELP = `Usage: agentlens <command>
   accept <id>         accept a recommendation and begin 14-day improvement tracking
   catalog             browse curated AI tools, MCPs, and skills (--json, --rule <rule>)
   discover            opt-in discovery of AI agent tools from GitHub (--query, --dry-run, --json)
+  plugin [action]     manage Omarchy Quattro bar-widget plugin (install|status|uninstall, --enable, --dir <path>, --json)
   statusline          process Claude Code statusline stdin, spool quota, and print status
   install-statusline  show configuration instructions for Claude Code statusline
   install-service     install background service (systemd, launchd, or scheduled task) so serve starts at login
@@ -295,6 +299,41 @@ const commands: Record<string, () => unknown> = {
     }
     console.log(`==================================================\n`);
   },
+  optimize: () => {
+    let projectArg: string | undefined;
+    let apply = false;
+    let isJson = false;
+    for (let i = 3; i < process.argv.length; i++) {
+      const arg = process.argv[i];
+      if (arg === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      } else if (arg === '--apply') {
+        apply = true;
+      } else if (arg === '--dry-run') {
+        apply = false;
+      } else if (arg === '--json') {
+        isJson = true;
+      } else if (!arg.startsWith('-') && !projectArg) {
+        projectArg = arg;
+      }
+    }
+    const targetPath = projectArg ?? process.cwd();
+    const db = openDb(DB_PATH);
+    try {
+      runAudit(db, HOME);
+    } catch {}
+    const res = optimizeWorkspace(db, {
+      projectRoot: targetPath,
+      home: HOME,
+      apply,
+    });
+    if (isJson) {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      console.log(formatOptimizeReport(res));
+    }
+  },
   report: () => {
     let weekArg: string | undefined;
     let isHtml = false;
@@ -531,6 +570,56 @@ const commands: Record<string, () => unknown> = {
     });
 
     process.stdout.write(output + (output.endsWith('\n') ? '' : '\n'));
+  },
+  plugin() {
+    let action: 'install' | 'status' | 'uninstall' = 'status';
+    let enable = false;
+    let jsonFlag = false;
+    let targetDir: string | undefined;
+
+    for (let i = 3; i < process.argv.length; i++) {
+      const arg = process.argv[i];
+      if (arg === 'install' || arg === 'status' || arg === 'uninstall') {
+        action = arg;
+      } else if (arg === '--enable') {
+        enable = true;
+      } else if (arg === '--json') {
+        jsonFlag = true;
+      } else if (arg === '--dir' && process.argv[i + 1]) {
+        targetDir = resolve(process.argv[i + 1]);
+        i++;
+      }
+    }
+
+    if (action === 'install') {
+      const res = installOmarchyPlugin({ targetDir, enable });
+      if (jsonFlag) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(`✓ Installed ${res.pluginId} to ${res.installedDir}`);
+        if (res.validationOutput) {
+          console.log(`  Validation: ${res.validationOutput}`);
+        }
+        console.log(`  Enabled in Omarchy bar: ${res.enabled ? 'yes' : 'no (run with --enable or `omarchy plugin enable agentlens.bar-widget`)'}`);
+      }
+    } else if (action === 'uninstall') {
+      const res = uninstallOmarchyPlugin({ targetDir });
+      if (jsonFlag) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(res.removed ? `✓ Uninstalled plugin from ${res.installedDir}` : `Plugin not installed at ${res.installedDir}`);
+      }
+    } else {
+      const res = getOmarchyPluginStatus({ targetDir });
+      if (jsonFlag) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(`Plugin: ${res.pluginId}`);
+        console.log(`Installed: ${res.installed ? `yes (${res.installedDir})` : 'no'}`);
+        console.log(`Manifest valid: ${res.manifestValid ? 'yes' : 'no'}`);
+        console.log(`Enabled in shell.json: ${res.enabledInShellConfig ? 'yes' : 'no'}`);
+      }
+    }
   },
   help: () => console.log(HELP),
 };

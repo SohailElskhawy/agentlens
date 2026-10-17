@@ -27,6 +27,7 @@
     "src",
     "web",
     "assets",
+    "plugins",
     "catalog.json",
     "catalog.yaml",
     "LICENSE",

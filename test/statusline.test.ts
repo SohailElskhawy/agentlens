@@ -159,7 +159,6 @@ test('writeSummary includes costToday, burnRateTokensPerHour, activeSessions, an
       output: 2_000,
       cacheRead: 0,
       cacheWrite: 0,
-      cost: 0.06,
     },
   ]);
 
@@ -168,6 +167,7 @@ test('writeSummary includes costToday, burnRateTokensPerHour, activeSessions, an
       id: 'f-1',
       rule: 'hot_files',
       projectId: projId,
+      sessionId: 's-live',
       evidence: { file: 'src/db.ts' },
       confidence: 'high',
       confidenceReason: 'Read 9 times',
@@ -181,9 +181,9 @@ test('writeSummary includes costToday, burnRateTokensPerHour, activeSessions, an
       id: 'rec-1',
       findingRule: 'hot_files',
       projectId: projId,
-      action: 'Document src/db.ts exports in CLAUDE.md',
+      action: 'improve',
       title: 'Hot file re-read: src/db.ts',
-      body: 'Read 9 times across sessions',
+      body: 'Document src/db.ts exports in CLAUDE.md',
       status: 'open',
       score: 95,
     },
@@ -200,6 +200,7 @@ test('writeSummary includes costToday, burnRateTokensPerHour, activeSessions, an
   assert.equal(data.topRecommendation.id, 'rec-1');
   assert.equal(data.topRecommendation.rule, 'hot_files');
   assert.equal(data.topRecommendation.severity, 'high');
+  assert.equal(data.topRecommendation.action, 'Document src/db.ts exports in CLAUDE.md');
   assert.equal(data.topRecommendation.projectName, 'alpha');
   assert.equal(data.topRecommendation.estTokensSavedWeek, 45000);
   assert.match(data.topRecommendation.prompt, /src\/db\.ts/);
@@ -216,9 +217,9 @@ test('writeSummary populates topRecommendation with estTokensSavedWeek 0 when no
       id: 'rec-orphan',
       findingRule: 'context_growth',
       projectId: projId,
-      action: 'Run /compact after milestones',
+      action: 'improve',
       title: 'Uncompacted context growth',
-      body: 'Context exceeded 140k tokens',
+      body: 'Run /compact after milestones',
       status: 'open',
       score: 65,
     },

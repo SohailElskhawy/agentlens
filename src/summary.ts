@@ -234,6 +234,7 @@ export function writeSummary(db: DB, targetPath: string): void {
            r.project_id AS projectId,
            r.action,
            r.title,
+           r.body,
            r.score,
            coalesce(p.name, 'global') AS projectName,
            coalesce(p.root, '') AS projectRoot
@@ -248,6 +249,7 @@ export function writeSummary(db: DB, targetPath: string): void {
     projectId: number | null;
     action: string;
     title: string;
+    body: string;
     score: number;
     projectName: string;
     projectRoot: string;
@@ -278,7 +280,7 @@ export function writeSummary(db: DB, targetPath: string): void {
       rule: recRow.findingRule,
       severity,
       title: recRow.title,
-      action: recRow.action,
+      action: recRow.body || recRow.action,
       estTokensSavedWeek: findingRow?.estTokensWeek ?? 0,
       projectId: recRow.projectId ?? undefined,
       projectName: recRow.projectName,
