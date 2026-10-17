@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { openDb, upsertEvents, upsertProject, upsertSessions } from '../src/db.ts';
+import { openDb, upsertEvents, upsertFindings, upsertProject, upsertRecommendations, upsertSessions } from '../src/db.ts';
 import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from '../src/summary.ts';
 import { tmp } from './helpers.ts';
 
@@ -138,3 +138,101 @@ test('writeSummary writes summary.json and formatStatusline formats output in < 
   assert.match(statusline, /5h 33%/);
   assert.match(statusline, /7d 12%/);
 });
+
+test('writeSummary includes costToday, burnRateTokensPerHour, activeSessions, and topRecommendation', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  const now = Date.now();
+
+  const projId = upsertProject(db, '/work/alpha', 'alpha');
+  upsertSessions(db, [{ id: 's-live', agent: 'claude', cwd: '/work/alpha', projectId: projId }]);
+  upsertEvents(db, [
+    {
+      id: 'ev-1',
+      agent: 'claude',
+      sessionId: 's-live',
+      ts: now - 5 * 60_000,
+      kind: 'assistant',
+      model: 'claude-sonnet-4-6',
+      input: 10_000,
+      output: 2_000,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0.06,
+    },
+  ]);
+
+  upsertFindings(db, [
+    {
+      id: 'f-1',
+      rule: 'hot_files',
+      projectId: projId,
+      evidence: { file: 'src/db.ts' },
+      confidence: 'high',
+      confidenceReason: 'Read 9 times',
+      estTokensWeek: 45000,
+      firstSeen: now,
+      lastSeen: now,
+    },
+  ]);
+  upsertRecommendations(db, [
+    {
+      id: 'rec-1',
+      findingRule: 'hot_files',
+      projectId: projId,
+      action: 'Document src/db.ts exports in CLAUDE.md',
+      title: 'Hot file re-read: src/db.ts',
+      body: 'Read 9 times across sessions',
+      status: 'open',
+      score: 95,
+    },
+  ]);
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+
+  assert.equal(data.totals.tokensToday, 12_000);
+  assert.ok(Math.abs(data.totals.costToday - 0.06) < 1e-6);
+  assert.equal(data.totals.burnRateTokensPerHour, 12_000);
+  assert.equal(data.totals.activeSessions, 1);
+  assert.ok(data.topRecommendation);
+  assert.equal(data.topRecommendation.id, 'rec-1');
+  assert.equal(data.topRecommendation.rule, 'hot_files');
+  assert.equal(data.topRecommendation.severity, 'high');
+  assert.equal(data.topRecommendation.projectName, 'alpha');
+  assert.equal(data.topRecommendation.estTokensSavedWeek, 45000);
+  assert.match(data.topRecommendation.prompt, /src\/db\.ts/);
+});
+
+test('writeSummary populates topRecommendation with estTokensSavedWeek 0 when no matching finding row exists', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+
+  const projId = upsertProject(db, '/work/beta', 'beta');
+  upsertRecommendations(db, [
+    {
+      id: 'rec-orphan',
+      findingRule: 'context_growth',
+      projectId: projId,
+      action: 'Run /compact after milestones',
+      title: 'Uncompacted context growth',
+      body: 'Context exceeded 140k tokens',
+      status: 'open',
+      score: 65,
+    },
+  ]);
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+
+  assert.ok(data.topRecommendation);
+  assert.equal(data.topRecommendation.id, 'rec-orphan');
+  assert.equal(data.topRecommendation.rule, 'context_growth');
+  assert.equal(data.topRecommendation.severity, 'medium');
+  assert.equal(data.topRecommendation.projectName, 'beta');
+  assert.equal(data.topRecommendation.estTokensSavedWeek, 0);
+  assert.match(data.topRecommendation.prompt, /\/compact/);
+});
+

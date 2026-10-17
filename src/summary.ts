@@ -2,6 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlink
 import { dirname } from 'node:path';
 import type { DB } from './db.ts';
 import { insertQuotas, tx } from './db.ts';
+import { generateFixPrompt } from './fix-prompts.ts';
+import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
 import type { QuotaSnapshot } from './types.ts';
 import { computeQuotaForecasts, type QuotaForecastResult } from './quota-forecast.ts';
@@ -11,12 +13,28 @@ export interface ProjectSummary {
   root: string;
   name: string;
   tokensToday: number;
+  costToday?: number;
+}
+
+export interface SummaryRecommendation {
+  id: string;
+  rule: string;
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  action: string;
+  estTokensSavedWeek: number;
+  projectId?: number;
+  projectName: string;
+  prompt: string;
 }
 
 export interface SummaryData {
   updatedAt: number;
   totals: {
     tokensToday: number;
+    costToday: number;
+    burnRateTokensPerHour: number;
+    activeSessions: number;
   };
   projects: Record<string, ProjectSummary>;
   quotas: {
@@ -25,6 +43,7 @@ export interface SummaryData {
   };
   forecasts?: QuotaForecastResult[];
   statuslineForecast?: string;
+  topRecommendation?: SummaryRecommendation | null;
 }
 
 export function formatTokens(tokens: number): string {
@@ -117,6 +136,7 @@ export function drainQuotaSpool(db: DB, spoolPath: string): void {
 }
 
 export function writeSummary(db: DB, targetPath: string): void {
+  const now = Date.now();
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
   const startOfToday = midnight.getTime();
@@ -125,27 +145,71 @@ export function writeSummary(db: DB, targetPath: string): void {
     SELECT coalesce(s.project_id, 0) AS projectId,
            coalesce(p.root, '') AS root,
            coalesce(p.name, 'unknown') AS name,
-           coalesce(sum(e.input + e.output + e.cache_read + e.cache_write), 0) AS tokens
+           e.model AS model,
+           coalesce(sum(e.input), 0) AS input,
+           coalesce(sum(e.output), 0) AS output,
+           coalesce(sum(e.cache_read), 0) AS cacheRead,
+           coalesce(sum(e.cache_write), 0) AS cacheWrite,
+           coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
     FROM events e
     JOIN sessions s ON s.id = e.session_id
     LEFT JOIN projects p ON p.id = s.project_id
     WHERE e.ts >= ?
-    GROUP BY s.project_id
-  `).all(startOfToday) as { projectId: number; root: string; name: string; tokens: number }[];
+    GROUP BY s.project_id, e.model
+  `).all(startOfToday) as {
+    projectId: number;
+    root: string;
+    name: string;
+    model: string | null;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cacheWrite1h: number;
+  }[];
 
   let totalTokensToday = 0;
+  let totalCostToday = 0;
   const projects: Record<string, ProjectSummary> = {};
   for (const r of projectRows) {
-    totalTokensToday += r.tokens;
+    const tokens = r.input + r.output + r.cacheRead + r.cacheWrite;
+    const cost = costOf(r.model ?? undefined, {
+      input: r.input,
+      output: r.output,
+      cacheRead: r.cacheRead,
+      cacheWrite: r.cacheWrite,
+      cacheWrite1h: r.cacheWrite1h,
+    }) ?? 0;
+    totalTokensToday += tokens;
+    totalCostToday += cost;
     if (r.root) {
-      projects[r.root] = {
-        projectId: r.projectId,
-        root: r.root,
-        name: r.name,
-        tokensToday: r.tokens,
-      };
+      const existing = projects[r.root];
+      if (existing) {
+        existing.tokensToday += tokens;
+        existing.costToday = Number(((existing.costToday ?? 0) + cost).toFixed(4));
+      } else {
+        projects[r.root] = {
+          projectId: r.projectId,
+          root: r.root,
+          name: r.name,
+          tokensToday: tokens,
+          costToday: Number(cost.toFixed(4)),
+        };
+      }
     }
   }
+
+  const burnRow = db.prepare(`
+    SELECT coalesce(sum(input + output + cache_read + cache_write), 0) AS tokensLastHour
+    FROM events
+    WHERE ts >= ?
+  `).get(now - 3600_000) as { tokensLastHour: number } | undefined;
+
+  const activeRow = db.prepare(`
+    SELECT count(DISTINCT session_id) AS activeSessions
+    FROM events
+    WHERE ts >= ?
+  `).get(now - 900_000) as { activeSessions: number } | undefined;
 
   const quotaRows = db.prepare(`
     SELECT agent, win, used_pct AS usedPct
@@ -164,13 +228,83 @@ export function writeSummary(db: DB, targetPath: string): void {
   const activeExhaustion = forecasts.find((f) => f.willExhaustBeforeReset && f.message);
   const statuslineForecast = activeExhaustion?.message;
 
+  const recRow = db.prepare(`
+    SELECT r.id,
+           r.finding_rule AS findingRule,
+           r.project_id AS projectId,
+           r.action,
+           r.title,
+           r.score,
+           coalesce(p.name, 'global') AS projectName,
+           coalesce(p.root, '') AS projectRoot
+    FROM recommendations r
+    LEFT JOIN projects p ON p.id = r.project_id
+    WHERE r.status = 'open'
+    ORDER BY r.score DESC, r.id ASC
+    LIMIT 1
+  `).get() as {
+    id: string;
+    findingRule: string;
+    projectId: number | null;
+    action: string;
+    title: string;
+    score: number;
+    projectName: string;
+    projectRoot: string;
+  } | undefined;
+
+  let topRecommendation: SummaryRecommendation | null = null;
+  if (recRow) {
+    const findingRow = db.prepare(`
+      SELECT evidence, coalesce(est_tokens_week, 0) AS estTokensWeek
+      FROM findings
+      WHERE rule = ? AND (project_id IS ? OR (? IS NULL AND project_id IS NULL))
+      ORDER BY est_tokens_week DESC, last_seen DESC
+      LIMIT 1
+    `).get(recRow.findingRule, recRow.projectId, recRow.projectId) as { evidence: string; estTokensWeek: number } | undefined;
+
+    let evidence: Record<string, any> = {};
+    if (findingRow?.evidence) {
+      try {
+        evidence = JSON.parse(findingRow.evidence);
+      } catch {}
+    }
+
+    const severity: 'high' | 'medium' | 'low' =
+      recRow.score >= 80 ? 'high' : recRow.score >= 50 ? 'medium' : 'low';
+
+    topRecommendation = {
+      id: recRow.id,
+      rule: recRow.findingRule,
+      severity,
+      title: recRow.title,
+      action: recRow.action,
+      estTokensSavedWeek: findingRow?.estTokensWeek ?? 0,
+      projectId: recRow.projectId ?? undefined,
+      projectName: recRow.projectName,
+      prompt: generateFixPrompt({
+        rule: recRow.findingRule,
+        title: recRow.title,
+        projectName: recRow.projectName,
+        projectRoot: recRow.projectRoot,
+        evidence,
+      }),
+    };
+  }
+
   const data: SummaryData = {
-    updatedAt: Date.now(),
-    totals: { tokensToday: totalTokensToday },
+    updatedAt: now,
+    totals: {
+      tokensToday: totalTokensToday,
+      costToday: Number(totalCostToday.toFixed(4)),
+      burnRateTokensPerHour: burnRow?.tokensLastHour ?? 0,
+      activeSessions: activeRow?.activeSessions ?? 0,
+    },
     projects,
     quotas,
     forecasts,
     statuslineForecast,
+    topRecommendation,
   };
 
   mkdirSync(dirname(targetPath), { recursive: true });
