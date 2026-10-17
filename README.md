@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![Privacy First](https://img.shields.io/badge/privacy-local--first-orange.svg)](#privacy--security-guarantees)
-[![Tests Passing](https://img.shields.io/badge/tests-193%20passing-success.svg)](test/)
+[![Tests Passing](https://img.shields.io/badge/tests-209%20passing-success.svg)](test/)
 
 **agentlens** is a lightweight, local-first, cross-platform usage and workflow optimizer for AI coding agents on Linux, macOS, and Windows:
 - **Claude Code** (Pro)
@@ -26,6 +26,7 @@ It monitors how you use AI coding agents to **save tokens, avoid hitting subscri
 * **Unified Usage Dashboard (Fluid & Responsive):** Fluid full-width 12-column responsive layout, dense KPI bar, side-by-side uPlot canvas charts, dark/light token design system, collapsible sidebar, and slide-over drawers.
 * **"Fix Now" Project Action Runner:** Instant project fix panel ranking open recommendations by tokens saved, with one-click copyable prompts and opt-in "Send to agent" CLI dispatch (`claude`, `codex`, `opencode`) capturing live `git diff --stat`.
 * **Quota Forecasting & Live Statusline:** Burn rate extrapolation projecting 5-hour and 7-day rate-limit exhaustion times before reset (< 10ms latency in statusline, CLI status, and dashboard top bar).
+* **Omarchy Quattro Desktop Bar Widget (`agentlens.bar-widget`):** Native Quickshell/QML top-bar pill and slide-out telemetry panel with reactive `FileView` watching (`~/.local/state/agentlens/summary.json`), multi-agent 5h/7d progress bars, live token burn velocity (`🔥 X/h`), Today's Activity KPIs, and one-click "Fix Now" prompt copy.
 * **Live Desktop Alerts:** Proactive notifications during `serve` for active retry loops, quota exhaustion predicted within 30 minutes, or project budgets crossing 80%/100%.
 * **Per-Project Weekly Budgets:** Configurable weekly token and cost targets per project with visual progress bars and weekly report integration.
 * **Cross-Agent Quota Balancing:** Evaluates quota headroom across agents to recommend optimal agent switching.
@@ -91,7 +92,8 @@ flowchart TD
 
     subgraph Outputs["Interfaces & Outputs"]
         Statusline["Live Statusline\n(< 10ms)"]
-        CLI["agentlens CLI\n(status, audit, report, track, export, discover)"]
+        Omarchy["Omarchy Quattro Bar Widget\n(agentlens.bar-widget)"]
+        CLI["agentlens CLI\n(status, audit, report, track, export, discover, plugin)"]
         WebUI["Local Web Dashboard\n(http://127.0.0.1:4711)"]
         Service["Background Service\n(systemd / launchd / schtasks)"]
         Metrics["Prometheus & CSV Exports\n(/metrics, /api/export.csv)"]
@@ -107,6 +109,7 @@ flowchart TD
     DB --> WebUI
     DB --> CLI
     DB --> Metrics
+    DB --> Omarchy
     Statusline --> CC
     Service --> Adapters
 ```
@@ -223,6 +226,24 @@ Add the printed snippet to `~/.claude/settings.json` (or `%USERPROFILE%\.claude\
 }
 ```
 
+### 6. Omarchy Quattro Desktop Plugin (`agentlens.bar-widget`)
+If you run **Omarchy Quattro** on Linux, install and enable the native top-bar widget and slide-out telemetry panel:
+
+```bash
+# Install to ~/.config/omarchy/plugins/agentlens.bar-widget, validate, and enable in the bar
+agentlens plugin install --enable
+
+# Check installation & shell status
+agentlens plugin status
+
+# Query live telemetry or force a refresh via Omarchy IPC
+omarchy-shell agentlens.bar-widget status
+omarchy-shell agentlens.bar-widget refresh
+
+# Disable and uninstall
+agentlens plugin uninstall
+```
+
 ---
 
 ## 💻 CLI Reference
@@ -242,6 +263,7 @@ Add the printed snippet to `~/.claude/settings.json` (or `%USERPROFILE%\.claude\
 | `agentlens statusline` | Streamlined stdin processor for Claude Code statusline payload |
 | `agentlens install-statusline` | Print configuration instructions for Claude Code statusline |
 | `agentlens install-service` | Install native background service (systemd user unit, launchd agent, or Windows scheduled task) |
+| `agentlens plugin [install\|status\|uninstall] [--enable] [--dir <path>]` | Install, inspect, or remove the native Omarchy Quattro desktop bar plugin (`agentlens.bar-widget`) |
 
 ---
 
@@ -318,7 +340,7 @@ agentlens performs read-only discovery of logs and session databases across Linu
 ## 🧪 Testing & Verification
 
 ```bash
-# Run test suite (193 unit & integration tests)
+# Run test suite (209 unit & integration tests)
 npm test
 
 # Run TypeScript typecheck
@@ -346,7 +368,7 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 ## 🗺️ Roadmap & Integrations
 
 - **[ROADMAP.md](ROADMAP.md)** — Architectural proposals for in-flight guardrails via MCP, automated ignore generation, git branch cost attribution, and terminal UI (`agentlens tui`).
-- **[OMARCHY_PLUGIN.md](OMARCHY_PLUGIN.md)** — Complete specification for the native **Omarchy Quattro** desktop bar widget and slide-out details panel (`BarWidget.qml`, `Panel.qml`).
+- **[OMARCHY_PLUGIN.md](OMARCHY_PLUGIN.md)** & **[`plugins/omarchy/agentlens.bar-widget/`](plugins/omarchy/agentlens.bar-widget/README.md)** — Shipped native **Omarchy Quattro** desktop bar widget and slide-out telemetry panel (`BarWidget.qml`, `Panel.qml`, `Model.js`), managed via `agentlens plugin install --enable`.
 - **[VSCODE_EXTENSION.md](VSCODE_EXTENSION.md)** — Full specification for the **VS Code & Cursor** extension (`vscode-agentlens`), including ambient status bar quota monitoring, workspace Fix Now tree view, and in-editor instruction trimmer diff preview.
 
 ---
