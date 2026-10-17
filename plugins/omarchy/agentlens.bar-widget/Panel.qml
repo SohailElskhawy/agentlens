@@ -138,12 +138,14 @@ Panel {
       anchors.fill: parent
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
-      onHorizontalMove: function(delta) {
-        root.activeTab = ((root.activeTab + delta) % 3 + 3) % 3
-      }
-      onVerticalMove: function(delta) {
-        var step = Style.space(48)
-        panelFlick.contentY = root.clamp(panelFlick.contentY + delta * step, 0, Math.max(0, panelFlick.contentHeight - panelFlick.height))
+      onMoveRequested: function(dx, dy) {
+        if (dx !== 0) {
+          root.activeTab = ((root.activeTab + dx) % 3 + 3) % 3
+        }
+        if (dy !== 0) {
+          var step = Style.space(48)
+          panelFlick.contentY = root.clamp(panelFlick.contentY + dy * step, 0, Math.max(0, panelFlick.contentHeight - panelFlick.height))
+        }
       }
       onTextKey: function(t) {
         if ((t === "r" || t === "R") && root.hostWidget) {

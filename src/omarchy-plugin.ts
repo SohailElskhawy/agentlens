@@ -163,6 +163,16 @@ export function installOmarchyPlugin(
         enabled = true;
       } catch {}
     }
+
+    const shellConfigPath = opts.shellConfigPath ?? defaultShellConfigPath();
+    if (omarchyBin && (enabled || isEnabledInShellJson(shellConfigPath))) {
+      try {
+        execFileSync(omarchyBin, ['restart', 'shell'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+      } catch {}
+    }
   }
 
   const status = getOmarchyPluginStatus(opts);
