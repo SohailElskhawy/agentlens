@@ -243,3 +243,24 @@ test('BarWidget.qml and Panel.qml exist and use valid Omarchy Quattro qs.Commons
   }
 });
 
+test('Model.buildStateFromApi parses /api/quota latest array and returns hasData: false when empty', () => {
+  const Model = loadModel();
+  const now = 1_700_000_000_000;
+
+  const emptyFallback = Model.buildStateFromApi(null, { latest: [], forecasts: [] }, now);
+  assert.equal(emptyFallback.hasData, false);
+
+  const validFallback = Model.buildStateFromApi(
+    { tokens: 25_000, cost: 0.15 },
+    {
+      latest: [{ agent: 'claude', window: '5h', usedPct: 54, resetsAt: now + 60 * 60_000 }],
+      forecasts: [],
+    },
+    now,
+  );
+  assert.equal(validFallback.hasData, true);
+  assert.equal(validFallback.bindingAgent, 'claude');
+  assert.equal(validFallback.binding5hPct, 54);
+});
+
+

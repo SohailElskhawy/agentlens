@@ -256,18 +256,38 @@ function formatTooltip(state) {
   return parts.join(" · ");
 }
 
-function buildStateFromApi(summaryResp, quotaResp, nowMs) {
+function buildSyntheticSummaryFromApi(summaryResp, quotaResp, nowMs) {
   var now = isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
   var quotas = {};
   var forecasts = [];
+  var hasQuotaData = false;
   if (quotaResp && typeof quotaResp === "object") {
-    if (quotaResp.windows && typeof quotaResp.windows === "object") {
+    if (Array.isArray(quotaResp.latest)) {
+      for (var i = 0; i < quotaResp.latest.length; i++) {
+        var entry = quotaResp.latest[i];
+        if (entry && entry.agent && (entry.win || entry.window)) {
+          var lWin = entry.win || entry.window;
+          quotas[entry.agent] = quotas[entry.agent] || {};
+          quotas[entry.agent][lWin] = Number(entry.usedPct != null ? entry.usedPct : (entry.percent || 0));
+          hasQuotaData = true;
+          forecasts.push({
+            agent: entry.agent,
+            window: lWin,
+            usedPct: quotas[entry.agent][lWin],
+            resetsAt: entry.resetsAt || 0,
+            willExhaustBeforeReset: false,
+            message: null
+          });
+        }
+      }
+    } else if (quotaResp.windows && typeof quotaResp.windows === "object") {
       for (var k in quotaResp.windows) {
         var w = quotaResp.windows[k];
         if (w && w.agent && (w.win || w.window)) {
           var winName = w.win || w.window;
           quotas[w.agent] = quotas[w.agent] || {};
           quotas[w.agent][winName] = Number(w.usedPct != null ? w.usedPct : (w.percent || 0));
+          hasQuotaData = true;
           forecasts.push({
             agent: w.agent,
             window: winName,
@@ -279,12 +299,18 @@ function buildStateFromApi(summaryResp, quotaResp, nowMs) {
         }
       }
     }
-    if (Array.isArray(quotaResp.forecasts)) {
+    if (Array.isArray(quotaResp.forecasts) && quotaResp.forecasts.length > 0) {
       forecasts = quotaResp.forecasts;
+      hasQuotaData = true;
     }
   }
 
-  var synthetic = {
+  var hasSummaryTokens = Boolean(summaryResp && (summaryResp.tokens != null || summaryResp.cost != null));
+  if (!hasQuotaData && !hasSummaryTokens) {
+    return null;
+  }
+
+  return {
     updatedAt: now,
     totals: {
       tokensToday: summaryResp && summaryResp.tokens != null ? Number(summaryResp.tokens) : 0,
@@ -296,6 +322,12 @@ function buildStateFromApi(summaryResp, quotaResp, nowMs) {
     quotas: quotas,
     forecasts: forecasts
   };
+}
+
+function buildStateFromApi(summaryResp, quotaResp, nowMs) {
+  var now = isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  var synthetic = buildSyntheticSummaryFromApi(summaryResp, quotaResp, now);
+  if (!synthetic) return emptyState();
   return parseSummaryJson(JSON.stringify(synthetic), now);
 }
 
@@ -308,9 +340,9 @@ function fetchHttpFallback(widget, baseUrl) {
     if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
       try {
         var quotaResp = JSON.parse(xhr.responseText);
-        var state = buildStateFromApi(null, quotaResp, Date.now());
-        if (state && state.hasData) {
-          widget.state = state;
+        var synthetic = buildSyntheticSummaryFromApi(null, quotaResp, Date.now());
+        if (synthetic) {
+          widget.rawSummary = JSON.stringify(synthetic);
         }
       } catch (e) {}
     }
