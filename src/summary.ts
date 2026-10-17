@@ -481,7 +481,7 @@ export function writeSummary(db: DB, targetPath: string): void {
            coalesce(sum(e.cache_write), 0) AS cacheWrite,
            coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
     FROM events e
-    WHERE e.ts >= ?
+    WHERE e.kind = 'assistant' AND e.ts >= ?
     GROUP BY day, e.model
   `).all(startOf7d) as {
     day: string;

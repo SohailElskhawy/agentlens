@@ -5,8 +5,8 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Live AI coding agent quota, token burn velocity, and remediation widget for Omarchy Quattro.
-// Left-click toggles the details panel; middle-click forces a refresh; right-click opens the web dashboard.
+// Live AI coding agent quota, token burn velocity, and 3-tab cockpit widget for Omarchy Quattro (v1.1).
+// Left-click toggles the details panel; middle-click cycles pill format; right-click opens the web dashboard.
 BarWidget {
   id: root
   moduleName: "agentlens.bar-widget"
@@ -19,8 +19,7 @@ BarWidget {
   readonly property string summaryPath: stateHome + "/agentlens/summary.json"
 
   readonly property int refreshIntervalSec: Math.max(2, Number(setting("refreshIntervalSec", 5)) || 5)
-  readonly property bool showCountdown: setting("showCountdown", true) !== false
-  readonly property bool showBurnRate: setting("showBurnRate", true) !== false
+  property string pillMode: String(setting("pillMode", "full") || "full")
   readonly property string dashboardUrl: String(setting("dashboardUrl", "http://127.0.0.1:4711") || "http://127.0.0.1:4711")
 
   property string rawSummary: ""
@@ -36,9 +35,16 @@ BarWidget {
   readonly property int burnRatePerHour: state ? Number(state.burnRatePerHour || 0) : 0
   readonly property int activeSessions: state ? Number(state.activeSessions || 0) : 0
   readonly property string statuslineForecast: state ? String(state.statuslineForecast || "") : ""
-  readonly property var agentWindows: state && state.agentWindows ? state.agentWindows : []
+  readonly property var agentQuotas: state && state.agentQuotas ? state.agentQuotas : []
+  readonly property var byAgentToday: state && state.byAgentToday ? state.byAgentToday : []
+  readonly property var switchAdvice: state ? state.switchAdvice : null
+  readonly property var liveAlerts: state && state.liveAlerts ? state.liveAlerts : []
   readonly property var topProjects: state && state.topProjects ? state.topProjects : []
+  readonly property var projectList: state && state.projectList ? state.projectList : []
+  readonly property var daily7d: state && state.daily7d ? state.daily7d : []
+  readonly property var topModels: state && state.topModels ? state.topModels : []
   readonly property var topRecommendation: state ? state.topRecommendation : null
+  readonly property var recommendations: state && state.recommendations ? state.recommendations : []
 
   readonly property color baseForeground: bar ? bar.barForeground : Color.foreground
   readonly property color urgentColor: bar ? bar.urgent : Color.urgent
@@ -48,10 +54,7 @@ BarWidget {
     severity === "warning" ? warningColor :
     baseForeground
 
-  readonly property string displayLabel: Model.formatBarLabel(state, {
-    showCountdown: root.showCountdown,
-    showBurnRate: root.showBurnRate
-  })
+  readonly property string displayLabel: Model.formatBarLabel(state, root.pillMode)
   readonly property string tooltipString: Model.formatTooltip(state)
 
   function refresh() {
@@ -153,12 +156,15 @@ BarWidget {
       return JSON.stringify({
         hasData: root.hasData,
         severity: root.severity,
+        pillMode: root.pillMode,
         quota5hPct: root.quota5hPct,
         quota5hReset: root.quota5hReset,
         tokensToday: root.tokensToday,
         costToday: root.costToday,
         burnRatePerHour: root.burnRatePerHour,
         activeSessions: root.activeSessions,
+        liveAlertsCount: root.liveAlerts ? root.liveAlerts.length : 0,
+        activeAgentsToday: root.byAgentToday ? root.byAgentToday.length : 0,
         displayLabel: root.displayLabel
       })
     }
@@ -178,7 +184,7 @@ BarWidget {
 
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.RightButton) root.openDashboard()
-      else if (mouseButton === Qt.MiddleButton) root.refresh()
+      else if (mouseButton === Qt.MiddleButton) root.pillMode = Model.cyclePillMode(root.pillMode)
       else root.togglePanel()
     }
   }

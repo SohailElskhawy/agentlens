@@ -263,4 +263,146 @@ test('Model.buildStateFromApi parses /api/quota latest array and returns hasData
   assert.equal(validFallback.binding5hPct, 54);
 });
 
+test('Model.js v1.1 computes pace math, switchAdvice, liveAlerts, recommendations, daily7d, topModels, projectList, and pillMode', () => {
+  const Model = loadModel();
+  const now = 1_700_000_000_000;
+  // 2.5h remaining out of 5h -> elapsedPct5h = 50%
+  const twoAndHalfHoursMs = 2.5 * 3600 * 1000;
+
+  const raw = JSON.stringify({
+    updatedAt: now,
+    totals: {
+      tokensToday: 185_000,
+      costToday: 1.45,
+      burnRateTokensPerHour: 90_000,
+      activeSessions: 2,
+    },
+    quotas: {
+      claude: { '5h': 88, '7d': 45 },
+      codex: { '5h': 20, '7d': 15 },
+    },
+    forecasts: [
+      {
+        agent: 'claude',
+        window: '5h',
+        usedPct: 88,
+        resetsAt: now + twoAndHalfHoursMs,
+        willExhaustBeforeReset: true,
+        message: 'Claude 5h exhausts in 45m',
+      },
+      {
+        agent: 'codex',
+        window: '5h',
+        usedPct: 20,
+        resetsAt: now + twoAndHalfHoursMs,
+        willExhaustBeforeReset: false,
+        message: null,
+      },
+    ],
+    byAgentToday: [
+      { agent: 'antigravity', tokens: 125_000, cost: 0.95, sessions: 3 },
+      { agent: 'claude', tokens: 60_000, cost: 0.5, sessions: 1 },
+    ],
+    liveAlerts: [
+      {
+        id: 'f-1',
+        rule: 'retry_loop',
+        severity: 'high',
+        title: 'retry loop',
+        detail: '5 consecutive tool errors',
+        projectName: 'token-analyzer',
+        wastedTokens: 45_000,
+        detectedAt: now - 120_000,
+      },
+    ],
+    recommendations: [
+      {
+        id: 'rec-1',
+        rule: 'retry_loop',
+        severity: 'high',
+        title: 'Break retry loop',
+        action: 'Stop after 2 consecutive failures',
+        estTokensSavedWeek: 45_000,
+        projectName: 'token-analyzer',
+        prompt: 'Fix retry loop',
+      },
+      {
+        id: 'rec-2',
+        rule: 'hot_files',
+        severity: 'medium',
+        title: 'Cache hot files',
+        action: 'Summarize in CLAUDE.md',
+        estTokensSavedWeek: 20_000,
+        projectName: 'token-analyzer',
+        prompt: 'Fix hot files',
+      },
+    ],
+    daily7d: [
+      { day: '2026-10-16', tokens: 100_000, cost: 0.8 },
+      { day: '2026-10-17', tokens: 200_000, cost: 1.6 },
+    ],
+    topModels: [
+      { model: 'Gemini 4 Argon (High)', tokens: 125_000, inputTokens: 25_000, outputTokens: 5_000, cacheTokens: 95_000, cost: 0.95 },
+      { model: 'claude-sonnet-4-6', tokens: 60_000, inputTokens: 15_000, outputTokens: 5_000, cacheTokens: 40_000, cost: 0.5 },
+    ],
+    projectList: [
+      {
+        projectId: 1,
+        name: 'token-analyzer',
+        path: '/home/user/token-analyzer',
+        tokensToday: 185_000,
+        costToday: 1.45,
+        weeklyTokenBudget: 500_000,
+        weeklyTokensUsed: 300_000,
+        budgetUsedPct: 60,
+      },
+    ],
+  });
+
+  const state = Model.parseSummaryJson(raw, now);
+  const claudeQuota = state.agentQuotas.find((q: any) => q.agent === 'claude');
+  assert.ok(claudeQuota);
+  assert.equal(claudeQuota.elapsedPct5h, 50);
+  assert.equal(claudeQuota.paceDelta5h, 38); // 88% used vs 50% elapsed
+
+  // Cross-Agent Switch Advisor
+  assert.ok(state.switchAdvice);
+  assert.equal(state.switchAdvice.fromAgent, 'claude');
+  assert.equal(state.switchAdvice.toAgent, 'codex');
+  assert.match(state.switchAdvice.message, /Codex/i);
+
+  // Active agents today (includes Antigravity!)
+  assert.equal(state.byAgentToday.length, 2);
+  assert.equal(state.byAgentToday[0].agent, 'antigravity');
+  assert.equal(state.byAgentToday[0].displayName, 'Antigravity');
+
+  // Live alerts
+  assert.equal(state.liveAlerts.length, 1);
+  assert.equal(state.liveAlerts[0].rule, 'retry_loop');
+
+  // Recommendations list
+  assert.equal(state.recommendations.length, 2);
+  assert.equal(state.recommendations[1].id, 'rec-2');
+
+  // 7d daily ratios & model ratios
+  assert.equal(state.daily7d.length, 2);
+  assert.equal(state.daily7d[0].barRatio, 0.5);
+  assert.equal(state.daily7d[1].barRatio, 1);
+  assert.equal(state.topModels.length, 2);
+  assert.equal(state.topModels[0].barRatio, 1);
+
+  // Project list with weekly budgets
+  assert.equal(state.projectList.length, 1);
+  assert.equal(state.projectList[0].budgetUsedPct, 60);
+
+  // Pill modes & live alert indicator
+  assert.equal(Model.formatBarLabel(state, 'full'), '⚡ 88% (2h 30m) · 🔥 90.0k/h · ⚠ 1');
+  assert.equal(Model.formatBarLabel(state, 'compact'), '⚡ 88% · ⚠ 1');
+  assert.equal(Model.formatBarLabel(state, 'cost'), '⚡ 88% · $1.45 · ⚠ 1');
+  assert.equal(Model.cyclePillMode('full'), 'compact');
+  assert.equal(Model.cyclePillMode('compact'), 'cost');
+  assert.equal(Model.cyclePillMode('cost'), 'full');
+});
+
+
 

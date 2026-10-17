@@ -169,7 +169,7 @@ const commands: Record<string, () => unknown> = {
                     coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
              FROM events e
              JOIN sessions s ON s.id = e.session_id
-             WHERE s.project_id = ? AND e.ts >= ?
+             WHERE e.kind = 'assistant' AND s.project_id = ? AND e.ts >= ?
              GROUP BY e.model`;
       const rows = db.prepare(sql).all(projId, fromTs) as {
         model: string | null;
