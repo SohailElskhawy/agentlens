@@ -28,6 +28,50 @@ export interface SummaryRecommendation {
   prompt: string;
 }
 
+export interface SummaryAgentToday {
+  agent: string;
+  tokens: number;
+  cost: number;
+  sessions: number;
+}
+
+export interface SummaryLiveAlert {
+  id: string;
+  rule: string;
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  detail: string;
+  projectName: string | null;
+  wastedTokens: number;
+  detectedAt: number;
+}
+
+export interface SummaryDailyBucket {
+  day: string;
+  tokens: number;
+  cost: number;
+}
+
+export interface SummaryModelRow {
+  model: string;
+  tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTokens: number;
+  cost: number;
+}
+
+export interface SummaryProjectBudget {
+  projectId: number;
+  name: string;
+  path: string;
+  tokensToday: number;
+  costToday: number;
+  weeklyTokenBudget: number | null;
+  weeklyTokensUsed: number;
+  budgetUsedPct: number | null;
+}
+
 export interface SummaryData {
   updatedAt: number;
   totals: {
@@ -44,6 +88,12 @@ export interface SummaryData {
   forecasts?: QuotaForecastResult[];
   statuslineForecast?: string;
   topRecommendation?: SummaryRecommendation | null;
+  recommendations?: SummaryRecommendation[];
+  byAgentToday?: SummaryAgentToday[];
+  liveAlerts?: SummaryLiveAlert[];
+  daily7d?: SummaryDailyBucket[];
+  topModels?: SummaryModelRow[];
+  projectList?: SummaryProjectBudget[];
 }
 
 export function formatTokens(tokens: number): string {
@@ -135,11 +185,22 @@ export function drainQuotaSpool(db: DB, spoolPath: string): void {
   } catch {}
 }
 
+function formatLocalDay(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function writeSummary(db: DB, targetPath: string): void {
   const now = Date.now();
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
   const startOfToday = midnight.getTime();
+
+  const startOf7dDate = new Date(midnight.getTime());
+  startOf7dDate.setDate(startOf7dDate.getDate() - 6);
+  const startOf7d = startOf7dDate.getTime();
 
   const projectRows = db.prepare(`
     SELECT coalesce(s.project_id, 0) AS projectId,
@@ -170,7 +231,7 @@ export function writeSummary(db: DB, targetPath: string): void {
 
   let totalTokensToday = 0;
   let totalCostToday = 0;
-  const projects: Record<string, ProjectSummary> = {};
+  const projectsRaw: Record<string, { projectId: number; root: string; name: string; tokensToday: number; costTodayRaw: number }> = {};
   for (const r of projectRows) {
     const tokens = r.input + r.output + r.cacheRead + r.cacheWrite;
     const cost = costOf(r.model ?? undefined, {
@@ -183,21 +244,89 @@ export function writeSummary(db: DB, targetPath: string): void {
     totalTokensToday += tokens;
     totalCostToday += cost;
     if (r.root) {
-      const existing = projects[r.root];
+      const existing = projectsRaw[r.root];
       if (existing) {
         existing.tokensToday += tokens;
-        existing.costToday = Number(((existing.costToday ?? 0) + cost).toFixed(4));
+        existing.costTodayRaw += cost;
       } else {
-        projects[r.root] = {
+        projectsRaw[r.root] = {
           projectId: r.projectId,
           root: r.root,
           name: r.name,
           tokensToday: tokens,
-          costToday: Number(cost.toFixed(4)),
+          costTodayRaw: cost,
         };
       }
     }
   }
+
+  const projects: Record<string, ProjectSummary> = {};
+  for (const [rootKey, p] of Object.entries(projectsRaw)) {
+    projects[rootKey] = {
+      projectId: p.projectId,
+      root: p.root,
+      name: p.name,
+      tokensToday: p.tokensToday,
+      costToday: Number(p.costTodayRaw.toFixed(4)),
+    };
+  }
+
+  // Active agents today
+  const agentModelRows = db.prepare(`
+    SELECT e.agent AS agent,
+           e.model AS model,
+           coalesce(sum(e.input), 0) AS input,
+           coalesce(sum(e.output), 0) AS output,
+           coalesce(sum(e.cache_read), 0) AS cacheRead,
+           coalesce(sum(e.cache_write), 0) AS cacheWrite,
+           coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
+    FROM events e
+    WHERE e.ts >= ?
+    GROUP BY e.agent, e.model
+  `).all(startOfToday) as {
+    agent: string;
+    model: string | null;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cacheWrite1h: number;
+  }[];
+
+  const agentSessionRows = db.prepare(`
+    SELECT agent, count(DISTINCT session_id) AS sessions
+    FROM events
+    WHERE ts >= ?
+    GROUP BY agent
+  `).all(startOfToday) as { agent: string; sessions: number }[];
+  const sessionsByAgent = new Map<string, number>();
+  for (const r of agentSessionRows) sessionsByAgent.set(r.agent, r.sessions);
+
+  const agentTotalsMap = new Map<string, { tokens: number; cost: number }>();
+  for (const r of agentModelRows) {
+    const tokens = r.input + r.output + r.cacheRead + r.cacheWrite;
+    const cost = costOf(r.model ?? undefined, {
+      input: r.input,
+      output: r.output,
+      cacheRead: r.cacheRead,
+      cacheWrite: r.cacheWrite,
+      cacheWrite1h: r.cacheWrite1h,
+    }) ?? 0;
+    const cur = agentTotalsMap.get(r.agent) ?? { tokens: 0, cost: 0 };
+    cur.tokens += tokens;
+    cur.cost += cost;
+    agentTotalsMap.set(r.agent, cur);
+  }
+
+  const byAgentToday: SummaryAgentToday[] = Array.from(agentTotalsMap.entries())
+    .filter(([, v]) => v.tokens > 0)
+    .map(([agent, v]) => ({
+      agent,
+      tokens: v.tokens,
+      cost: Number(v.cost.toFixed(4)),
+      sessions: sessionsByAgent.get(agent) ?? 0,
+    }))
+    .sort((a, b) => b.tokens - a.tokens);
 
   const burnRow = db.prepare(`
     SELECT coalesce(sum(input + output + cache_read + cache_write), 0) AS tokensLastHour
@@ -228,7 +357,8 @@ export function writeSummary(db: DB, targetPath: string): void {
   const activeExhaustion = forecasts.find((f) => f.willExhaustBeforeReset && f.message);
   const statuslineForecast = activeExhaustion?.message;
 
-  const recRow = db.prepare(`
+  // Top 5 open recommendations
+  const recRows = db.prepare(`
     SELECT r.id,
            r.finding_rule AS findingRule,
            r.project_id AS projectId,
@@ -242,8 +372,8 @@ export function writeSummary(db: DB, targetPath: string): void {
     LEFT JOIN projects p ON p.id = r.project_id
     WHERE r.status = 'open'
     ORDER BY r.score DESC, r.id ASC
-    LIMIT 1
-  `).get() as {
+    LIMIT 5
+  `).all() as {
     id: string;
     findingRule: string;
     projectId: number | null;
@@ -253,17 +383,20 @@ export function writeSummary(db: DB, targetPath: string): void {
     score: number;
     projectName: string;
     projectRoot: string;
-  } | undefined;
+  }[];
 
-  let topRecommendation: SummaryRecommendation | null = null;
-  if (recRow) {
-    const findingRow = db.prepare(`
-      SELECT evidence, coalesce(est_tokens_week, 0) AS estTokensWeek
-      FROM findings
-      WHERE rule = ? AND (project_id IS ? OR (? IS NULL AND project_id IS NULL))
-      ORDER BY est_tokens_week DESC, last_seen DESC
-      LIMIT 1
-    `).get(recRow.findingRule, recRow.projectId, recRow.projectId) as { evidence: string; estTokensWeek: number } | undefined;
+  const findFindingStmt = db.prepare(`
+    SELECT evidence, coalesce(est_tokens_week, 0) AS estTokensWeek
+    FROM findings
+    WHERE rule = ? AND (project_id IS ? OR (? IS NULL AND project_id IS NULL))
+    ORDER BY est_tokens_week DESC, last_seen DESC
+    LIMIT 1
+  `);
+
+  const recommendations: SummaryRecommendation[] = recRows.map((recRow) => {
+    const findingRow = findFindingStmt.get(recRow.findingRule, recRow.projectId, recRow.projectId) as
+      | { evidence: string; estTokensWeek: number }
+      | undefined;
 
     let evidence: Record<string, any> = {};
     if (findingRow?.evidence) {
@@ -275,7 +408,7 @@ export function writeSummary(db: DB, targetPath: string): void {
     const severity: 'high' | 'medium' | 'low' =
       recRow.score >= 80 ? 'high' : recRow.score >= 50 ? 'medium' : 'low';
 
-    topRecommendation = {
+    return {
       id: recRow.id,
       rule: recRow.findingRule,
       severity,
@@ -292,7 +425,159 @@ export function writeSummary(db: DB, targetPath: string): void {
         evidence,
       }),
     };
+  });
+
+  const topRecommendation: SummaryRecommendation | null = recommendations[0] ?? null;
+
+  // Live alerts: findings seen in the last 30 minutes
+  const alertRows = db.prepare(`
+    SELECT f.id,
+           f.rule,
+           f.confidence,
+           f.confidence_reason AS confidenceReason,
+           coalesce(f.est_tokens_week, 0) AS estTokensWeek,
+           f.last_seen AS lastSeen,
+           p.name AS projectName
+    FROM findings f
+    LEFT JOIN projects p ON p.id = f.project_id
+    WHERE f.last_seen >= ?
+    ORDER BY f.est_tokens_week DESC, f.last_seen DESC
+    LIMIT 3
+  `).all(now - 30 * 60_000) as {
+    id: string;
+    rule: string;
+    confidence: string;
+    confidenceReason: string;
+    estTokensWeek: number;
+    lastSeen: number;
+    projectName: string | null;
+  }[];
+
+  const liveAlerts: SummaryLiveAlert[] = alertRows.map((a) => ({
+    id: a.id,
+    rule: a.rule,
+    severity: a.confidence === 'high' ? 'high' : a.confidence === 'medium' ? 'medium' : 'low',
+    title: a.rule.replace(/_/g, ' '),
+    detail: a.confidenceReason || '',
+    projectName: a.projectName ?? null,
+    wastedTokens: a.estTokensWeek,
+    detectedAt: a.lastSeen,
+  }));
+
+  // 7-day daily buckets & top models
+  const dayBucketsMap = new Map<string, { tokens: number; cost: number }>();
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startOf7dDate.getTime());
+    d.setDate(d.getDate() + i);
+    dayBucketsMap.set(formatLocalDay(d), { tokens: 0, cost: 0 });
   }
+
+  const dailyModelRows = db.prepare(`
+    SELECT date(e.ts/1000, 'unixepoch', 'localtime') AS day,
+           e.model AS model,
+           coalesce(sum(e.input), 0) AS input,
+           coalesce(sum(e.output), 0) AS output,
+           coalesce(sum(e.cache_read), 0) AS cacheRead,
+           coalesce(sum(e.cache_write), 0) AS cacheWrite,
+           coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
+    FROM events e
+    WHERE e.ts >= ?
+    GROUP BY day, e.model
+  `).all(startOf7d) as {
+    day: string;
+    model: string | null;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cacheWrite1h: number;
+  }[];
+
+  const modelAggMap = new Map<string, { tokens: number; inputTokens: number; outputTokens: number; cacheTokens: number; cost: number }>();
+  for (const r of dailyModelRows) {
+    const tokens = r.input + r.output + r.cacheRead + r.cacheWrite;
+    if (tokens <= 0) continue;
+    const cost = costOf(r.model ?? undefined, {
+      input: r.input,
+      output: r.output,
+      cacheRead: r.cacheRead,
+      cacheWrite: r.cacheWrite,
+      cacheWrite1h: r.cacheWrite1h,
+    }) ?? 0;
+
+    const dayBucket = dayBucketsMap.get(r.day);
+    if (dayBucket) {
+      dayBucket.tokens += tokens;
+      dayBucket.cost += cost;
+    }
+
+    const modelName = r.model || 'unknown';
+    const mCur = modelAggMap.get(modelName) ?? { tokens: 0, inputTokens: 0, outputTokens: 0, cacheTokens: 0, cost: 0 };
+    mCur.tokens += tokens;
+    mCur.inputTokens += r.input;
+    mCur.outputTokens += r.output;
+    mCur.cacheTokens += r.cacheRead + r.cacheWrite;
+    mCur.cost += cost;
+    modelAggMap.set(modelName, mCur);
+  }
+
+  const daily7d: SummaryDailyBucket[] = Array.from(dayBucketsMap.entries()).map(([day, b]) => ({
+    day,
+    tokens: b.tokens,
+    cost: Number(b.cost.toFixed(4)),
+  }));
+
+  const topModels: SummaryModelRow[] = Array.from(modelAggMap.entries())
+    .map(([model, m]) => ({
+      model,
+      tokens: m.tokens,
+      inputTokens: m.inputTokens,
+      outputTokens: m.outputTokens,
+      cacheTokens: m.cacheTokens,
+      cost: Number(m.cost.toFixed(4)),
+    }))
+    .sort((a, b) => b.tokens - a.tokens)
+    .slice(0, 5);
+
+  // Project list with weekly budgets
+  const settingsRows = db.prepare(`SELECT key, value FROM settings WHERE key LIKE 'budget_tokens_%'`).all() as Array<{ key: string; value: string }>;
+  const tokenBudgets = new Map<number, number>();
+  for (const s of settingsRows) {
+    const pid = Number(s.key.replace('budget_tokens_', ''));
+    const limit = Number(s.value);
+    if (pid > 0 && limit > 0) tokenBudgets.set(pid, limit);
+  }
+
+  const weeklyProjRows = db.prepare(`
+    SELECT p.id AS projectId,
+           p.name AS name,
+           p.root AS root,
+           coalesce(sum(e.input + e.output + e.cache_read + e.cache_write), 0) AS weeklyTokens
+    FROM projects p
+    LEFT JOIN sessions s ON s.project_id = p.id
+    LEFT JOIN events e ON e.session_id = s.id AND e.ts >= ?
+    GROUP BY p.id
+  `).all(startOf7d) as { projectId: number; name: string; root: string; weeklyTokens: number }[];
+
+  const projectList: SummaryProjectBudget[] = weeklyProjRows
+    .map((wp) => {
+      const todayEntry = projects[wp.root];
+      const weeklyBudget = tokenBudgets.get(wp.projectId) ?? null;
+      const budgetUsedPct = weeklyBudget ? Math.round((wp.weeklyTokens / weeklyBudget) * 100) : null;
+      return {
+        projectId: wp.projectId,
+        name: wp.name,
+        path: wp.root,
+        tokensToday: todayEntry?.tokensToday ?? 0,
+        costToday: todayEntry?.costToday ?? 0,
+        weeklyTokenBudget: weeklyBudget,
+        weeklyTokensUsed: wp.weeklyTokens,
+        budgetUsedPct,
+      };
+    })
+    .filter((p) => p.tokensToday > 0 || p.weeklyTokensUsed > 0 || p.weeklyTokenBudget !== null)
+    .sort((a, b) => b.tokensToday - a.tokensToday || b.weeklyTokensUsed - a.weeklyTokensUsed)
+    .slice(0, 5);
 
   const data: SummaryData = {
     updatedAt: now,
@@ -307,6 +592,12 @@ export function writeSummary(db: DB, targetPath: string): void {
     forecasts,
     statuslineForecast,
     topRecommendation,
+    recommendations,
+    byAgentToday,
+    liveAlerts,
+    daily7d,
+    topModels,
+    projectList,
   };
 
   mkdirSync(dirname(targetPath), { recursive: true });

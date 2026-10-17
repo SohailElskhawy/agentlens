@@ -237,3 +237,131 @@ test('writeSummary populates topRecommendation with estTokensSavedWeek 0 when no
   assert.match(data.topRecommendation.prompt, /\/compact/);
 });
 
+test('writeSummary includes v1.1 fields: byAgentToday, recommendations, liveAlerts, daily7d, topModels, and projectList', async () => {
+  const { setSetting } = await import('../src/db.ts');
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  const now = Date.now();
+
+  const projId = upsertProject(db, '/work/gamma', 'gamma');
+  setSetting(db, `budget_tokens_${projId}`, '100000');
+
+  upsertSessions(db, [
+    { id: 's-claude', agent: 'claude', cwd: '/work/gamma', projectId: projId },
+    { id: 's-anti', agent: 'antigravity', cwd: '/work/gamma', projectId: projId },
+  ]);
+
+  upsertEvents(db, [
+    {
+      id: 'ev-c1',
+      agent: 'claude',
+      sessionId: 's-claude',
+      ts: now - 10 * 60_000,
+      kind: 'assistant',
+      model: 'claude-sonnet-4-6',
+      input: 15_000,
+      output: 5_000,
+      cacheRead: 10_000,
+      cacheWrite: 0,
+    },
+    {
+      id: 'ev-a1',
+      agent: 'antigravity',
+      sessionId: 's-anti',
+      ts: now - 3 * 60_000,
+      kind: 'assistant',
+      model: 'Gemini 4 Argon (High)',
+      input: 20_000,
+      output: 2_000,
+      cacheRead: 30_000,
+      cacheWrite: 0,
+    },
+  ]);
+
+  upsertFindings(db, [
+    {
+      id: 'f-loop',
+      rule: 'retry_loop',
+      projectId: projId,
+      sessionId: 's-anti',
+      evidence: { tool: 'run_command', retries: 5 },
+      confidence: 'high',
+      confidenceReason: '5 consecutive tool errors',
+      estTokensWeek: 65000,
+      firstSeen: now - 5 * 60_000,
+      lastSeen: now - 2 * 60_000,
+    },
+  ]);
+
+  upsertRecommendations(db, [
+    {
+      id: 'rec-top-1',
+      findingRule: 'retry_loop',
+      projectId: projId,
+      action: 'improve',
+      title: 'Stop retry loop on run_command',
+      body: 'Halt after 2 consecutive failures',
+      status: 'open',
+      score: 92,
+    },
+    {
+      id: 'rec-top-2',
+      findingRule: 'hot_files',
+      projectId: projId,
+      action: 'add',
+      title: 'Cache hot file summary',
+      body: 'Add architecture notes to AGENTS.md',
+      status: 'open',
+      score: 78,
+    },
+  ]);
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+
+  // byAgentToday
+  assert.ok(Array.isArray(data.byAgentToday));
+  assert.equal(data.byAgentToday.length, 2);
+  assert.equal(data.byAgentToday[0].agent, 'antigravity');
+  assert.equal(data.byAgentToday[0].tokens, 52_000);
+  assert.equal(data.byAgentToday[1].agent, 'claude');
+  assert.equal(data.byAgentToday[1].tokens, 30_000);
+
+  // recommendations (Top 5)
+  assert.ok(Array.isArray(data.recommendations));
+  assert.equal(data.recommendations.length, 2);
+  assert.equal(data.recommendations[0].id, 'rec-top-1');
+  assert.equal(data.recommendations[1].id, 'rec-top-2');
+
+  // liveAlerts (recent 30m findings)
+  assert.ok(Array.isArray(data.liveAlerts));
+  assert.equal(data.liveAlerts.length, 1);
+  assert.equal(data.liveAlerts[0].rule, 'retry_loop');
+  assert.equal(data.liveAlerts[0].projectName, 'gamma');
+
+  // daily7d (7 local calendar days)
+  assert.ok(Array.isArray(data.daily7d));
+  assert.equal(data.daily7d.length, 7);
+  assert.equal(data.daily7d[6].tokens, 82_000);
+
+  // topModels
+  assert.ok(Array.isArray(data.topModels));
+  assert.equal(data.topModels.length, 2);
+  assert.equal(data.topModels[0].model, 'Gemini 4 Argon (High)');
+  assert.equal(data.topModels[0].tokens, 52_000);
+  assert.equal(data.topModels[0].inputTokens, 20_000);
+  assert.equal(data.topModels[0].outputTokens, 2_000);
+  assert.equal(data.topModels[0].cacheTokens, 30_000);
+
+  // projectList with weekly budgets
+  assert.ok(Array.isArray(data.projectList));
+  assert.equal(data.projectList.length, 1);
+  assert.equal(data.projectList[0].name, 'gamma');
+  assert.equal(data.projectList[0].path, '/work/gamma');
+  assert.equal(data.projectList[0].weeklyTokenBudget, 100_000);
+  assert.equal(data.projectList[0].weeklyTokensUsed, 82_000);
+  assert.equal(data.projectList[0].budgetUsedPct, 82);
+});
+
+
