@@ -85,9 +85,9 @@ Panel {
         root.optimizeStatusText = err || "Could not preview workspace hygiene"
         return
       }
-      var count = (res.actions && res.actions.length) ? res.actions.length : 0
+      var count = Number(res.actionCount || 0)
       root.optimizeStatusText = count > 0
-        ? (count + " hygiene actions ready (~" + Model.formatTokens(res.estTokensSaved || 0) + " tokens saved)")
+        ? (count + " hygiene actions ready (~" + Model.formatTokens(res.estTokensSaved || 0) + " tokens/turn saved)")
         : "Workspace is already clean!"
     })
   }
@@ -103,8 +103,8 @@ Panel {
         root.optimizeStatusText = err || "Could not apply workspace hygiene"
         return
       }
-      var count = (res.applied && res.applied.length) ? res.applied.length : 0
-      root.optimizeStatusText = "✓ Applied " + count + " fixes (~" + Model.formatTokens(res.estTokensSaved || 0) + " saved)"
+      var count = Number(res.actionCount || 0)
+      root.optimizeStatusText = "✓ Applied " + count + " fixes (~" + Model.formatTokens(res.estTokensSaved || 0) + " tokens/turn saved)"
       if (root.hostWidget) root.hostWidget.refresh()
     })
   }

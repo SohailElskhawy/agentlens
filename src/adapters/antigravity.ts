@@ -45,7 +45,8 @@ function readTranscriptJsonl(path: string, cursor: Cursor): ReadResult {
   const baseDir = dirname(brainDir);
   const convId = basename(convDir);
   const defaultModel = readAntigravityModel(baseDir);
-  let inferredCwd: string | undefined;
+  let explicitCwd: string | undefined;
+  let fallbackFileCwd: string | undefined;
 
   const { offset, dropped } = readLines(path, cursor.offset, (line) => {
     let r: any;
@@ -103,13 +104,15 @@ function readTranscriptJsonl(path: string, cursor: Cursor): ReadResult {
           if (!tc || typeof tc !== 'object') continue;
           const toolName = tc.name || tc.tool_name || 'unknown';
           const args = tc.args || tc.arguments || {};
-          if (!inferredCwd && args && typeof args === 'object') {
-            if (typeof args.Cwd === 'string' && args.Cwd.startsWith('/')) {
-              inferredCwd = args.Cwd;
-            } else if (typeof args.AbsolutePath === 'string' && args.AbsolutePath.startsWith('/')) {
-              inferredCwd = dirname(args.AbsolutePath);
-            } else if (typeof args.TargetFile === 'string' && args.TargetFile.startsWith('/')) {
-              inferredCwd = dirname(args.TargetFile);
+          if (args && typeof args === 'object') {
+            if (!explicitCwd && typeof args.Cwd === 'string' && args.Cwd.startsWith('/')) {
+              explicitCwd = args.Cwd;
+            } else if (!fallbackFileCwd) {
+              if (typeof args.AbsolutePath === 'string' && args.AbsolutePath.startsWith('/')) {
+                fallbackFileCwd = dirname(args.AbsolutePath);
+              } else if (typeof args.TargetFile === 'string' && args.TargetFile.startsWith('/')) {
+                fallbackFileCwd = dirname(args.TargetFile);
+              }
             }
           }
           events.push({
@@ -139,6 +142,7 @@ function readTranscriptJsonl(path: string, cursor: Cursor): ReadResult {
     }
   });
 
+  const inferredCwd = explicitCwd || fallbackFileCwd;
   return {
     events,
     sessions: [{ id: convId, agent: 'antigravity', cwd: inferredCwd }],

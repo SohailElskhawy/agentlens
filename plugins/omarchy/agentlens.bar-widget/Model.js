@@ -611,17 +611,47 @@ function acceptRecommendation(recId, baseUrl, callback) {
   xhr.send("{}");
 }
 
+function normalizeOptimizeResponse(res) {
+  if (!res || typeof res !== "object") return { actionCount: 0, estTokensSaved: 0, raw: res };
+  var actionCount = 0;
+  if (Array.isArray(res.actions)) {
+    actionCount = res.actions.length;
+  } else if (Array.isArray(res.applied)) {
+    actionCount = res.applied.length;
+  } else {
+    if (Array.isArray(res.ignoreFiles)) {
+      for (var i = 0; i < res.ignoreFiles.length; i++) {
+        var ig = res.ignoreFiles[i];
+        if (ig && Array.isArray(ig.addedPatterns) && ig.addedPatterns.length > 0) actionCount++;
+      }
+    }
+    if (Array.isArray(res.instructionTrims)) {
+      for (var j = 0; j < res.instructionTrims.length; j++) {
+        var tr = res.instructionTrims[j];
+        if (tr && Array.isArray(tr.cuts) && tr.cuts.length > 0) actionCount++;
+      }
+    }
+  }
+  var estTokensSaved = Number(res.estimatedTokensSavedPerTurn || res.estTokensSaved || 0);
+  return {
+    actionCount: actionCount,
+    estTokensSaved: estTokensSaved,
+    raw: res
+  };
+}
+
 function previewWorkspaceOptimize(projectPath, baseUrl, callback) {
   if (typeof XMLHttpRequest === "undefined" || !projectPath) return;
   var base = String(baseUrl || "http://127.0.0.1:4711").replace(/\/+$/, "");
+  var enc = encodeURIComponent(String(projectPath));
   var xhr = new XMLHttpRequest();
-  xhr.open("GET", base + "/api/optimize?project=" + encodeURIComponent(String(projectPath)), true);
+  xhr.open("GET", base + "/api/optimize?path=" + enc + "&project=" + enc, true);
   xhr.onreadystatechange = function() {
     if (xhr.readyState === XMLHttpRequest.DONE) {
       if (xhr.status === 200) {
         try {
           var res = JSON.parse(xhr.responseText);
-          if (typeof callback === "function") callback(null, res);
+          if (typeof callback === "function") callback(null, normalizeOptimizeResponse(res));
           return;
         } catch (e) {}
       }
@@ -642,14 +672,14 @@ function applyWorkspaceOptimize(projectPath, baseUrl, callback) {
       if (xhr.status === 200) {
         try {
           var res = JSON.parse(xhr.responseText);
-          if (typeof callback === "function") callback(null, res);
+          if (typeof callback === "function") callback(null, normalizeOptimizeResponse(res));
           return;
         } catch (e) {}
       }
       if (typeof callback === "function") callback("Could not apply workspace hygiene", null);
     }
   };
-  xhr.send(JSON.stringify({ project: String(projectPath) }));
+  xhr.send(JSON.stringify({ project: String(projectPath), projectRoot: String(projectPath), apply: true }));
 }
 
 if (typeof module !== "undefined") {
