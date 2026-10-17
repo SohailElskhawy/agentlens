@@ -2,6 +2,27 @@
  "asOf": "2026-10-15",
  "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
  "models": {
+  "Gemini 4 Argon (High)": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 3.125e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "Gemini 4 Argon": {
+   "input": 0.00000125,
+   "output": 0.00001,
+   "cacheRead": 3.125e-7,
+   "cacheWrite": 0.00000125,
+   "cacheWrite1h": 0.00000125
+  },
+  "gemini-3.8-flash-high": {
+   "input": 3e-7,
+   "output": 0.0000025,
+   "cacheRead": 7.5e-8,
+   "cacheWrite": 3e-7,
+   "cacheWrite1h": 3e-7
+  },
   "claude-haiku-4-5-20251001": {
    "input": 0.000001,
    "output": 0.000005,

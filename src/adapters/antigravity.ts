@@ -1,9 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { readLines } from '../jsonl.ts';
+import { hash } from '../util.ts';
 import type { Adapter, Cursor, NormalizedEvent, ReadResult, SessionInfo } from '../types.ts';
 
 function runCcusageSession(): any {
@@ -19,6 +21,134 @@ function runCcusageSession(): any {
   }
 }
 
+function readAntigravityModel(baseDir: string): string {
+  try {
+    const settingsPath = join(baseDir, 'settings.json');
+    if (existsSync(settingsPath)) {
+      const parsed = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      if (parsed && typeof parsed.model === 'string' && parsed.model.trim()) {
+        return parsed.model.trim();
+      }
+    }
+  } catch {}
+  return 'Gemini 4 Argon (High)';
+}
+
+function readTranscriptJsonl(path: string, cursor: Cursor): ReadResult {
+  let errors = 0;
+  const events: NormalizedEvent[] = [];
+  // Path layout: <baseDir>/brain/<conversationId>/.system_generated/logs/transcript.jsonl
+  const logsDir = dirname(path);
+  const sysGenDir = dirname(logsDir);
+  const convDir = dirname(sysGenDir);
+  const brainDir = dirname(convDir);
+  const baseDir = dirname(brainDir);
+  const convId = basename(convDir);
+  const defaultModel = readAntigravityModel(baseDir);
+  let inferredCwd: string | undefined;
+
+  const { offset, dropped } = readLines(path, cursor.offset, (line) => {
+    let r: any;
+    try {
+      r = JSON.parse(line);
+    } catch {
+      errors++;
+      return;
+    }
+    if (!r || typeof r !== 'object') {
+      errors++;
+      return;
+    }
+
+    const parsedTs = r.created_at ? Date.parse(r.created_at) : Date.now();
+    const ts = Number.isNaN(parsedTs) ? Date.now() : parsedTs;
+    const stepIdx = r.step_index ?? events.length;
+
+    if (r.type === 'USER_INPUT') {
+      const content = typeof r.content === 'string' ? r.content : '';
+      events.push({
+        id: `antigravity:${convId}:step:${stepIdx}`,
+        agent: 'antigravity',
+        sessionId: convId,
+        ts,
+        kind: 'user',
+        textHash: content ? hash(content) : undefined,
+        textLen: content.length,
+      });
+    } else if (r.type === 'PLANNER_RESPONSE') {
+      const thinking = typeof r.thinking === 'string' ? r.thinking : '';
+      const input = Number(r.input_tokens ?? 0);
+      const output = Number(r.output_tokens ?? 0);
+      const cacheRead = Number(r.cache_read_tokens ?? 0);
+      const cacheWrite = Number(r.cache_write_tokens ?? 0);
+      const reasoning = Number(r.thinking_tokens ?? (thinking ? Math.ceil(thinking.length / 4) : 0));
+
+      events.push({
+        id: `antigravity:${convId}:step:${stepIdx}`,
+        agent: 'antigravity',
+        sessionId: convId,
+        ts,
+        kind: 'assistant',
+        model: typeof r.model === 'string' && r.model ? r.model : defaultModel,
+        input,
+        output,
+        cacheRead,
+        cacheWrite,
+        reasoning,
+      });
+
+      if (Array.isArray(r.tool_calls)) {
+        for (let ti = 0; ti < r.tool_calls.length; ti++) {
+          const tc = r.tool_calls[ti];
+          if (!tc || typeof tc !== 'object') continue;
+          const toolName = tc.name || tc.tool_name || 'unknown';
+          const args = tc.args || tc.arguments || {};
+          if (!inferredCwd && args && typeof args === 'object') {
+            if (typeof args.Cwd === 'string' && args.Cwd.startsWith('/')) {
+              inferredCwd = args.Cwd;
+            } else if (typeof args.AbsolutePath === 'string' && args.AbsolutePath.startsWith('/')) {
+              inferredCwd = dirname(args.AbsolutePath);
+            } else if (typeof args.TargetFile === 'string' && args.TargetFile.startsWith('/')) {
+              inferredCwd = dirname(args.TargetFile);
+            }
+          }
+          events.push({
+            id: `antigravity:${convId}:step:${stepIdx}:tc:${ti}`,
+            agent: 'antigravity',
+            sessionId: convId,
+            ts,
+            kind: 'tool_call',
+            tool: String(toolName),
+            argsHash: hash(JSON.stringify(args)),
+          });
+        }
+      }
+    } else if (r.type === 'GENERIC' && r.source === 'MODEL') {
+      const content = typeof r.content === 'string' ? r.content : '';
+      events.push({
+        id: `antigravity:${convId}:step:${stepIdx}`,
+        agent: 'antigravity',
+        sessionId: convId,
+        ts,
+        kind: 'tool_result',
+        resultBytes: Buffer.byteLength(content, 'utf8'),
+        isError: r.status === 'ERROR',
+        textHash: content ? hash(content) : undefined,
+        textLen: content.length,
+      });
+    }
+  });
+
+  return {
+    events,
+    sessions: [{ id: convId, agent: 'antigravity', cwd: inferredCwd }],
+    quotas: [],
+    cursor: { offset, state: {} },
+    errors,
+    skipped: dropped,
+  };
+}
+
 export interface AntigravityAdapter extends Adapter {
   read(path: string, cursor: Cursor, ccusageRunner?: () => any): ReadResult;
 }
@@ -29,21 +159,44 @@ export const antigravity: AntigravityAdapter = {
     return join(home, '.gemini');
   },
   discover(root: string): string[] {
-    const candidates = [
-      join(root, 'antigravity-cli/conversation_summaries.db'),
-      join(root, 'antigravity/conversation_summaries.db'),
+    const baseDirs = [
+      join(root, 'antigravity-cli'),
+      join(root, 'antigravity'),
     ];
     if (process.platform === 'darwin') {
       const macSupport = join(homedir(), 'Library/Application Support');
-      candidates.push(
-        join(macSupport, 'Google/Antigravity/conversation_summaries.db'),
-        join(macSupport, 'antigravity/conversation_summaries.db'),
-        join(macSupport, 'antigravity-cli/conversation_summaries.db')
+      baseDirs.push(
+        join(macSupport, 'Google/Antigravity'),
+        join(macSupport, 'antigravity'),
+        join(macSupport, 'antigravity-cli'),
       );
     }
-    return candidates.filter((p) => existsSync(p));
+
+    const discovered: string[] = [];
+    for (const baseDir of baseDirs) {
+      const dbPath = join(baseDir, 'conversation_summaries.db');
+      if (existsSync(dbPath)) {
+        discovered.push(dbPath);
+      }
+      const brainDir = join(baseDir, 'brain');
+      if (existsSync(brainDir)) {
+        try {
+          for (const entry of readdirSync(brainDir)) {
+            const transcriptPath = join(brainDir, entry, '.system_generated', 'logs', 'transcript.jsonl');
+            if (existsSync(transcriptPath)) {
+              discovered.push(transcriptPath);
+            }
+          }
+        } catch {}
+      }
+    }
+    return discovered;
   },
   read(path: string, cursor: Cursor, ccusageRunner = runCcusageSession): ReadResult {
+    if (path.endsWith('.jsonl')) {
+      return readTranscriptJsonl(path, cursor);
+    }
+
     let errors = 0;
     const sessions: SessionInfo[] = [];
     const events: NormalizedEvent[] = [];
@@ -93,29 +246,33 @@ export const antigravity: AntigravityAdapter = {
       }
     }
 
-    // Attempt token retrieval via ccusage
-    try {
-      const ccusageData = ccusageRunner();
-      if (ccusageData && Array.isArray(ccusageData.sessions)) {
-        for (const s of ccusageData.sessions) {
-          if (!s.sessionId) continue;
-          const ts = new Date(s.lastActivity || s.firstActivity || Date.now()).getTime();
-          events.push({
-            id: `antigravity:${s.sessionId}`,
-            agent: 'antigravity',
-            sessionId: s.sessionId,
-            ts: Number.isNaN(ts) ? Date.now() : ts,
-            kind: 'assistant',
-            model: s.modelsUsed?.[0] ?? 'gemini-3.8-flash-high',
-            input: s.inputTokens ?? 0,
-            output: s.outputTokens ?? 0,
-            cacheRead: s.cacheReadTokens ?? 0,
-            cacheWrite: s.cacheCreationTokens ?? 0,
-          });
+    // Only invoke external ccusage fallback if a custom runner is provided (e.g. unit tests)
+    // or if no native brain/ transcript directory exists alongside conversation_summaries.db.
+    const hasNativeBrain = existsSync(join(dirname(path), 'brain'));
+    if (ccusageRunner !== runCcusageSession || !hasNativeBrain) {
+      try {
+        const ccusageData = ccusageRunner();
+        if (ccusageData && Array.isArray(ccusageData.sessions)) {
+          for (const s of ccusageData.sessions) {
+            if (!s.sessionId) continue;
+            const ts = new Date(s.lastActivity || s.firstActivity || Date.now()).getTime();
+            events.push({
+              id: `antigravity:${s.sessionId}`,
+              agent: 'antigravity',
+              sessionId: s.sessionId,
+              ts: Number.isNaN(ts) ? Date.now() : ts,
+              kind: 'assistant',
+              model: s.modelsUsed?.[0] ?? 'gemini-3.8-flash-high',
+              input: s.inputTokens ?? 0,
+              output: s.outputTokens ?? 0,
+              cacheRead: s.cacheReadTokens ?? 0,
+              cacheWrite: s.cacheCreationTokens ?? 0,
+            });
+          }
         }
+      } catch {
+        // ccusage bridge failed, session metadata is still preserved
       }
-    } catch {
-      // ccusage bridge failed, session metadata is still preserved
     }
 
     let offset = 0;

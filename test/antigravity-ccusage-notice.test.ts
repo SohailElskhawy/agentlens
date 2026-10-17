@@ -50,3 +50,28 @@ test('checkHealth flags warning and explains zero tokens when antigravity exists
   assert.equal(report.status, 'warning');
   assert.ok(report.warnings.some((w) => w.includes('ccusage binary not found') && w.includes('Antigravity')));
 });
+
+test('checkHealth does NOT warn about missing ccusage when Antigravity token events are already ingested natively', async () => {
+  const { upsertEvents } = await import('../src/db.ts');
+  const db = openDb(':memory:');
+  upsertSessions(db, [{ id: 'sess-anti-1', agent: 'antigravity', cwd: '/my/proj', projectId: null }]);
+  upsertEvents(db, [
+    {
+      id: 'antigravity:sess-anti-1:step:1',
+      agent: 'antigravity',
+      sessionId: 'sess-anti-1',
+      ts: Date.now(),
+      kind: 'assistant',
+      model: 'Gemini 4 Argon (High)',
+      input: 15000,
+      output: 800,
+      cacheRead: 40000,
+    },
+  ]);
+
+  const report = checkHealth(db, () => null);
+  assert.equal(report.ccusageAvailable, false);
+  assert.equal(report.status, 'healthy');
+  assert.ok(!report.warnings.some((w) => w.includes('Antigravity')));
+});
+

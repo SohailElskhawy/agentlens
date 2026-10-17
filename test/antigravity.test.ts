@@ -103,3 +103,78 @@ test('antigravity maps ccusage session tokens into normalized events', () => {
   assert.equal(ev.cacheRead, 40000);
   assert.equal(ev.cacheWrite, 1000);
 });
+
+test('antigravity natively discovers and parses brain/*/transcript.jsonl without ccusage', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const home = tmp();
+  const root = antigravity.root(home);
+  const cliDir = join(root, 'antigravity-cli');
+  mkdirSync(cliDir, { recursive: true });
+  writeFileSync(join(cliDir, 'settings.json'), JSON.stringify({ model: 'Gemini 4 Argon (High)' }));
+
+  const convId = 'ae1c3906-f015-4126-8f58-1d61db946ae2';
+  const logDir = join(cliDir, 'brain', convId, '.system_generated', 'logs');
+  mkdirSync(logDir, { recursive: true });
+  const transcriptPath = join(logDir, 'transcript.jsonl');
+
+  const lines = [
+    JSON.stringify({
+      step_index: 0,
+      source: 'USER_EXPLICIT',
+      type: 'USER_INPUT',
+      status: 'DONE',
+      created_at: '2026-10-17T11:00:00Z',
+      content: 'Please inspect the project',
+    }),
+    JSON.stringify({
+      step_index: 1,
+      source: 'MODEL',
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: '2026-10-17T11:00:05Z',
+      input_tokens: 12500,
+      cache_read_tokens: 48000,
+      output_tokens: 620,
+      thinking: 'Let us inspect the directory first.',
+      tool_calls: [
+        { name: 'run_command', args: { Cwd: '/home/user/my-project', CommandLine: 'ls -la' } },
+      ],
+    }),
+    JSON.stringify({
+      step_index: 2,
+      source: 'MODEL',
+      type: 'GENERIC',
+      status: 'DONE',
+      created_at: '2026-10-17T11:00:06Z',
+      content: 'total 12\ndrwxr-xr-x 2 user user 4096 Oct 17 11:00 .',
+    }),
+  ];
+  writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+  const discovered = antigravity.discover(root);
+  assert.ok(discovered.includes(transcriptPath));
+
+  const res = antigravity.read(transcriptPath, { offset: 0, state: {} });
+  assert.equal(res.errors, 0);
+  assert.equal(res.sessions.length, 1);
+  assert.equal(res.sessions[0].id, convId);
+  assert.equal(res.sessions[0].cwd, '/home/user/my-project');
+
+  const assistantEv = res.events.find((e) => e.kind === 'assistant');
+  assert.ok(assistantEv);
+  assert.equal(assistantEv.sessionId, convId);
+  assert.equal(assistantEv.model, 'Gemini 4 Argon (High)');
+  assert.equal(assistantEv.input, 12500);
+  assert.equal(assistantEv.cacheRead, 48000);
+  assert.equal(assistantEv.output, 620);
+  assert.ok((assistantEv.reasoning ?? 0) > 0);
+
+  const toolCallEv = res.events.find((e) => e.kind === 'tool_call');
+  assert.ok(toolCallEv);
+  assert.equal(toolCallEv.tool, 'run_command');
+
+  const toolResultEv = res.events.find((e) => e.kind === 'tool_result');
+  assert.ok(toolResultEv);
+  assert.ok((toolResultEv.resultBytes ?? 0) > 0);
+});
+
