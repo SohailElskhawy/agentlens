@@ -206,3 +206,40 @@ test('manifest.json and icon.svg exist and conform to Omarchy Quattro schemaVers
   assert.equal(manifest.entryPoints?.barWidget, 'BarWidget.qml');
   assert.equal(manifest.barWidget?.defaultSection, 'right');
 });
+
+test('BarWidget.qml and Panel.qml exist and use valid Omarchy Quattro qs.Commons and qs.Ui components', () => {
+  const barWidgetPath = join(PLUGIN_DIR, 'BarWidget.qml');
+  const panelPath = join(PLUGIN_DIR, 'Panel.qml');
+  const readmePath = join(PLUGIN_DIR, 'README.md');
+
+  assert.ok(existsSync(barWidgetPath), 'BarWidget.qml must exist');
+  assert.ok(existsSync(panelPath), 'Panel.qml must exist');
+  assert.ok(existsSync(readmePath), 'README.md must exist');
+
+  const barQml = readFileSync(barWidgetPath, 'utf8');
+  const panelQml = readFileSync(panelPath, 'utf8');
+
+  assert.match(barQml, /import qs\.Commons/);
+  assert.match(barQml, /import qs\.Ui/);
+  assert.match(barQml, /moduleName:\s*"agentlens\.bar-widget"/);
+  assert.match(barQml, /IpcHandler/);
+  assert.match(barQml, /target:\s*"agentlens\.bar-widget"/);
+  assert.match(barQml, /WidgetButton/);
+  assert.match(barQml, /FileView/);
+
+  assert.match(panelQml, /import qs\.Commons/);
+  assert.match(panelQml, /import qs\.Ui/);
+  assert.match(panelQml, /moduleName:\s*"agentlens\.bar-widget"/);
+  assert.match(panelQml, /KeyboardPanel/);
+  assert.match(panelQml, /PanelKeyCatcher/);
+  assert.match(panelQml, /PanelHero/);
+  assert.match(panelQml, /PanelSectionHeader/);
+  assert.match(panelQml, /PanelSeparator/);
+
+  // Ensure no non-existent pseudo-components are referenced
+  for (const invalid of ['BarButton', 'StatusBadge', 'StatBox', 'Divider']) {
+    assert.ok(!barQml.includes(invalid), `BarWidget.qml must not reference ${invalid}`);
+    assert.ok(!panelQml.includes(invalid), `Panel.qml must not reference ${invalid}`);
+  }
+});
+

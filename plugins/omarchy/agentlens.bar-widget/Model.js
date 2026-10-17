@@ -256,6 +256,68 @@ function formatTooltip(state) {
   return parts.join(" · ");
 }
 
+function buildStateFromApi(summaryResp, quotaResp, nowMs) {
+  var now = isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  var quotas = {};
+  var forecasts = [];
+  if (quotaResp && typeof quotaResp === "object") {
+    if (quotaResp.windows && typeof quotaResp.windows === "object") {
+      for (var k in quotaResp.windows) {
+        var w = quotaResp.windows[k];
+        if (w && w.agent && (w.win || w.window)) {
+          var winName = w.win || w.window;
+          quotas[w.agent] = quotas[w.agent] || {};
+          quotas[w.agent][winName] = Number(w.usedPct != null ? w.usedPct : (w.percent || 0));
+          forecasts.push({
+            agent: w.agent,
+            window: winName,
+            usedPct: quotas[w.agent][winName],
+            resetsAt: w.resetsAt || 0,
+            willExhaustBeforeReset: false,
+            message: null
+          });
+        }
+      }
+    }
+    if (Array.isArray(quotaResp.forecasts)) {
+      forecasts = quotaResp.forecasts;
+    }
+  }
+
+  var synthetic = {
+    updatedAt: now,
+    totals: {
+      tokensToday: summaryResp && summaryResp.tokens != null ? Number(summaryResp.tokens) : 0,
+      costToday: summaryResp && summaryResp.cost != null ? Number(summaryResp.cost) : 0,
+      burnRateTokensPerHour: 0,
+      activeSessions: 0
+    },
+    projects: {},
+    quotas: quotas,
+    forecasts: forecasts
+  };
+  return parseSummaryJson(JSON.stringify(synthetic), now);
+}
+
+function fetchHttpFallback(widget, baseUrl) {
+  if (typeof XMLHttpRequest === "undefined" || !widget) return;
+  var base = String(baseUrl || "http://127.0.0.1:4711").replace(/\/+$/, "");
+  var xhr = new XMLHttpRequest();
+  xhr.open("GET", base + "/api/quota", true);
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
+      try {
+        var quotaResp = JSON.parse(xhr.responseText);
+        var state = buildStateFromApi(null, quotaResp, Date.now());
+        if (state && state.hasData) {
+          widget.state = state;
+        }
+      } catch (e) {}
+    }
+  };
+  xhr.send();
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     formatTokens: formatTokens,
@@ -264,7 +326,10 @@ if (typeof module !== "undefined") {
     agentDisplayName: agentDisplayName,
     emptyState: emptyState,
     parseSummaryJson: parseSummaryJson,
+    buildStateFromApi: buildStateFromApi,
+    fetchHttpFallback: fetchHttpFallback,
     formatBarLabel: formatBarLabel,
     formatTooltip: formatTooltip
   };
 }
+
