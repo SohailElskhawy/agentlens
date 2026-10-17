@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "agentlens.bar-widget",
+  "name": "agentlens Monitor",
+  "version": "1.0.0",
+  "author": "Sohail Elskhawy",
+  "license": "MIT",
+  "description": "Live AI agent quota tracking, token burn speed, and waste alerts for Claude Code, Codex, OpenCode, and Antigravity.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "agentlens Quota",
+    "description": "Live AI agent 5h/7d quota tracking, token burn velocity, and one-click Fix Now remediation.",
+    "category": "AI",
+    "aliases": [
+      "agentlens",
+      "tokens",
+      "quota",
+      "claude",
+      "codex",
+      "ai"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 5,
+      "showCountdown": true,
+      "showBurnRate": true,
+      "dashboardUrl": "http://127.0.0.1:4711"
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "description": "How often to reload ~/.local/state/agentlens/summary.json.",
+        "min": 2,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 5
+      },
+      {
+        "key": "showCountdown",
+        "type": "boolean",
+        "label": "Show reset countdown in bar",
+        "description": "Display the 5h quota reset countdown (e.g. '(1h 42m)') next to the quota percentage.",
+        "defaultValue": true
+      },
+      {
+        "key": "showBurnRate",
+        "type": "boolean",
+        "label": "Show active burn rate in bar",
+        "description": "Display live token burn velocity (e.g. '42.1k/h') when coding agents are active.",
+        "defaultValue": true
+      },
+      {
+        "key": "dashboardUrl",
+        "type": "string",
+        "label": "Dashboard URL",
+        "description": "Local agentlens dashboard URL opened by right-click or panel button.",
+        "defaultValue": "http://127.0.0.1:4711"
+      }
+    ]
+  }
+}
