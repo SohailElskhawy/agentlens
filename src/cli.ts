@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { openDb, getRecommendations, updateRecommendationStatus } from './db.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
 import { costOf } from './pricing.ts';
@@ -15,6 +16,7 @@ import { runAudit } from './audit/runner.ts';
 import { checkWeeklyReportSchedule } from './report-scheduler.ts';
 import { generateWeeklyReport } from './report.ts';
 import { evaluateRecommendations } from './track.ts';
+import { getSavings, snapshotSavings } from './savings.ts';
 import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates } from './discover.ts';
 import { getPlatformPaths } from './paths.ts';
@@ -45,6 +47,7 @@ const HELP = `Usage: agentlens <command>
   audit               audit agent instructions, MCPs, skills, and plugins
   report              generate and display weekly usage report (--week, --html, --json)
   track               show improvement tracking for accepted recommendations
+  savings             compare weekly project metrics (--project <path>, --weeks <N> [default 8], --json, --snapshot)
   accept <id>         accept a recommendation and begin 14-day improvement tracking
   catalog             browse curated AI tools, MCPs, and skills (--json, --rule <rule>)
   discover            opt-in discovery of AI agent tools from GitHub (--query, --dry-run, --json)
@@ -357,6 +360,47 @@ const commands: Record<string, () => unknown> = {
     } else {
       console.log(rep.markdown);
     }
+  },
+  savings: () => {
+    const { values } = parseArgs({ args: process.argv.slice(3), options: {
+      project: { type: 'string' }, weeks: { type: 'string', default: '8' },
+      json: { type: 'boolean' }, snapshot: { type: 'boolean' },
+    } });
+    const weeks = Number(values.weeks);
+    if (!Number.isSafeInteger(weeks) || weeks < 1) throw new Error('weeks must be a positive integer');
+    if (values.project !== undefined && !values.project.trim()) throw new Error('project must not be empty');
+    const db = values.snapshot ? openDb(DB_PATH)
+      : existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      let projectId: number | undefined;
+      if (values.project) {
+        const project = db.prepare('SELECT id FROM projects WHERE root = ?').get(projectRoot(resolve(values.project))) as { id: number } | undefined;
+        if (!project) throw new Error(`Unknown project: ${values.project}`);
+        projectId = project.id;
+      }
+      const report = (values.snapshot ? snapshotSavings : getSavings)(db, { projectId, weeks });
+      if (values.json) {
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      if (!report.projects.length) console.log('No savings data.');
+      const label = (week: { weekStart: number; complete: boolean } | null) => week
+        ? `${new Date(week.weekStart).toLocaleDateString('sv')}${week.complete ? '' : ' (partial)'}` : 'n/a';
+      for (const project of report.projects) {
+        console.log(`\n${project.name} (${project.root})`);
+        console.log(`  Baseline: ${label(project.baseline)}${project.baselineSource ? ` [${project.baselineSource}]` : ''}`);
+        console.log(`  Latest: ${label(project.latest)}`);
+        for (const [key, title] of [
+          ['tokensPerSession', 'Tokens/session'], ['tokensPerTurn', 'Tokens/turn'],
+          ['nonCacheInputShare', 'Non-cache input share'], ['cacheReadRatio', 'Cache-read ratio'], ['sessions', 'Sessions'],
+        ] as const) {
+          const before = project.baseline?.[key];
+          const after = project.latest?.[key];
+          const delta = project.changePct?.[key];
+          console.log(`  ${title}: ${before ?? 'n/a'} -> ${after ?? 'n/a'} (${delta == null ? 'n/a' : `${delta > 0 ? '+' : ''}${delta}%`})`);
+        }
+      }
+    } finally { db.close(); }
   },
   track: () => {
     let projectArg: string | undefined;
