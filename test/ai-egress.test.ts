@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb, setSetting, upsertEvents, upsertFindings, upsertSessions } from '../src/db.ts';
 import { redact, buildPrompt, sessionDigest } from '../src/ai/payload.ts';
 import { cached } from '../src/ai/cache.ts';
+import { prepareDiagnosis } from '../src/ai/diagnose.ts';
 import { buildAnalystCommand, runAnalyst } from '../src/ai/runner.ts';
 import { tmp } from './helpers.ts';
 
@@ -75,11 +76,16 @@ test('preview is exact, read-only, works disabled and rejects unsupported provid
   let actual: unknown;
   await runAnalyst(prompt, { agent: 'claude', model: 'example-model', exec: async (bin, args) => { actual = { bin, args }; return { stdout: '{"result":"ok"}', stderr: '' }; } });
   assert.deepEqual(actual, command);
+  const descriptor = prepareDiagnosis(db, 's1');
+  assert.ok(descriptor.status === 'ready');
+  const prepared = descriptor.status === 'ready' ? descriptor.preview : null;
+  assert.deepEqual({ prompt: prepared?.prompt, bin: prepared?.bin, args: prepared?.args }, { prompt, ...command });
+  assert.match(prepared?.confirmationHash ?? '', /^[a-f0-9]{64}$/);
   const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
   const run = (...args: string[]) => spawnSync(process.execPath, ['--no-warnings', cli, 'ai', 'preview', ...args], { env: { ...process.env, AGENTLENS_DATA_DIR: dir, AGENTLENS_STATE_DIR: dir, AGENTLENS_SOURCE_HOME: dir, PATH: '' }, encoding: 'utf8' });
   const preview = run('session', 's1');
   assert.equal(preview.status, 0, preview.stderr);
-  assert.deepEqual(JSON.parse(preview.stdout), { prompt, ...command });
+  assert.deepEqual(JSON.parse(preview.stdout), prepared);
   assert.ok(!preview.stdout.includes('/secret/source'));
   assert.equal((db.prepare('SELECT count(*) AS n FROM ai_calls').get() as { n: number }).n, 0);
   const unknownKind = run('other', 's1');

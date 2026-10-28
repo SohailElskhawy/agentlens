@@ -4,7 +4,6 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![Privacy First](https://img.shields.io/badge/privacy-local--first-orange.svg)](#privacy--security-guarantees)
-[![Tests Passing](https://img.shields.io/badge/tests-209%20passing-success.svg)](test/)
 
 **agentlens** is a lightweight, local-first, cross-platform usage and workflow optimizer for AI coding agents on Linux, macOS, and Windows:
 - **Claude Code** (Pro)
@@ -264,6 +263,8 @@ agentlens plugin uninstall
 | `agentlens install-statusline` | Print configuration instructions for Claude Code statusline |
 | `agentlens install-service` | Install native background service (systemd user unit, launchd agent, or Windows scheduled task) |
 | `agentlens plugin [install\|status\|uninstall] [--enable] [--dir <path>]` | Install, inspect, or remove the native Omarchy Quattro desktop bar plugin (`agentlens.bar-widget`) |
+| `agentlens ai [status\|enable\|disable\|preview <diagnose\|session> <id>]` | Opt-in AI settings and exact preview (off by default; see [docs/ai.md](docs/ai.md)) |
+| `agentlens diagnose <session-id> \| --worst <N> [--project <path>] [--preview] [--confirm <hash>] [--json]` | Opt-in AI diagnosis of structured session waste via your `claude` CLI; each new call needs its exact preview hash |
 
 ---
 
@@ -272,7 +273,8 @@ agentlens plugin uninstall
 agentlens is engineered from the ground up to respect developer privacy and system security:
 - **Strictly Read-Only on Agent Files:** Agent log files and SQLite databases are opened with read-only flags (`mode=ro`). agentlens **never** modifies agent configurations, installs tools, or alters session histories.
 - **Zero Raw Prompt or Output Storage:** Prompt text and tool outputs are never persisted to disk. Only SHA-256 hashes and byte lengths are recorded for repetition detection.
-- **Strict Network Isolation:** Dashboard binds exclusively to loopback (`127.0.0.1`) with DNS rebinding host protection. Metrics (`/metrics`) and CSV exports (`/api/export.csv`) are strictly loopback-only. No analytics, telemetry, or external AI model calls are made.
+- **Strict Network Isolation:** Dashboard binds exclusively to loopback (`127.0.0.1`) with DNS rebinding host protection. Metrics (`/metrics`) and CSV exports (`/api/export.csv`) are strictly loopback-only. No analytics or telemetry. AI analysis is off by default and only runs when you opt in (see below and [docs/ai.md](docs/ai.md)).
+- **Opt-In AI Diagnosis (Off by Default):** `agentlens diagnose` can ask your own installed `claude` CLI to explain a session's token waste. It never runs automatically (not on ingest, not on `serve`) and requires `agentlens ai enable`. Only a redacted, structured summary is sent (rule names, tool names, token counts, finding estimates): never prompt text, tool output, source code, or file paths. Every new call requires you to review the exact prompt and command with `--preview` and confirm its hash with `--confirm`. That CLI sends the prompt to whatever provider and account it is configured for, so that call uses your provider's subscription and quota and its data leaves your machine. Results are cached locally, calls are capped per day, and AI output never changes the deterministic findings or recommendations.
 - **Zero Agent Token Allowance:** agentlens never injects prompt instructions or SessionStart hooks into active coding sessions.
 - **Privacy-Safe Discovery:** The optional GitHub discovery engine operates strictly on generic alphanumeric keyword queries. Local paths, project names, or token metrics are never transmitted.
 - **Opt-In Agent Automation (`Fix Now`):** Executing automated fixes via local agent CLIs (`claude`, `codex`, `opencode`) is strictly opt-in and disabled by default until explicitly enabled in Settings (`Allow agentlens to launch agents`). All CLI commands require confirmation displaying the exact command array and verified project folder, and are executed via direct `execFile`/`spawn` argument arrays (never a shell string) restricted solely to repositories already tracked by agentlens.
@@ -340,7 +342,7 @@ agentlens performs read-only discovery of logs and session databases across Linu
 ## 🧪 Testing & Verification
 
 ```bash
-# Run test suite (209 unit & integration tests)
+# Run test suite
 npm test
 
 # Run TypeScript typecheck

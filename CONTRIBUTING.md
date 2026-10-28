@@ -21,9 +21,11 @@ Before writing code, please keep these non-negotiable principles in mind:
    - Full prompt texts and tool outputs are **never** stored in the database.
    - Only byte lengths and SHA-256 hashes are recorded for repetition and loop detection.
 
-4. **Deterministic & Lightweight:**
+4. **Deterministic & Lightweight (AI is optional and separate):**
    - Analyzers must be deterministic, transparent, and fast.
    - Background monitoring must consume minimal CPU/memory (systemd default `MemoryMax=200M`, `Nice=10`) and zero agent token budget.
+   - AI features live in `src/ai/`, are off unless `ai_enabled` is `true`, and never run from ingest, `serve`, or any background path. They send structured, redacted data only, require exact-hash preview confirmation for every new external call, cache only validated output, and never write or alter deterministic findings, scores, IDs, or recommendations.
+   - Tests must inject a fake runner: never spawn a real agent CLI or touch the network.
 
 ---
 
