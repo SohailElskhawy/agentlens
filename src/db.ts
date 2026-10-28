@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS ai_calls (
   id INTEGER PRIMARY KEY, kind TEXT NOT NULL, agent TEXT NOT NULL, created_at INTEGER NOT NULL,
   input_hash TEXT NOT NULL, ok INTEGER, duration_ms INTEGER);
 CREATE INDEX IF NOT EXISTS ai_calls_created_at ON ai_calls(created_at);
+CREATE TABLE IF NOT EXISTS ai_notes (
+  kind TEXT NOT NULL, input_hash TEXT NOT NULL, agent TEXT NOT NULL, model TEXT NOT NULL,
+  created_at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (kind, input_hash, agent, model));
 `;
 
 export function openDb(path: string): DB {

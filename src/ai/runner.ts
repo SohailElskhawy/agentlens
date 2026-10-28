@@ -43,6 +43,19 @@ export async function detectAgents(exec: AnalystExec = execFileAsync, platform: 
   return found;
 }
 
+export function buildAnalystArgs(prompt: string, opts: { agent: AnalystAgent; model?: string }): string[] {
+  if (opts.agent !== 'claude') throw new Error('Analyst provider is not supported safely');
+  const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--safe-mode', '--restricted',
+    '--strict-mcp-config', '--disable-slash-commands', '--tools', ''];
+  if (opts.model) args.push(`--model=${opts.model}`);
+  args.push('--', prompt);
+  return args;
+}
+
+export function buildAnalystCommand(prompt: string, opts: { agent: AnalystAgent; model?: string }): { bin: string; args: string[] } {
+  return { bin: opts.agent, args: buildAnalystArgs(prompt, opts) };
+}
+
 export async function runAnalyst(prompt: string, opts: RunAnalystOptions): Promise<RunAnalystResult> {
   const start = Date.now();
   let cwd: string | undefined;
@@ -51,11 +64,8 @@ export async function runAnalyst(prompt: string, opts: RunAnalystOptions): Promi
       return { ok: false, text: '', agent: opts.agent, durationMs: Date.now() - start, error: 'Analyst provider is not supported safely' };
     }
     cwd = await mkdtemp(join(tmpdir(), `${TEMP_DIR_NAME}-`));
-    const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--safe-mode', '--restricted',
-      '--strict-mcp-config', '--disable-slash-commands', '--tools', ''];
-    if (opts.model) args.push(`--model=${opts.model}`);
-    args.push('--', prompt);
-    const { stdout } = await (opts.exec ?? execFileAsync)(opts.agent, args, {
+    const { bin, args } = buildAnalystCommand(prompt, opts);
+    const { stdout } = await (opts.exec ?? execFileAsync)(bin, args, {
       cwd, encoding: 'utf8', shell: false,
       timeout: opts.timeout ?? DEFAULT_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024,

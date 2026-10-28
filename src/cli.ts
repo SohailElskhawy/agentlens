@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { openDb, getRecommendations, setSetting, updateRecommendationStatus } from './db.ts';
 import { aiStatus } from './ai/gate.ts';
+import { buildPrompt, sessionDigest } from './ai/payload.ts';
+import { buildAnalystCommand } from './ai/runner.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
@@ -43,7 +45,7 @@ const HELP = `Usage: agentlens <command>
   serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
-  ai <action>         show AI status or enable/disable AI (status|enable|disable, --json)
+  ai <action>         AI status, enable, disable, or preview <diagnose|session> <id>
   optimize [path]     preview or apply workspace hygiene (.claudeignore/.cursorignore, instruction trims, unused MCPs) (--apply, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
@@ -121,6 +123,38 @@ async function serve() {
 const commands: Record<string, () => unknown> = {
   ai: () => {
     const action = process.argv[3]?.startsWith('--') ? 'status' : process.argv[3] ?? 'status';
+    if (action === 'preview') {
+      const kind = process.argv[4];
+      const id = process.argv[5];
+      if (!['diagnose', 'session'].includes(kind) || !id) {
+        console.error('Usage: agentlens ai preview <diagnose|session> <id>');
+        process.exitCode = 1;
+        return;
+      }
+      if (!existsSync(DB_PATH)) {
+        console.error('No database found');
+        process.exitCode = 1;
+        return;
+      }
+      const db = new DatabaseSync(DB_PATH, { readOnly: true });
+      try {
+        const digest = sessionDigest(db, id);
+        if (!digest) { console.error('AI preview: unknown session ID'); process.exitCode = 1; return; }
+        const status = aiStatus(db);
+        if (!status.agent || status.error === 'AI_INVALID_SETTINGS') { console.error('AI preview: invalid AI settings'); process.exitCode = 1; return; }
+        const agent = status.agent === 'auto' ? 'claude' : status.agent;
+        if (agent !== 'claude') { console.error('AI preview: analyst provider is not supported safely'); process.exitCode = 1; return; }
+        const { prompt } = buildPrompt('diagnose', digest);
+        const command = buildAnalystCommand(prompt, { agent, model: status.model ?? undefined });
+        console.log(JSON.stringify({ prompt, ...command }, null, 2));
+      } catch {
+        console.error('AI preview failed: check session, settings, and supported provider');
+        process.exitCode = 1;
+      } finally {
+        db.close();
+      }
+      return;
+    }
     if (!['status', 'enable', 'disable'].includes(action)) {
       console.error('Usage: agentlens ai <status|enable|disable> [--json]');
       process.exitCode = 1;
