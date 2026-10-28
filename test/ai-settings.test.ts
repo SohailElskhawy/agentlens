@@ -45,5 +45,6 @@ test('CLI enables, reports and disables AI using isolated data directories', () 
   assert.equal(JSON.parse(run('status', '--json')).enabled, true);
   run('disable');
   assert.equal(JSON.parse(run('status', '--json')).enabled, false);
+  assert.equal(JSON.parse(run('--json')).enabled, false);
   assert.throws(() => run('unexpected'));
 });

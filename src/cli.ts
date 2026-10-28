@@ -117,7 +117,7 @@ async function serve() {
 
 const commands: Record<string, () => unknown> = {
   ai: () => {
-    const action = process.argv[3] ?? 'status';
+    const action = process.argv[3]?.startsWith('--') ? 'status' : process.argv[3] ?? 'status';
     if (!['status', 'enable', 'disable'].includes(action)) {
       console.error('Usage: agentlens ai <status|enable|disable> [--json]');
       process.exitCode = 1;

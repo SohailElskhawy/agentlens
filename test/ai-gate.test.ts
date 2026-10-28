@@ -103,3 +103,24 @@ test('invalid stored options fail closed and zero prevents spending', () => {
   assert.throws(() => assertAiAllowed(db), { code: 'AI_DAILY_LIMIT' });
   db.close();
 });
+
+test('failed or contended reservations leave no row and no open transaction', () => {
+  const path = join(tmp(), 'busy.db');
+  const first = openDb(path);
+  const second = openDb(path);
+  const call = { kind: 'diagnose', agent: 'claude' as const, inputHash: 'd'.repeat(64) };
+  try {
+    assert.throws(() => reserveAiCall(first, call), { code: 'AI_DISABLED' });
+    assert.equal(first.isTransaction, false);
+    setSetting(first, 'ai_enabled', 'true');
+    first.exec('BEGIN IMMEDIATE');
+    assert.throws(() => reserveAiCall(second, call), /locked/);
+    assert.equal(second.isTransaction, false);
+    first.exec('ROLLBACK');
+    assert.equal(aiStatus(second).callsToday, 0);
+    assert.ok(reserveAiCall(second, call) > 0);
+  } finally {
+    first.close();
+    second.close();
+  }
+});
