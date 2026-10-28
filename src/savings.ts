@@ -1,6 +1,5 @@
 import type { DB } from './db.ts';
 import { tx } from './db.ts';
-import { summary } from './queries.ts';
 
 interface SavingsMetrics {
   sessions: number;
@@ -39,32 +38,43 @@ export function getSavings(db: DB, { projectId, weeks = 8, now = Date.now() }: S
     projectId: number; name: string; root: string;
   }[];
   const hasSnapshots = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'savings_baselines'").get();
+  const weeklyByProject = new Map<number, SavingsWeek[]>();
+  const aggregate = db.prepare(`SELECT s.project_id AS projectId, count(DISTINCT e.session_id) AS sessions,
+    sum(e.kind = 'user') AS turns,
+    sum(CASE WHEN e.kind = 'assistant' THEN e.input ELSE 0 END) AS input,
+    sum(CASE WHEN e.kind = 'assistant' THEN e.output ELSE 0 END) AS output,
+    sum(CASE WHEN e.kind = 'assistant' THEN e.cache_read ELSE 0 END) AS cacheRead,
+    sum(CASE WHEN e.kind = 'assistant' THEN e.cache_write ELSE 0 END) AS cacheWrite
+    FROM events e JOIN sessions s ON s.id = e.session_id
+    WHERE e.ts >= ? AND e.ts < ? AND (? IS NULL OR s.project_id = ?)
+    GROUP BY s.project_id`);
+  for (const date = new Date(start); date.getTime() <= now; date.setDate(date.getDate() + 7)) {
+    const from = date.getTime();
+    const end = new Date(date);
+    end.setDate(end.getDate() + 7);
+    const rows = aggregate.all(from, Math.min(end.getTime(), now), projectId ?? null, projectId ?? null) as {
+      projectId: number | null; sessions: number; turns: number; input: number; output: number; cacheRead: number; cacheWrite: number;
+    }[];
+    for (const row of rows) {
+      if (row.projectId == null || !row.sessions) continue;
+      const input = row.input + row.cacheWrite;
+      const totalInput = input + row.cacheRead;
+      const tokens = totalInput + row.output;
+      const weekly = weeklyByProject.get(row.projectId) ?? [];
+      weekly.push({
+        weekStart: from, complete: end.getTime() <= now, sessions: row.sessions,
+        tokensPerSession: tokens / row.sessions, tokensPerTurn: row.turns ? tokens / row.turns : null,
+        nonCacheInputShare: totalInput ? input / totalInput : null,
+        cacheReadRatio: totalInput ? row.cacheRead / totalInput : null,
+      });
+      weeklyByProject.set(row.projectId, weekly);
+    }
+  }
 
   return {
     weeks,
     projects: projects.map((project) => {
-      const weekly: SavingsWeek[] = [];
-      for (const date = new Date(start); date.getTime() <= now; date.setDate(date.getDate() + 7)) {
-        const from = date.getTime();
-        const end = new Date(date);
-        end.setDate(end.getDate() + 7);
-        const to = Math.min(end.getTime(), now);
-        const { totals, sessions } = summary(db, { projectId: project.projectId, from, to });
-        if (!sessions) continue;
-        const { turns } = db.prepare(`SELECT count(*) AS turns FROM events e
-          JOIN sessions s ON s.id = e.session_id
-          WHERE s.project_id = ? AND e.ts >= ? AND e.ts < ? AND e.kind = 'user'`)
-          .get(project.projectId, from, to) as { turns: number };
-        const input = totals.input + totals.cacheWrite;
-        const totalInput = input + totals.cacheRead;
-        weekly.push({
-          weekStart: from, complete: end.getTime() <= now, sessions,
-          tokensPerSession: totals.tokens / sessions,
-          tokensPerTurn: turns ? totals.tokens / turns : null,
-          nonCacheInputShare: totalInput ? input / totalInput : null,
-          cacheReadRatio: totalInput ? totals.cacheRead / totalInput : null,
-        });
-      }
+      const weekly = weeklyByProject.get(project.projectId) ?? [];
       const stored = hasSnapshots ? db.prepare(`SELECT metrics FROM savings_baselines
         WHERE project_id = ? ORDER BY captured_at, id LIMIT 1`).get(project.projectId) as { metrics: string } | undefined : undefined;
       const baseline: SavingsWeek | null = stored ? JSON.parse(stored.metrics) : weekly.find((week) => week.complete) ?? null;

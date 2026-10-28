@@ -368,6 +368,7 @@ const commands: Record<string, () => unknown> = {
     } });
     const weeks = Number(values.weeks);
     if (!Number.isSafeInteger(weeks) || weeks < 1) throw new Error('weeks must be a positive integer');
+    if (values.project !== undefined && !values.project.trim()) throw new Error('project must not be empty');
     const db = values.snapshot ? openDb(DB_PATH)
       : existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
     try {

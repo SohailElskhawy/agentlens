@@ -59,6 +59,35 @@ test('savings normalises weekly totals and compares projects independently', () 
   } finally { db.close(); }
 });
 
+test('savings aggregates events with a bounded number of queries across many active projects', () => {
+  const db = openDb(':memory:');
+  try {
+    for (let i = 0; i < 150; i++) {
+      const projectId = upsertProject(db, `/work/${i}`, `project ${i}`);
+      for (let week = 0; week < 8; week++) seed(db, projectId, `${i}-${week}`, monday - week * 7 * 86400_000);
+    }
+    const prepare = db.prepare.bind(db);
+    let eventQueries = 0;
+    db.prepare = ((sql: string) => {
+      const statement = prepare(sql);
+      if (!/\b(?:FROM|JOIN)\s+events\b/i.test(sql)) return statement;
+      return new Proxy(statement, { get(target, key) {
+        const value = Reflect.get(target, key, target);
+        if (key === 'all' || key === 'get') return (...args: unknown[]) => {
+          eventQueries++;
+          return value.apply(target, args);
+        };
+        return typeof value === 'function' ? value.bind(target) : value;
+      } });
+    }) as typeof db.prepare;
+    const result = getSavings(db, { now });
+    assert.equal(result.projects.length, 150);
+    assert.equal(result.projects[0].weekly.length, 7);
+    assert.equal(result.projects[0].weekly[0].tokensPerSession, 1000);
+    assert.ok(eventQueries <= 8, `expected at most 8 event queries, got ${eventQueries}`);
+  } finally { db.close(); }
+});
+
 test('savings handles empty data, one complete week, and an incomplete week without inventing a baseline', () => {
   const db = openDb(':memory:');
   try {
@@ -138,6 +167,10 @@ test('savings CLI JSON includes project weekly metrics and snapshots only on req
   const run = (...args: string[]) => execFileSync(process.execPath, ['--no-warnings', CLI, 'savings', ...args], { env, encoding: 'utf8', stdio: 'pipe' });
   try {
     assert.deepEqual(JSON.parse(run('--json')), { weeks: 8, projects: [] });
+    assert.equal(existsSync(join(dir, 'agentlens.db')), false);
+    const emptyProject = spawnSync(process.execPath, ['--no-warnings', CLI, 'savings', '--snapshot', '--project='], { env, encoding: 'utf8' });
+    assert.notEqual(emptyProject.status, 0);
+    assert.match(emptyProject.stderr, /project must not be empty/);
     assert.equal(existsSync(join(dir, 'agentlens.db')), false);
     const db = openDb(join(dir, 'agentlens.db'));
     const projectId = upsertProject(db, '/work/app', 'app');
