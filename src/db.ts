@@ -44,6 +44,10 @@ CREATE INDEX IF NOT EXISTS audit_project ON audit_items(project_id);
 CREATE INDEX IF NOT EXISTS audit_kind ON audit_items(kind);
 CREATE INDEX IF NOT EXISTS audit_status ON audit_items(status);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ai_calls (
+  id INTEGER PRIMARY KEY, kind TEXT NOT NULL, agent TEXT NOT NULL, created_at INTEGER NOT NULL,
+  input_hash TEXT NOT NULL, ok INTEGER, duration_ms INTEGER);
+CREATE INDEX IF NOT EXISTS ai_calls_created_at ON ai_calls(created_at);
 `;
 
 export function openDb(path: string): DB {

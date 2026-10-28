@@ -14,6 +14,7 @@ import { getPlatformPaths } from './paths.ts';
 import { generateFixPrompt } from './fix-prompts.ts';
 import { runFix } from './fix-runner.ts';
 import { exportData, generatePrometheusMetrics } from './export.ts';
+import { aiStatus, validAiSetting } from './ai/gate.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -127,6 +128,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
     '/api/catalog': () => ({ catalog: getCuratedCatalog() }),
     '/api/candidates': () => ({ candidates: loadDiscoveredCandidates(process.env.AGENTLENS_SOURCE_HOME || homedir()) }),
     '/api/settings': () => ({ settings: getAllSettings(db) }),
+    '/api/ai/status': () => aiStatus(db),
   };
 
   const server = createServer((req, res) => {
@@ -318,6 +320,10 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
           if (tooLarge) return;
           try {
             const json = JSON.parse(body || '{}');
+            if (typeof json.key === 'string' && json.key.startsWith('ai_')
+              && (typeof json.value !== 'string' || !validAiSetting(json.key, json.value))) {
+              return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid AI setting' }));
+            }
             if (json.key && typeof json.value === 'string') {
               setSetting(db, json.key, json.value);
             } else if (typeof json.allowAgentLaunch === 'boolean') {
