@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { openDb, getRecommendations, setSetting, updateRecommendationStatus } from './db.ts';
 import { aiStatus } from './ai/gate.ts';
-import { buildPrompt, sessionDigest } from './ai/payload.ts';
-import { buildAnalystCommand } from './ai/runner.ts';
+import { diagnoseSession, prepareDiagnosis, renderDiagnosisMarkdown, worstSessions } from './ai/diagnose.ts';
+import type { DiagnosisPreview } from './ai/diagnose.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
@@ -46,6 +46,7 @@ const HELP = `Usage: agentlens <command>
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
   ai <action>         AI status, enable, disable, or preview <diagnose|session> <id>
+  diagnose            AI diagnosis of a session <id> or --worst <N> (--project, --json, --preview, --confirm <hash>)
   optimize [path]     preview or apply workspace hygiene (.claudeignore/.cursorignore, instruction trims, unused MCPs) (--apply, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
@@ -138,15 +139,9 @@ const commands: Record<string, () => unknown> = {
       }
       const db = new DatabaseSync(DB_PATH, { readOnly: true });
       try {
-        const digest = sessionDigest(db, id);
-        if (!digest) { console.error('AI preview: unknown session ID'); process.exitCode = 1; return; }
-        const status = aiStatus(db);
-        if (!status.agent || status.error === 'AI_INVALID_SETTINGS') { console.error('AI preview: invalid AI settings'); process.exitCode = 1; return; }
-        const agent = status.agent === 'auto' ? 'claude' : status.agent;
-        if (agent !== 'claude') { console.error('AI preview: analyst provider is not supported safely'); process.exitCode = 1; return; }
-        const { prompt } = buildPrompt('diagnose', digest);
-        const command = buildAnalystCommand(prompt, { agent, model: status.model ?? undefined });
-        console.log(JSON.stringify({ prompt, ...command }, null, 2));
+        const prepared = prepareDiagnosis(db, id);
+        if (prepared.status === 'error') { console.error(`AI preview: ${prepared.message.toLowerCase()}`); process.exitCode = 1; return; }
+        console.log(JSON.stringify(prepared.preview, null, 2));
       } catch {
         console.error('AI preview failed: check session, settings, and supported provider');
         process.exitCode = 1;
@@ -166,6 +161,70 @@ const commands: Record<string, () => unknown> = {
       const status = aiStatus(db);
       if (process.argv.includes('--json')) console.log(JSON.stringify(status, null, 2));
       else console.log(`AI: ${status.enabled ? 'enabled' : 'disabled'}\nAgent: ${status.agent ?? 'invalid'}\nModel: ${status.model ?? 'default'}\nCalls today: ${status.callsToday}/${status.maxCallsPerDay ?? 'invalid'}${status.error ? `\nStatus: ${status.error}` : ''}`);
+    } finally {
+      db.close();
+    }
+  },
+  diagnose: async () => {
+    const usage = 'Usage: agentlens diagnose <session-id> | --worst <N> [--project <path>] [--json] [--preview] [--confirm <hash>]...';
+    const bad = (message: string) => { console.error(`${message}\n${usage}`); process.exitCode = 1; };
+    let parsed;
+    try {
+      parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
+        worst: { type: 'string' }, project: { type: 'string' }, json: { type: 'boolean' }, preview: { type: 'boolean' },
+        confirm: { type: 'string', multiple: true },
+      } });
+    } catch { return bad('Invalid option'); }
+    const { values, positionals } = parsed;
+    const confirms = values.confirm ?? [];
+    if (positionals.length > 1) return bad('Expected exactly one session id');
+    if (values.worst !== undefined && positionals.length) return bad('Use either a session id or --worst, not both');
+    if (values.worst === undefined && !positionals.length) return bad('Missing session id or --worst');
+    if (values.worst !== undefined && !/^[1-9]\d?$/.test(values.worst)) return bad('--worst must be an integer from 1 to 99');
+    if (values.project !== undefined && (values.worst === undefined || !values.project.trim())) return bad('--project requires --worst and a path');
+    if (values.preview && confirms.length) return bad('--preview cannot be combined with --confirm');
+    if (confirms.some(c => !/^[a-f0-9]{64}$/.test(c))) return bad('--confirm expects a 64-character preview hash');
+    if (!existsSync(DB_PATH)) { console.error('No database found'); process.exitCode = 1; return; }
+    const db = values.preview ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(DB_PATH);
+    try {
+      let ids = positionals;
+      if (values.worst !== undefined) {
+        let projectId: number | undefined;
+        if (values.project) {
+          const project = db.prepare('SELECT id FROM projects WHERE root = ?').get(projectRoot(resolve(values.project))) as { id: number } | undefined;
+          if (!project) { console.error(`Unknown project: ${values.project}`); process.exitCode = 1; return; }
+          projectId = project.id;
+        }
+        ids = worstSessions(db, Number(values.worst), projectId);
+        if (!ids.length) { console.log(values.json ? '[]' : 'No sessions with findings to diagnose.'); return; }
+      }
+      const showPreview = (p: DiagnosisPreview) => console.log(`Session ${p.sessionId}\nProvider: ${p.agent}${p.model ? ` (${p.model})` : ''}\nCommand: ${p.bin} ${p.args.slice(0, -1).join(' ')} -- <prompt>\nConfirmation hash: ${p.confirmationHash}\n--- exact prompt sent ---\n${p.prompt}\n--- end prompt ---\n`);
+      const results: Record<string, unknown>[] = [];
+      for (const id of ids) {
+        const prepared = prepareDiagnosis(db, id);
+        if (values.preview) {
+          if (prepared.status === 'error') {
+            process.exitCode = 1;
+            if (values.json) results.push({ sessionId: id, ...prepared });
+            else console.error(`diagnose ${id}: ${prepared.code}: ${prepared.message}`);
+          } else if (values.json) results.push({ ...prepared.preview });
+          else showPreview(prepared.preview);
+          continue;
+        }
+        const confirm = prepared.status === 'ready' && confirms.includes(prepared.preview.confirmationHash) ? prepared.preview.confirmationHash : undefined;
+        const result = await diagnoseSession(db, id, { confirm });
+        if (result.status !== 'ok') process.exitCode = 1;
+        if (values.json) results.push({ sessionId: id, ...result });
+        else if (result.status === 'ok') console.log(`## Session ${id}${result.cached ? ' (cached)' : ''}\n\n${renderDiagnosisMarkdown(result.diagnosis)}\n`);
+        else if (result.status === 'confirmation_required') {
+          showPreview(result.preview);
+          console.error(`diagnose ${id}: confirmation required; review the prompt above, then rerun with --confirm ${result.preview.confirmationHash}`);
+        } else console.error(`diagnose ${id}: ${result.code}: ${result.message}`);
+      }
+      if (values.json) console.log(JSON.stringify(values.worst === undefined ? results[0] : results, null, 2));
+    } catch {
+      console.error('diagnose failed: check session and settings');
+      process.exitCode = 1;
     } finally {
       db.close();
     }
