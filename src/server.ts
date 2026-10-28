@@ -15,6 +15,8 @@ import { generateFixPrompt } from './fix-prompts.ts';
 import { runFix } from './fix-runner.ts';
 import { exportData, generatePrometheusMetrics } from './export.ts';
 import { aiStatus, validAiSetting } from './ai/gate.ts';
+import { diagnoseSession } from './ai/diagnose.ts';
+import type { DiagnosisErrorCode, DiagnosisRunner } from './ai/diagnose.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -37,7 +39,13 @@ function send(res: ServerResponse, status: number, type: string, body: string | 
   res.end(body);
 }
 
-export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<Server> {
+const AI_ERROR_STATUS: Record<DiagnosisErrorCode, number> = {
+  AI_DISABLED: 403, AI_INVALID_SETTINGS: 403, AI_DAILY_LIMIT: 429, UNKNOWN_SESSION: 404,
+  AI_PROVIDER_UNSUPPORTED: 422, AI_RUN_FAILED: 502, AI_INVALID_OUTPUT: 502,
+};
+
+// aiRunner is a test seam: tests inject a fake so no agent CLI is ever spawned.
+export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { aiRunner?: DiagnosisRunner } = {}): Promise<Server> {
   const api: Record<string, (f: Filter, sp: URLSearchParams) => unknown> = {
     '/api/summary': (f) => q.summary(db, f),
     '/api/daily': (f) => q.daily(db, f),
@@ -341,6 +349,36 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
           } catch {
             send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
           }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/ai/diagnose') {
+        let body = '';
+        let tooLarge = false;
+        req.on('data', (c) => {
+          if (tooLarge) return;
+          body += c;
+          if (body.length > 16384) {
+            tooLarge = true;
+            req.resume();
+            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+          }
+        });
+        req.on('end', async () => {
+          if (tooLarge) return;
+          const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
+          let input: any;
+          try { input = JSON.parse(body || '{}'); } catch { return json(400, { error: 'invalid payload' }); }
+          const { sessionId, confirm } = input ?? {};
+          if (typeof sessionId !== 'string' || !sessionId || (confirm !== undefined && typeof confirm !== 'string')) {
+            return json(400, { error: 'sessionId (string) and optional confirm (string) are required' });
+          }
+          const r = await diagnoseSession(db, sessionId, { confirm, runner: opts.aiRunner });
+          if (r.status === 'error') return json(AI_ERROR_STATUS[r.code] ?? 502, { error: r.message, code: r.code });
+          if (r.status === 'ok') return json(200, r);
+          const { agent, model, prompt, confirmationHash } = r.preview; // exactly what is sent; no command, temp paths or hashes beyond consent
+          json(200, { status: 'confirmation_required', preview: { agent, model, prompt, confirmationHash } });
         });
         return;
       }
