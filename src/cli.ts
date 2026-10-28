@@ -6,7 +6,8 @@ import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { openDb, getRecommendations, updateRecommendationStatus } from './db.ts';
+import { openDb, getRecommendations, setSetting, updateRecommendationStatus } from './db.ts';
+import { aiStatus } from './ai/gate.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
@@ -42,6 +43,7 @@ const HELP = `Usage: agentlens <command>
   serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
+  ai <action>         show AI status or enable/disable AI (status|enable|disable, --json)
   optimize [path]     preview or apply workspace hygiene (.claudeignore/.cursorignore, instruction trims, unused MCPs) (--apply, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
@@ -117,6 +119,23 @@ async function serve() {
 }
 
 const commands: Record<string, () => unknown> = {
+  ai: () => {
+    const action = process.argv[3]?.startsWith('--') ? 'status' : process.argv[3] ?? 'status';
+    if (!['status', 'enable', 'disable'].includes(action)) {
+      console.error('Usage: agentlens ai <status|enable|disable> [--json]');
+      process.exitCode = 1;
+      return;
+    }
+    const db = openDb(DB_PATH);
+    try {
+      if (action !== 'status') setSetting(db, 'ai_enabled', action === 'enable' ? 'true' : 'false');
+      const status = aiStatus(db);
+      if (process.argv.includes('--json')) console.log(JSON.stringify(status, null, 2));
+      else console.log(`AI: ${status.enabled ? 'enabled' : 'disabled'}\nAgent: ${status.agent ?? 'invalid'}\nModel: ${status.model ?? 'default'}\nCalls today: ${status.callsToday}/${status.maxCallsPerDay ?? 'invalid'}${status.error ? `\nStatus: ${status.error}` : ''}`);
+    } finally {
+      db.close();
+    }
+  },
   serve,
   async ingest() {
     const db = openDb(DB_PATH);
