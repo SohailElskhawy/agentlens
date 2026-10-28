@@ -1,179 +1,170 @@
-import { afterEach, beforeEach, test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { DEFAULT_TIMEOUT_MS, TEMP_DIR_NAME, detectAgents, runAnalyst } from '../src/ai/runner.ts';
-import type { AnalystAgent, AnalystExec } from '../src/ai/runner.ts';
+import type { AnalystExec } from '../src/ai/runner.ts';
 
 const prompt = '{"toolCalls":42,"label":"$(touch nope); --help"}';
-const originalOverride = process.env.AGENTLENS_AI_BIN_OVERRIDE;
-beforeEach(() => { delete process.env.AGENTLENS_AI_BIN_OVERRIDE; });
-afterEach(() => {
-  if (originalOverride === undefined) delete process.env.AGENTLENS_AI_BIN_OVERRIDE;
-  else process.env.AGENTLENS_AI_BIN_OVERRIDE = originalOverride;
-});
 
-const commands: Array<{ agent: AnalystAgent; args: string[]; stdout: string }> = [
-  { agent: 'claude', args: ['-p', prompt, '--output-format', 'json', '--no-session-persistence', '--tools', ''], stdout: '{"result":"analysis"}' },
-  { agent: 'gemini', args: ['-p', prompt, '-o', 'json', '--approval-mode', 'plan'], stdout: '{"response":"analysis"}' },
-  { agent: 'opencode', args: ['run', '--standalone', prompt], stdout: 'analysis' },
-];
-
-for (const { agent, args, stdout } of commands) {
-  test(`${agent} uses the requested argv and extracts analysis`, async () => {
-    let calls = 0;
-    const exec: AnalystExec = async (bin, actualArgs, options) => {
-      calls++;
-      assert.equal(bin, agent);
-      assert.deepEqual(actualArgs, args);
-      assert.equal(options.cwd, join(tmpdir(), 'agentlens-ai'));
-      assert.ok(existsSync(options.cwd!));
-      assert.equal(options.timeout, 120_000);
-      assert.equal(options.maxBuffer, 10 * 1024 * 1024);
-      assert.equal(options.shell, false);
-      if (agent === 'opencode') {
-        assert.equal(JSON.parse(options.env!.OPENCODE_CONFIG_CONTENT!).permission, 'deny');
-      }
-      return { stdout, stderr: 'startup diagnostics' };
-    };
-    const result = await runAnalyst(prompt, { agent, exec });
-    assert.equal(calls, 1);
-    assert.equal(result.ok, true);
-    assert.equal(result.text, 'analysis');
-    assert.equal(result.agent, agent);
-    assert.equal(result.error, undefined);
-    assert.ok(result.durationMs >= 0);
-  });
-}
-
-test('exports the default timeout and fixed temp directory name', () => {
+test('exports the default timeout and temporary directory prefix', () => {
   assert.equal(DEFAULT_TIMEOUT_MS, 120_000);
   assert.equal(TEMP_DIR_NAME, 'agentlens-ai');
 });
 
-test('claude adds a model only when supplied', async () => {
-  const result = await runAnalyst(prompt, {
-    agent: 'claude', model: 'test-model',
-    exec: async (_bin, args) => {
-      assert.deepEqual(args, [...commands[0].args, '--model', 'test-model']);
-      return { stdout: '{"result":"analysis"}', stderr: '' };
-    },
-  });
-  assert.equal(result.ok, true);
+test('claude extracts analysis and uses the default execution limits', async () => {
+  let calls = 0;
+  const exec: AnalystExec = async (bin, args, options) => {
+    calls++;
+    assert.equal(bin, 'claude');
+    assert.deepEqual(args.slice(-2), ['--', prompt]);
+    assert.equal(options.timeout, DEFAULT_TIMEOUT_MS);
+    assert.equal(options.maxBuffer, 10 * 1024 * 1024);
+    assert.equal(options.shell, false);
+    assert.ok(existsSync(options.cwd!));
+    return { stdout: '{"result":"analysis"}', stderr: 'startup diagnostics' };
+  };
+  const result = await runAnalyst(prompt, { agent: 'claude', exec });
+  assert.equal(calls, 1);
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.text, 'analysis');
+  assert.equal(result.agent, 'claude');
+  assert.equal(result.error, undefined);
+  assert.ok(result.durationMs >= 0);
 });
 
-test('codex reads its unique -o file instead of stdout and removes it', async () => {
+test('concurrent invocations use distinct private directories and remove them', async () => {
   const paths: string[] = [];
-  const exec: AnalystExec = async (bin, args, options) => {
-    assert.equal(bin, 'codex');
-    assert.deepEqual(args.slice(0, 6), ['exec', '-s', 'read-only', '--ephemeral', '--skip-git-repo-check', '-o']);
-    assert.equal(args[7], prompt);
-    assert.equal(args.length, 8);
-    assert.equal(dirname(dirname(args[6])), options.cwd);
-    paths.push(args[6]);
-    writeFileSync(args[6], 'file analysis');
-    return { stdout: 'progress, not the answer', stderr: '' };
+  const exec: AnalystExec = async (_bin, _args, options) => {
+    const cwd = String(options.cwd);
+    paths.push(cwd);
+    if (process.platform !== 'win32') assert.equal(statSync(cwd).mode & 0o777, 0o700);
+    return { stdout: '{"result":"analysis"}', stderr: '' };
   };
   const results = await Promise.all([
-    runAnalyst(prompt, { agent: 'codex', exec }),
-    runAnalyst(prompt, { agent: 'codex', exec }),
+    runAnalyst(prompt, { agent: 'claude', exec }),
+    runAnalyst(prompt, { agent: 'claude', exec }),
   ]);
+  assert.equal(paths.length, 2);
   assert.notEqual(paths[0], paths[1]);
-  for (const result of results) {
-    assert.equal(result.ok, true);
-    assert.equal(result.text, 'file analysis');
-  }
-  for (const path of paths) assert.equal(existsSync(dirname(path)), false);
+  for (const result of results) assert.equal(result.ok, true, result.error);
+  for (const path of paths) assert.equal(existsSync(path), false);
 });
 
-test('binary override mirrors fix-runner and receives only the prompt', async () => {
-  process.env.AGENTLENS_AI_BIN_OVERRIDE = '/fake/analyst';
-  const result = await runAnalyst(prompt, {
-    agent: 'claude', model: 'ignored-model',
-    exec: async (bin, args) => {
-      assert.equal(bin, '/fake/analyst');
-      assert.deepEqual(args, [prompt]);
-      return { stdout: '{"result":"overridden"}', stderr: '' };
-    },
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.text, 'overridden');
-});
-
-for (const [name, error] of [
-  ['timeout', Object.assign(new Error('execution timed out'), { killed: true, signal: 'SIGTERM' })],
-  ['non-zero exit', Object.assign(new Error('command failed'), { code: 1, stderr: 'failure diagnostics' })],
-  ['missing binary', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' })],
-] as const) {
-  test(`${name} returns an error without throwing`, async () => {
-    const result = await runAnalyst(prompt, {
-      agent: 'claude', timeout: 25,
-      exec: async (_bin, _args, options) => {
-        assert.equal(options.timeout, 25);
-        throw error;
-      },
-    });
-    assert.equal(result.ok, false);
-    assert.equal(result.text, '');
-    assert.equal(result.agent, 'claude');
-    assert.equal(result.error, error.message);
-    assert.ok(result.durationMs >= 0);
-  });
-}
-
-for (const agent of ['claude', 'gemini'] as const) {
-  test(`${agent} rejects malformed JSON and missing or erroneous answers`, async () => {
-    for (const stdout of ['not json', 'null', '{}', '{"result":42,"response":42}',
-      '{"is_error":true,"result":"failed"}', '{"error":{"message":"failed"},"response":"failed"}']) {
-      const result = await runAnalyst(prompt, {
-        agent, exec: async () => ({ stdout, stderr: '' }),
-      });
-      assert.equal(result.ok, false, stdout);
-      assert.equal(result.text, '');
-      assert.ok(result.error);
-    }
-  });
-}
-
-test('codex fails if the output file is absent and cleans up on failure', async () => {
-  for (const fail of [false, true]) {
-    let output = '';
-    const result = await runAnalyst(prompt, {
-      agent: 'codex',
-      exec: async (_bin, args) => {
-        output = args[6];
-        if (fail) {
-          writeFileSync(output, 'partial analysis');
-          throw new Error('command failed');
-        }
-        return { stdout: 'must not fall back to logs', stderr: '' };
-      },
-    });
-    assert.equal(result.ok, false);
+test('claude rejects malformed JSON and missing or erroneous answers', async () => {
+  for (const stdout of ['not json', 'null', '{}', '{"result":42}',
+    '{"is_error":true,"result":"failed"}', '{"error":{"message":"failed"}}']) {
+    const result = await runAnalyst(prompt, { agent: 'claude', exec: async () => ({ stdout, stderr: '' }) });
+    assert.equal(result.ok, false, stdout);
     assert.equal(result.text, '');
     assert.ok(result.error);
-    assert.equal(existsSync(dirname(output)), false);
   }
+});
+
+test('failed executions clean up their private directory', async () => {
+  let cwd = '';
+  const result = await runAnalyst(prompt, { agent: 'claude', exec: async (_bin, _args, options) => {
+    cwd = String(options.cwd);
+    throw new Error('command failed');
+  }});
+  assert.equal(result.ok, false);
+  assert.equal(result.text, '');
+  assert.ok(result.error);
+  assert.equal(existsSync(cwd), false);
 });
 
 test('empty output is an error', async () => {
-  const result = await runAnalyst(prompt, {
-    agent: 'opencode', exec: async () => ({ stdout: '  \n', stderr: '' }),
-  });
+  const result = await runAnalyst(prompt, { agent: 'claude', exec: async () => ({ stdout: '{"result":"  "}', stderr: '' }) });
   assert.equal(result.ok, false);
   assert.ok(result.error);
 });
 
-test('detectAgents lists only CLIs found on PATH without running agents', async () => {
+test('a binary override cannot bypass the provider safety flags', async () => {
+  const original = process.env.AGENTLENS_AI_BIN_OVERRIDE;
+  process.env.AGENTLENS_AI_BIN_OVERRIDE = '/fake/analyst';
+  try {
+    let called = false;
+    const result = await runAnalyst(prompt, { agent: 'claude', timeout: 25, exec: async (bin, args, options) => {
+      called = true;
+      assert.equal(bin, 'claude');
+      assert.equal(options.timeout, 25);
+      assert.ok(args.includes('--safe-mode'));
+      return { stdout: '{"result":"analysis"}', stderr: '' };
+    }});
+    assert.equal(called, true);
+    assert.equal(result.ok, true, result.error);
+  } finally {
+    if (original === undefined) delete process.env.AGENTLENS_AI_BIN_OVERRIDE;
+    else process.env.AGENTLENS_AI_BIN_OVERRIDE = original;
+  }
+});
+
+test('detectAgents lists only safe CLIs found on the Unix PATH', async () => {
   const checked: string[] = [];
   const agents = await detectAgents(async (bin, args) => {
     assert.equal(bin, 'which');
     checked.push(args[0]);
-    if (args[0] === 'codex' || args[0] === 'gemini') throw new Error('not found');
     return { stdout: `/fake/${args[0]}\n`, stderr: '' };
-  });
-  assert.deepEqual(checked, ['claude', 'codex', 'gemini', 'opencode']);
-  assert.deepEqual(agents, ['claude', 'opencode']);
+  }, 'linux');
+  assert.deepEqual(checked, ['claude']);
+  assert.deepEqual(agents, ['claude']);
   assert.deepEqual(await detectAgents(async () => { throw new Error('not found'); }), []);
+});
+
+test('failures never expose command, output, paths, or secrets', async () => {
+  for (const [properties, expected] of [
+    [{ killed: true, signal: 'SIGTERM' }, 'Analyst timed out'],
+    [{ code: 17 }, 'Analyst exited with code 17'],
+    [{ code: 'ENOENT' }, 'Analyst executable not found'],
+    [{ code: 'EACCES' }, 'Analyst executable permission denied'],
+    [{ code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }, 'Analyst output exceeded the limit'],
+    [{ code: 'private-error-code' }, 'Analyst execution failed'],
+  ] as const) {
+    const secret = 'private-prompt-output-path-secret';
+    const error = Object.assign(new Error(secret), properties, { stdout: secret, stderr: secret, path: secret });
+    const result = await runAnalyst(secret, { agent: 'claude', exec: async () => { throw error; } });
+    assert.equal(result.error, expected);
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  }
+  const result = await runAnalyst(prompt, { agent: 'claude', exec: async () => ({ stdout: 'private-invalid-json', stderr: '' }) });
+  assert.equal(JSON.stringify(result).includes('private-invalid-json'), false);
+});
+
+test('claude isolates its workspace and keeps leading-dash prompts and models as data', async () => {
+  for (const model of ['model-name', '--model-secret']) {
+    let cwd = '';
+    const result = await runAnalyst('--private-prompt', { agent: 'claude', model, exec: async (_bin, args, options) => {
+      cwd = String(options.cwd);
+      assert.equal(dirname(cwd), tmpdir());
+      assert.ok(existsSync(cwd));
+      assert.deepEqual(args.slice(-2), ['--', '--private-prompt']);
+      assert.ok(args.includes(`--model=${model}`));
+      for (const flag of ['--safe-mode', '--restricted', '--strict-mcp-config', '--disable-slash-commands']) assert.ok(args.includes(flag), flag);
+      assert.deepEqual(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2), ['--tools', '']);
+      return { stdout: '{"result":"analysis"}', stderr: '' };
+    }});
+    assert.equal(result.ok, true, result.error);
+    assert.equal(existsSync(cwd), false);
+  }
+});
+
+test('providers without isolated read-only controls fail closed', async () => {
+  for (const agent of ['codex', 'gemini', 'opencode'] as const) {
+    let called = false;
+    const result = await runAnalyst(prompt, { agent, exec: async () => { called = true; return { stdout: '', stderr: '' }; } });
+    assert.equal(called, false);
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /not supported/i);
+  }
+});
+
+test('detectAgents uses the Windows PATH locator and only advertises safe providers', async () => {
+  const calls: string[][] = [];
+  const found = await detectAgents(async (bin, args) => {
+    calls.push([bin, ...args]);
+    return { stdout: '', stderr: '' };
+  }, 'win32');
+  assert.deepEqual(calls, [['where.exe', 'claude']]);
+  assert.deepEqual(found, ['claude']);
 });
