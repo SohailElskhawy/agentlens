@@ -5,7 +5,7 @@ signals. It is **off** until you enable it and it never runs automatically (not 
 
 Currently implemented: session diagnosis through the **Claude Code CLI (`claude`) only**. Other `ai_agent` values are
 accepted as settings but fail closed before anything is launched, because their CLIs cannot be reliably started without
-user hooks, plugins, and tools. Excerpt-based analysis is not implemented. There is no dashboard UI or HTTP endpoint for diagnosis yet.
+user hooks, plugins, and tools. Excerpt-based analysis is not implemented. The dashboard offers the same flow (see below).
 
 ## Commands
 
@@ -22,6 +22,16 @@ prints every session's hash, and a session without a matching hash is previewed 
 
 Exit codes are non-zero for bad arguments, an unknown session, disabled or invalid AI settings, an unsupported
 provider, the daily cap, a missing or stale confirmation, a failed run, and output that fails schema validation.
+
+## Dashboard and HTTP API
+
+When AI is enabled, a session's detail page shows **Explain with AI**. It opens a preview panel with the exact prompt,
+provider and model; nothing is sent until you press **Send to claude**. Cached results open directly.
+
+`POST /api/ai/diagnose` takes `{"sessionId": "...", "confirm": "<confirmationHash>"}` (loopback only, 16 KB body cap,
+cross-origin requests rejected). Without a matching `confirm` it returns `200 {"status":"confirmation_required","preview":{agent,model,prompt,confirmationHash}}`;
+with one (or a cached result) `200 {"status":"ok","cached":bool,"diagnosis":{...}}`. Errors carry `{error, code}`:
+403 disabled or invalid settings, 404 unknown session, 422 unsupported provider, 429 daily cap, 502 failed run or invalid output.
 
 ## Settings
 
