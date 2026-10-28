@@ -27,14 +27,16 @@ export function sessionDigest(db: DB, id: string) {
   const detail = sessionDetail(db, id);
   if (!detail) return null;
   const timeline = sessionTimeline(db, id);
+  // Findings and tools come first and turns are capped so the 12k prompt cap never truncates the key signal.
   return {
     agent: metadata((detail as typeof detail & { agent: unknown }).agent),
+    findings: timeline.markers.slice(0, 30).map(f => ({ rule: metadata(f.rule), turnIndex: f.turnIndex, estTokensWeek: f.estTokensWeek,
+      evidence: { tool: metadata(f.evidence?.tool), count: typeof f.evidence?.count === 'number' ? f.evidence.count : null } })),
+    tools: detail.tools.slice(0, 20).map(t => ({ tool: metadata(t.tool), calls: t.calls, resultBytes: t.resultBytes, errors: t.errors })),
     totals: { input: detail.totals.input, output: detail.totals.output, cacheRead: detail.totals.cacheRead,
       cacheWrite: detail.totals.cacheWrite, reasoning: detail.totals.reasoning },
-    turns: timeline.turns.map(t => ({ model: metadata(t.model), input: t.input, output: t.output,
+    turnCount: timeline.turns.length,
+    turns: timeline.turns.slice(0, 40).map(t => ({ model: metadata(t.model), input: t.input, output: t.output,
       cacheRead: t.cacheRead, cacheWrite: t.cacheWrite, reasoning: t.reasoning, contextSize: t.contextSize })),
-    tools: detail.tools.map(t => ({ tool: metadata(t.tool), calls: t.calls, resultBytes: t.resultBytes, errors: t.errors })),
-    findings: timeline.markers.map(f => ({ rule: metadata(f.rule), turnIndex: f.turnIndex, estTokensWeek: f.estTokensWeek,
-      evidence: { tool: metadata(f.evidence?.tool), count: typeof f.evidence?.count === 'number' ? f.evidence.count : null } })),
   };
 }

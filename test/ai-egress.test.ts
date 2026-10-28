@@ -126,3 +126,14 @@ test('preview errors do not expose malformed finding evidence', () => {
   assert.notEqual(result.status, 0);
   assert.ok(!result.stderr.includes('private-invalid-evidence'));
 });
+
+test('long sessions keep findings and tools inside the capped prompt', () => {
+  const db = openDb(':memory:');
+  upsertSessions(db, [{ id: 's1', agent: 'claude', projectId: null }]);
+  upsertEvents(db, Array.from({ length: 300 }, (_, i) => ({ id: `e${i}`, agent: 'claude', sessionId: 's1', ts: i + 1, kind: 'assistant', model: 'claude-sonnet', input: 1000, output: 50 })));
+  upsertFindings(db, [{ id: 'f', rule: 'retry_loop', projectId: null, sessionId: 's1', evidence: { tool: 'Bash', count: 3 }, confidence: 'high', confidenceReason: '', estTokensWeek: 50, firstSeen: 1, lastSeen: 1 }]);
+  const { prompt } = buildPrompt('diagnose', sessionDigest(db, 's1'));
+  assert.ok(prompt.length <= 12000);
+  assert.ok(prompt.includes('retry_loop') && !prompt.includes('[truncated]'));
+  db.close();
+});
