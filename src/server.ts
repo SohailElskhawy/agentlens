@@ -134,6 +134,14 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
   const server = createServer((req, res) => {
     // Bound to loopback, but a malicious page could still reach it via DNS rebinding; the Host check stops that.
     if (!LOCAL_HOST.test(req.headers.host ?? '')) return send(res, 403, 'text/plain', 'forbidden host');
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method ?? '') && req.headers.origin !== undefined) {
+      let origin = '';
+      try { origin = new URL(`http://${req.headers.host}`).origin; } catch {}
+      if (!origin || req.headers.origin !== origin) {
+        req.resume();
+        return send(res, 403, 'text/plain', 'forbidden origin');
+      }
+    }
     let url: URL;
     try {
       url = new URL(req.url ?? '/', 'http://localhost');
