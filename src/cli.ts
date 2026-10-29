@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { openDb, getRecommendations, setSetting, updateRecommendationStatus } from './db.ts';
 import { aiStatus } from './ai/gate.ts';
 import { enrichRecommendations } from './ai/recommendations.ts';
+import { rewriteInstructions } from './ai/instruction-rewrite.ts';
 import { diagnoseSession, prepareDiagnosis, renderDiagnosisMarkdown, worstSessions } from './ai/diagnose.ts';
 import type { DiagnosisPreview } from './ai/diagnose.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
@@ -49,7 +50,7 @@ const HELP = `Usage: agentlens <command>
   ai <action>         AI status, enable, disable, or preview <diagnose|session> <id>
   recommend           show recommendations [--ai] [--preview] [--confirm <hash>]
   diagnose            AI diagnosis of a session <id> or --worst <N> (--project, --json, --preview, --confirm <hash>)
-  optimize [path]     preview or apply workspace hygiene (.claudeignore/.cursorignore, instruction trims, unused MCPs) (--apply, --json)
+  optimize [path]     workspace hygiene or instruction rewrite (--ai, --preview, --confirm <hash>, --apply, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
   report              generate and display weekly usage report (--week, --html, --json)
@@ -431,7 +432,26 @@ const commands: Record<string, () => unknown> = {
     }
     console.log(`==================================================\n`);
   },
-  optimize: () => {
+  optimize: async () => {
+    if (process.argv.slice(3).includes('--ai')) {
+      try {
+        const { values, positionals } = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
+          ai: { type: 'boolean' }, preview: { type: 'boolean' }, confirm: { type: 'string' }, apply: { type: 'boolean' }, json: { type: 'boolean' },
+        } });
+        if (positionals.length > 1 || (values.preview && (values.confirm || values.apply)) || (values.confirm && !/^[a-f0-9]{64}$/.test(values.confirm))) throw Error('Invalid AI optimize options');
+        const db = openDb(DB_PATH);
+        try {
+          const result = await rewriteInstructions(db, positionals[0] ?? process.cwd(), { preview: values.preview, confirm: values.confirm, apply: values.apply });
+          if (values.json) console.log(JSON.stringify(result, null, 2));
+          else if (result.status === 'confirmation_required') console.log(`Confirmation hash: ${result.preview.confirmationHash}\nCommand: ${result.preview.bin} ${result.preview.args.slice(0, -1).join(' ')} <prompt>\n--- exact prompt sent ---\n${result.preview.prompt}\n--- end prompt ---`);
+          else if (result.status === 'error') console.error(result.message);
+          else { console.log(result.diff); if (result.status === 'rejected') console.error(`Rejected: ${result.reason}`); else console.log(result.applied ? 'Applied; original saved as .bak.' : 'Preview only; use --apply to write.'); }
+          if (result.status === 'error' || result.status === 'rejected' || (result.status === 'confirmation_required' && !values.preview)) process.exitCode = 1;
+        } finally { db.close(); }
+      } catch (error) { console.error(error instanceof Error ? error.message : 'Invalid AI optimize options'); process.exitCode = 1; }
+      return;
+    }
+    if (process.argv.slice(3).some(arg => arg === '--preview' || arg === '--confirm')) { console.error('AI preview and confirmation require --ai'); process.exitCode = 1; return; }
     let projectArg: string | undefined;
     let apply = false;
     let isJson = false;
