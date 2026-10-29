@@ -17,7 +17,7 @@ import { ADAPTERS, ingest } from './ingest.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
 import { startServer } from './server.ts';
-import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from './summary.ts';
+import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary, type StatuslineFormat } from './summary.ts';
 import { runAudit } from './audit/runner.ts';
 import { checkWeeklyReportSchedule } from './report-scheduler.ts';
 import { generateWeeklyReport } from './report.ts';
@@ -289,12 +289,37 @@ const commands: Record<string, () => unknown> = {
     );
   },
   statusline: async () => {
+    let format: StatuslineFormat = 'default';
+    const args = process.argv.slice(3);
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === '--format') {
+        const next = args[++i];
+        if (next === 'default' || next === 'starship' || next === 'raw') {
+          format = next;
+        } else {
+          console.error('Usage: agentlens statusline [--format default|starship|raw]');
+          process.exitCode = 1;
+          return;
+        }
+      } else if (arg.startsWith('--format=')) {
+        const val = arg.slice('--format='.length);
+        if (val === 'default' || val === 'starship' || val === 'raw') {
+          format = val;
+        } else {
+          console.error('Usage: agentlens statusline [--format default|starship|raw]');
+          process.exitCode = 1;
+          return;
+        }
+      }
+    }
+
     let input = '';
     for await (const chunk of process.stdin) {
       input += chunk;
     }
     spoolQuota(SPOOL_PATH, input);
-    const out = formatStatusline(SUMMARY_PATH, process.cwd());
+    const out = formatStatusline(SUMMARY_PATH, process.cwd(), format);
     process.stdout.write(out + '\n');
   },
   status: () => {

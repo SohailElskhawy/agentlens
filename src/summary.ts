@@ -700,7 +700,13 @@ export function writeSummary(db: DB, targetPath: string): void {
   renameSync(tmpPath, targetPath);
 }
 
-export function formatStatusline(summaryPath: string, projectCwd: string): string {
+export type StatuslineFormat = 'default' | 'starship' | 'raw';
+
+export function formatStatusline(
+  summaryPath: string,
+  projectCwd: string,
+  format: StatuslineFormat = 'default',
+): string {
   const root = projectRoot(projectCwd);
   const name = projectName(root);
 
@@ -719,6 +725,21 @@ export function formatStatusline(summaryPath: string, projectCwd: string): strin
 
   const h5Str = claude5h != null ? `${Math.round(claude5h)}%` : '--';
   const d7Str = claude7d != null ? `${Math.round(claude7d)}%` : '--';
+
+  if (format === 'starship') {
+    let line = `⚡ ${h5Str} 5h | ${tokensTodayStr}/d`;
+    if (data?.statuslineForecast) {
+      line += ` | ${data.statuslineForecast}`;
+    }
+    if (proj?.contextWarning) {
+      line += ` | ${proj.contextWarning}`;
+    }
+    return line;
+  }
+
+  if (format === 'raw') {
+    return [name, tokensTodayStr, h5Str, d7Str, data?.statuslineForecast ?? '', proj?.contextWarning ?? ''].join('\t');
+  }
 
   const base = `${name} · ${tokensTodayStr} · 5h ${h5Str} · 7d ${d7Str}`;
   let line = base;
