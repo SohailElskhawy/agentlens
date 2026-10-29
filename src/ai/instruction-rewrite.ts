@@ -11,7 +11,7 @@ import type { AnalysisPreview } from './confirmed.ts';
 import type { DiagnosisRunner } from './diagnose.ts';
 import { aiStatus } from './gate.ts';
 import { redact } from './payload.ts';
-import { buildAnalystCommand } from './runner.ts';
+import { buildAnalystCommand, getProviderIsolation } from './runner.ts';
 
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 const fail = (message: string) => ({ status: 'error' as const, message });
@@ -62,7 +62,7 @@ export async function rewriteInstructions(db: DB, path: string, opts: { preview?
     if (!opts.preview && status.error === 'AI_DISABLED') return fail('AI_DISABLED');
     if (status.error === 'AI_INVALID_SETTINGS' || !status.agent) return fail('AI_INVALID_SETTINGS');
     const agent = status.agent === 'auto' ? 'claude' : status.agent;
-    if (agent !== 'claude') return fail('AI_PROVIDER_UNSUPPORTED');
+    if (!getProviderIsolation(agent).supported) return fail('AI_PROVIDER_UNSUPPORTED');
     const file = targetPath(path); const original = readTarget(file); const originalHash = hash(original);
     const contents = new Map<string, string>([[file, original]]);
     const sibling = join(dirname(file), basename(file) === 'AGENTS.md' ? 'CLAUDE.md' : 'AGENTS.md');
