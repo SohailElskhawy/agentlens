@@ -7,7 +7,7 @@ import type { Recommendation } from '../types.ts';
 import { MAX_BOUNDED_READ_BYTES } from './constants.ts';
 import { aiStatus } from './gate.ts';
 import { redact } from './payload.ts';
-import { buildAnalystCommand } from './runner.ts';
+import { buildAnalystCommand, getProviderIsolation } from './runner.ts';
 import { confirmedAnalysis } from './confirmed.ts';
 import type { AnalysisPreview } from './confirmed.ts';
 import type { DiagnosisErrorCode, DiagnosisRunner } from './diagnose.ts';
@@ -75,7 +75,7 @@ function prepare(db: DB, recs: Recommendation[], topN: number): { preview: Analy
   const status = aiStatus(db);
   if (status.error === 'AI_INVALID_SETTINGS' || !status.agent) return 'AI_INVALID_SETTINGS';
   const agent = status.agent === 'auto' ? 'claude' : status.agent;
-  if (agent !== 'claude') return 'AI_PROVIDER_UNSUPPORTED';
+  if (!getProviderIsolation(agent).supported) return 'AI_PROVIDER_UNSUPPORTED';
   const findings = new Map(getFindings(db).map(f => [f.id, f]));
   const contexts = new Map<number, ReturnType<typeof projectContext>>();
   const data = recs.slice(0, topN).filter(r => safe(r.id, 200) && safe(r.findingRule, 100) && safe(r.action, 30)).map(r => {

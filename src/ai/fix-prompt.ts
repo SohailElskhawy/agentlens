@@ -8,7 +8,7 @@ import { confirmedAnalysis, type AnalysisPreview } from './confirmed.ts';
 import type { DiagnosisErrorCode, DiagnosisRunner } from './diagnose.ts';
 import { aiStatus } from './gate.ts';
 import { redact } from './payload.ts';
-import { buildAnalystCommand, type AnalystAgent } from './runner.ts';
+import { buildAnalystCommand, getProviderIsolation, type AnalystAgent } from './runner.ts';
 
 export type TailorFixPromptPreview = {
   agent: AnalystAgent;
@@ -152,7 +152,7 @@ export async function tailorFixPrompt(
       return { ok: true, prompt: fallback, source: 'fallback', aiError: 'AI_INVALID_SETTINGS' };
     }
     const agent = status.agent === 'auto' ? 'claude' : status.agent;
-    if (agent !== 'claude') {
+    if (!getProviderIsolation(agent).supported) {
       return { ok: true, prompt: fallback, source: 'fallback', aiError: 'AI_PROVIDER_UNSUPPORTED' };
     }
 

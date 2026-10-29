@@ -4,7 +4,7 @@ import { detectAnomalies, formatLocalDay } from '../anomaly.ts';
 import { confirmedAnalysis } from './confirmed.ts';
 import { aiStatus } from './gate.ts';
 import { redact, sessionDigest } from './payload.ts';
-import { buildAnalystCommand } from './runner.ts';
+import { buildAnalystCommand, getProviderIsolation } from './runner.ts';
 import type { DiagnosisRunner } from './diagnose.ts';
 
 const error = (code: string, message: string) => ({ status: 'error' as const, code, message });
@@ -29,7 +29,7 @@ export function prepareExplanation(db: DB, day: string, project: string, opts: {
   const status = aiStatus(db, now);
   if (status.error === 'AI_INVALID_SETTINGS' || !status.agent) return error('AI_INVALID_SETTINGS', errors.AI_INVALID_SETTINGS);
   const agent = status.agent === 'auto' ? 'claude' : status.agent;
-  if (agent !== 'claude') return error('AI_PROVIDER_UNSUPPORTED', errors.AI_PROVIDER_UNSUPPORTED);
+  if (!getProviderIsolation(agent).supported) return error('AI_PROVIDER_UNSUPPORTED', errors.AI_PROVIDER_UNSUPPORTED);
   const data = {
     day, projectId: anomaly.projectId, agent: anomaly.agent, tokens: anomaly.tokens, baselineMedian: anomaly.baselineMedian,
     baselineSamples: anomaly.baselineSamples, ratio: anomaly.ratio,

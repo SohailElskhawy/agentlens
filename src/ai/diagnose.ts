@@ -4,7 +4,7 @@ import { confirmedAnalysis } from './confirmed.ts';
 import { aiStatus } from './gate.ts';
 import type { AiErrorCode } from './gate.ts';
 import { buildPrompt, sessionDigest } from './payload.ts';
-import { buildAnalystCommand } from './runner.ts';
+import { buildAnalystCommand, getProviderIsolation } from './runner.ts';
 import type { AnalystAgent } from './runner.ts';
 
 export interface Diagnosis {
@@ -53,7 +53,7 @@ export function prepareDiagnosis(db: DB, id: string): PrepareResult {
   const status = aiStatus(db);
   if (status.error === 'AI_INVALID_SETTINGS' || !status.agent) return fail('AI_INVALID_SETTINGS');
   const agent = status.agent === 'auto' ? 'claude' : status.agent;
-  if (agent !== 'claude') return fail('AI_PROVIDER_UNSUPPORTED');
+  if (!getProviderIsolation(agent).supported) return fail('AI_PROVIDER_UNSUPPORTED');
   const { prompt, inputHash } = buildPrompt('diagnose', digest);
   const { bin, args } = buildAnalystCommand(prompt, { agent, model: status.model ?? undefined });
   // args already contain the prompt, so hashing the command binds prompt, provider and model.
