@@ -395,3 +395,5 @@ agentlens incorporates concepts and parsing techniques inspired by open-source p
 ## 📜 License
 
 [MIT License](LICENSE) © 2026 agentlens authors.
+
+Instruction drift checks are conservative: project CLAUDE.md and AGENTS.md files are checked for explicit `npm run` scripts and file-like relative paths. Examples, globs, URLs, global instructions, symlinks, and oversized files are skipped; missing or invalid package.json files do not produce script findings. Review each finding before changing instructions.

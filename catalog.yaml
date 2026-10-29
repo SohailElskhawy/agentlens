@@ -62,6 +62,7 @@
     - repeated_prompt
     - context_growth
     - outcome_efficiency
+    - instruction_drift
     - abandoned_session
     - compaction_churn
   estSavingsPct: 25

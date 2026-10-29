@@ -10,6 +10,7 @@ import { analyzeOverhead } from './overhead.ts';
 import { analyzeUsage } from './usage.ts';
 import { detectDuplicates } from './duplicates.ts';
 import { detectConflicts } from './conflicts.ts';
+import { detectDrift } from './drift.ts';
 import { trimInstructions, type InstructionTrimmerResult } from './trimmer.ts';
 import { scanInstructions } from './scanners/instruction.ts';
 import { scanMcp } from './scanners/mcp.ts';
@@ -57,6 +58,7 @@ export function runAudit(
     ...usageResult.findings,
     ...dupResult.findings,
     ...conflictResult.findings,
+    ...detectDrift(instructions, projects),
   ];
 
   // 4. Assemble AuditItems with unique IDs per source path
@@ -91,10 +93,16 @@ export function runAudit(
     db.prepare('DELETE FROM audit_items WHERE updated_at < ?').run(now);
   }
   tx(db, () => {
-    if (findings.length > 0) {
-      upsertFindings(db, findings);
-      const auditRules = ['instruction_bloat', 'unused_config', 'duplicate_config', 'config_conflict'];
-      db.prepare(`DELETE FROM findings WHERE rule IN ('${auditRules.join("','")}') AND last_seen < ?`).run(now);
+    if (findings.length > 0) upsertFindings(db, findings);
+    const auditRules = ['instruction_bloat', 'unused_config', 'duplicate_config', 'config_conflict'];
+    db.prepare(`DELETE FROM findings WHERE rule IN ('${auditRules.join("','")}') AND last_seen < ?`).run(now);
+    const currentDrift = new Set(findings.filter(f => f.rule === 'instruction_drift').map(f => f.id));
+    const storedDrift = db.prepare("SELECT id, project_id AS projectId FROM findings WHERE rule = 'instruction_drift'").all() as { id: string; projectId: number | null }[];
+    for (const row of storedDrift) {
+      if (!currentDrift.has(row.id)) {
+        db.prepare('DELETE FROM findings WHERE id = ?').run(row.id);
+        db.prepare("DELETE FROM recommendations WHERE id = ? AND status = 'open' AND accepted_at IS NULL").run(`rec:instruction_drift:${row.projectId ?? 'global'}:${row.id}`);
+      }
     }
     capStoredFindings(db, budgets);
   });

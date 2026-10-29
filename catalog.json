@@ -53,7 +53,7 @@
     "kind": "plugin",
     "description": "Structured agent workflow skills for TDD, brainstorming, plan execution, and code review that prevent runaway prompt context.",
     "url": "https://github.com/obra/superpowers",
-    "targetRules": ["repeated_prompt", "context_growth"],
+    "targetRules": ["repeated_prompt", "context_growth", "instruction_drift"],
     "estSavingsPct": 25,
     "recommendedAction": "add",
     "installCommand": "git clone https://github.com/obra/superpowers.git ~/.gemini/config/plugins/superpowers",

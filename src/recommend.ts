@@ -125,6 +125,13 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         body = `${f.evidence?.kind ?? 'Config'} '${f.evidence?.name}' is defined in ${f.evidence?.sources?.length ?? 'multiple'} locations. Maintain a single canonical definition to prevent conflicts.`;
         break;
 
+      case 'instruction_drift':
+        action = 'improve';
+        title = 'Update stale instruction references';
+        body = `Review the missing scripts and paths in ${f.evidence?.projectName ?? 'project'} instructions: ${(f.evidence?.references ?? []).map((r: { kind: string; reference: string; source: string }) => `${r.source}: ${r.kind === 'script' ? 'npm run ' : ''}${r.reference}`).join(', ')}. Update the instructions or restore the targets.`;
+        actionSnippet = 'Review the referenced scripts and paths';
+        break;
+
       case 'config_conflict':
         action = 'improve';
         title = 'Resolve conflicting instruction commands';
