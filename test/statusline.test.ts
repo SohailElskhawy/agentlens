@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { openDb, upsertEvents, upsertFindings, upsertProject, upsertRecommendations, upsertSessions } from '../src/db.ts';
+import { openDb, setSetting, upsertEvents, upsertFindings, upsertProject, upsertRecommendations, upsertSessions } from '../src/db.ts';
+import { enrichRecommendations } from '../src/ai/recommendations.ts';
+import type { Recommendation } from '../src/types.ts';
 import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from '../src/summary.ts';
 import { tmp } from './helpers.ts';
 
@@ -363,5 +365,262 @@ test('writeSummary includes v1.1 fields: byAgentToday, recommendations, liveAler
   assert.equal(data.projectList[0].weeklyTokensUsed, 82_000);
   assert.equal(data.projectList[0].budgetUsedPct, 82);
 });
+
+test('writeSummary: topInsight is null on an empty DB', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.topInsight, null);
+});
+
+test('writeSummary: topInsight uses deterministic topRecommendation when AI is disabled (even if ai_notes contains cached rows)', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+
+  upsertRecommendations(db, [
+    {
+      id: 'rec-1',
+      findingRule: 'hot_files',
+      projectId: null,
+      action: 'improve',
+      title: 'Hot file re-read: src/db.ts',
+      body: 'Document src/db.ts exports in CLAUDE.md',
+      status: 'open',
+      score: 95,
+    },
+  ]);
+
+  db.prepare(`
+    INSERT INTO ai_notes (kind, input_hash, agent, model, created_at, text)
+    VALUES ('explain', 'hash-exp', 'claude', '', 5000, '{"explanation":"Cached AI explanation that should be ignored when AI disabled"}')
+  `).run();
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.topInsight, 'Document src/db.ts exports in CLAUDE.md');
+});
+
+test('writeSummary: topInsight falls back to anomaly when no recommendations exist and AI is disabled', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  const now = Date.now();
+
+  const pid = upsertProject(db, '/work/proj-a', 'proj-a');
+  upsertSessions(db, [{ id: 's-spike', agent: 'claude', cwd: '/work/proj-a', projectId: pid }]);
+
+  // Baseline days 1, 2, 3
+  for (const daysAgo of [1, 2, 3]) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - daysAgo);
+    d.setHours(12, 0, 0, 0);
+    upsertEvents(db, [
+      {
+        id: `ev-base-${daysAgo}`,
+        agent: 'claude',
+        sessionId: 's-spike',
+        ts: d.getTime(),
+        kind: 'assistant',
+        model: 'm',
+        input: 400_000,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
+    ]);
+  }
+
+  // Today spike: >= 2.5x median (400k) and >= 1M tokens
+  upsertEvents(db, [
+    {
+      id: 'ev-today-spike',
+      agent: 'claude',
+      sessionId: 's-spike',
+      ts: now,
+      kind: 'assistant',
+      model: 'm',
+      input: 1_200_000,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  ]);
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.ok(data.topInsight);
+  assert.match(data.topInsight, /^claude \(proj-a\) spiked to 1\.2M on \d{4}-\d{2}-\d{2} \(3x median\)$/);
+});
+
+test('writeSummary: topInsight falls back to liveAlert when no recommendations or anomalies exist', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  const now = Date.now();
+
+  upsertFindings(db, [
+    {
+      id: 'f-alert',
+      rule: 'retry_loop',
+      projectId: null,
+      sessionId: null,
+      evidence: {},
+      confidence: 'high',
+      confidenceReason: '5 consecutive tool failures detected',
+      estTokensWeek: 50000,
+      firstSeen: now - 5 * 60_000,
+      lastSeen: now - 1 * 60_000,
+    },
+  ]);
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.topInsight, '5 consecutive tool failures detected');
+});
+
+test('writeSummary: topInsight returns cached recommendation aiBody when AI is enabled without invoking runner', async () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  setSetting(db, 'ai_enabled', 'true');
+
+  const recs: Recommendation[] = [
+    {
+      id: 'rec:retry_loop:global:1',
+      findingRule: 'retry_loop',
+      projectId: null,
+      action: 'improve',
+      title: 'Stop retry loop on run_command',
+      body: 'Halt after 2 consecutive failures',
+      status: 'open',
+      score: 95,
+    },
+  ];
+  upsertRecommendations(db, recs);
+
+  let runnerCalls = 0;
+  const runner = async () => {
+    runnerCalls++;
+    return { ok: true, text: JSON.stringify([{ id: 'rec:retry_loop:global:1', aiBody: '  AI suggests halting after 2 failures and checking logs.  ' }]) };
+  };
+
+  const preview = await enrichRecommendations(db, recs, { runner });
+  assert.equal(preview.status, 'confirmation_required');
+  if (preview.status === 'confirmation_required') {
+    await enrichRecommendations(db, recs, { runner, confirm: preview.preview.confirmationHash });
+  }
+  assert.equal(runnerCalls, 1);
+
+  // Now writeSummary should synchronously pick up cached recommendation aiBody without calling any runner
+  writeSummary(db, summaryPath);
+  assert.equal(runnerCalls, 1, 'writeSummary must never invoke an AI runner');
+
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.topInsight, 'AI suggests halting after 2 failures and checking logs.');
+  // summary.recommendations remains deterministic
+  assert.equal(data.recommendations[0].action, 'Halt after 2 consecutive failures');
+});
+
+test('writeSummary: topInsight returns cached explain note when no cached recommendation exists', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  setSetting(db, 'ai_enabled', 'true');
+
+  db.prepare(`
+    INSERT INTO ai_notes (kind, input_hash, agent, model, created_at, text)
+    VALUES ('explain', 'hash-1', 'claude', '', 1000, '{"explanation":"Token spike on gamma project due to large diff generation."}')
+  `).run();
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.topInsight, 'Token spike on gamma project due to large diff generation.');
+});
+
+test('writeSummary: topInsight returns cached diagnose summary when no cached recommendation or explain exists', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  setSetting(db, 'ai_enabled', 'true');
+
+  const diagPayload = JSON.stringify({
+    summary: '  Diagnosed cache thrashing due to repeated context rewrites.  ',
+    causes: [{ cause: 'large files', evidence: '10 reads', est_tokens: 50000 }],
+    fixes: [{ action: 'trim file', where: 'CLAUDE.md', snippet: 'shorten' }],
+  });
+
+  db.prepare(`
+    INSERT INTO ai_notes (kind, input_hash, agent, model, created_at, text)
+    VALUES ('diagnose', 'hash-2', 'claude', '', 2000, ?)
+  `).run(diagPayload);
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.topInsight, 'Diagnosed cache thrashing due to repeated context rewrites.');
+});
+
+test('writeSummary: malformed/schema-invalid ai_notes rows are ignored and topInsight falls back cleanly', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  setSetting(db, 'ai_enabled', 'true');
+
+  upsertRecommendations(db, [
+    {
+      id: 'rec-fallback',
+      findingRule: 'hot_files',
+      projectId: null,
+      action: 'improve',
+      title: 'Hot file cache',
+      body: 'Deterministic action advice',
+      status: 'open',
+      score: 80,
+    },
+  ]);
+
+  // Insert newest malformed explain note (invalid JSON)
+  db.prepare(`
+    INSERT INTO ai_notes (kind, input_hash, agent, model, created_at, text)
+    VALUES ('explain', 'hash-bad-1', 'claude', '', 3000, 'NOT JSON')
+  `).run();
+
+  // Insert another malformed diagnose note (missing causes/fixes arrays)
+  db.prepare(`
+    INSERT INTO ai_notes (kind, input_hash, agent, model, created_at, text)
+    VALUES ('diagnose', 'hash-bad-2', 'claude', '', 2000, '{"summary":"Missing required causes"}')
+  `).run();
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.topInsight, 'Deterministic action advice');
+});
+
+test('writeSummary: ignores newest malformed note and uses valid older note within limit', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  setSetting(db, 'ai_enabled', 'true');
+
+  // Older valid note
+  db.prepare(`
+    INSERT INTO ai_notes (kind, input_hash, agent, model, created_at, text)
+    VALUES ('explain', 'hash-valid', 'claude', '', 1000, '{"explanation":"Valid older explanation."}')
+  `).run();
+
+  // Newest malformed note
+  db.prepare(`
+    INSERT INTO ai_notes (kind, input_hash, agent, model, created_at, text)
+    VALUES ('explain', 'hash-bad', 'claude', '', 2000, 'INVALID')
+  `).run();
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.topInsight, 'Valid older explanation.');
+});
+
 
 

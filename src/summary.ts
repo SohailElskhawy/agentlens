@@ -1,13 +1,17 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DB } from './db.ts';
-import { insertQuotas, tx } from './db.ts';
+import { getRecommendations, insertQuotas, tx } from './db.ts';
 import { detectAnomalies, formatLocalDay, type AnomalyResult } from './anomaly.ts';
 import { generateFixPrompt } from './fix-prompts.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
 import type { QuotaSnapshot } from './types.ts';
 import { computeQuotaForecasts, type QuotaForecastResult } from './quota-forecast.ts';
+import { aiStatus } from './ai/gate.ts';
+import { cachedRecommendations } from './ai/recommendations.ts';
+import { parseExplanation } from './ai/explain.ts';
+import { parseDiagnosis } from './ai/diagnose.ts';
 
 export interface ProjectSummary {
   projectId: number;
@@ -89,6 +93,7 @@ export interface SummaryData {
   forecasts?: QuotaForecastResult[];
   statuslineForecast?: string;
   topRecommendation?: SummaryRecommendation | null;
+  topInsight?: string | null;
   recommendations?: SummaryRecommendation[];
   byAgentToday?: SummaryAgentToday[];
   liveAlerts?: SummaryLiveAlert[];
@@ -574,6 +579,62 @@ export function writeSummary(db: DB, targetPath: string): void {
     .sort((a, b) => b.tokensToday - a.tokensToday || b.weeklyTokensUsed - a.weeklyTokensUsed)
     .slice(0, 5);
 
+  const anomalies = detectAnomalies(db, {}, now);
+
+  let topInsight: string | null = null;
+  const status = aiStatus(db, now);
+  if (status.enabled && !status.error && status.agent) {
+    if (recRows[0]) {
+      const enriched = cachedRecommendations(db, getRecommendations(db), 5);
+      const match = enriched.find((r) => r.id === recRows[0].id);
+      if (match?.aiBody && typeof match.aiBody === 'string' && match.aiBody.trim().length > 0) {
+        topInsight = match.aiBody.trim();
+      }
+    }
+
+    if (!topInsight) {
+      const agent = status.agent === 'auto' ? 'claude' : status.agent;
+      const model = status.model ?? '';
+      const cachedNotes = db.prepare(`
+        SELECT kind, text
+        FROM ai_notes
+        WHERE agent = ? AND model = ? AND kind IN ('explain', 'diagnose')
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT 10
+      `).all(agent, model) as { kind: string; text: string }[];
+
+      for (const row of cachedNotes) {
+        if (row.kind === 'explain') {
+          const parsed = parseExplanation(row.text);
+          if (parsed?.explanation) {
+            topInsight = parsed.explanation;
+            break;
+          }
+        } else if (row.kind === 'diagnose') {
+          const parsed = parseDiagnosis(row.text);
+          if (parsed?.summary && parsed.summary.trim().length > 0) {
+            topInsight = parsed.summary.trim();
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (!topInsight) {
+    if (topRecommendation !== null) {
+      topInsight = topRecommendation.action || topRecommendation.title;
+    } else if (anomalies.anomalies.length > 0) {
+      const topAnomaly = anomalies.anomalies[0];
+      const projectLabel = topAnomaly.project || 'global';
+      topInsight = `${topAnomaly.agent} (${projectLabel}) spiked to ${formatTokens(topAnomaly.tokens)} on ${topAnomaly.day} (${topAnomaly.ratio}x median)`;
+    } else if (liveAlerts.length > 0) {
+      topInsight = liveAlerts[0].detail || liveAlerts[0].title;
+    } else {
+      topInsight = null;
+    }
+  }
+
   const data: SummaryData = {
     updatedAt: now,
     totals: {
@@ -587,13 +648,14 @@ export function writeSummary(db: DB, targetPath: string): void {
     forecasts,
     statuslineForecast,
     topRecommendation,
+    topInsight,
     recommendations,
     byAgentToday,
     liveAlerts,
     daily7d,
     topModels,
     projectList,
-    anomalies: detectAnomalies(db, {}, now),
+    anomalies,
   };
 
   mkdirSync(dirname(targetPath), { recursive: true });
