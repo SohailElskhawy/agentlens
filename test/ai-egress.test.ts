@@ -9,7 +9,7 @@ import { redact, buildPrompt, sessionDigest } from '../src/ai/payload.ts';
 import { cached } from '../src/ai/cache.ts';
 import { prepareDiagnosis } from '../src/ai/diagnose.ts';
 import { buildAnalystCommand, runAnalyst } from '../src/ai/runner.ts';
-import { tmp } from './helpers.ts';
+import { capabilityHelp, tmp } from './helpers.ts';
 
 const secrets = ['sk-abcdefghijk123456789', 'sk-proj-abcdefghijk123456789', 'sk_proj_abcdefghijk123456789',
   'ghp_abcdefghijk123456789', 'github_pat_abcdefghijk123456789', 'AKIA1234567890ABCDEF',
@@ -74,7 +74,7 @@ test('preview is exact, read-only, works disabled and rejects unsupported provid
   const prompt = buildPrompt('diagnose', sessionDigest(db, 's1')).prompt;
   const command = buildAnalystCommand(prompt, { agent: 'claude', model: 'example-model' });
   let actual: unknown;
-  await runAnalyst(prompt, { agent: 'claude', model: 'example-model', exec: async (bin, args) => { actual = { bin, args }; return { stdout: '{"result":"ok"}', stderr: '' }; } });
+  await runAnalyst(prompt, { agent: 'claude', model: 'example-model', exec: async (bin, args) => { if (args.includes('--help')) return { stdout: capabilityHelp, stderr: '' }; actual = { bin, args }; return { stdout: '{"result":"ok"}', stderr: '' }; } });
   assert.deepEqual(actual, command);
   const descriptor = prepareDiagnosis(db, 's1');
   assert.ok(descriptor.status === 'ready');

@@ -15,7 +15,7 @@ type Note = { id: string; aiBody?: string; aiActionSnippet?: string };
 type Result = { recommendations: Recommendation[] } & (
   { status: 'ok'; cached: boolean } | { status: 'confirmation_required'; preview: AnalysisPreview } |
   { status: 'error'; code: DiagnosisErrorCode; message: string });
-const fail = (recs: Recommendation[], code: DiagnosisErrorCode): Result => ({ status: 'error', code, message: code, recommendations: recs });
+const fail = (recs: Recommendation[], code: DiagnosisErrorCode, message: string = code): Result => ({ status: 'error', code, message, recommendations: recs });
 const safe = (s: string, max: number) => typeof s === 'string' && s.length > 0 && s.length <= max && /^[\w.:-]+$/.test(s) && redact(s) === s;
 
 const evidenceKeys: Record<string, string[]> = {
@@ -139,7 +139,7 @@ export async function enrichRecommendations(db: DB, recs: Recommendation[], opts
     if (opts.preview) return { status: 'confirmation_required', preview, recommendations: recs };
     if (!ids.size) return { status: 'ok', cached: false, recommendations: recs };
     const result = await confirmedAnalysis(db, 'recommendations', preview, text => parse(text, ids), opts);
-    if (result.status === 'error') return fail(recs, result.code);
+    if (result.status === 'error') return fail(recs, result.code, result.message);
     if (result.status === 'confirmation_required') return { ...result, preview, recommendations: recs };
     return { status: 'ok', cached: result.cached, recommendations: merge(recs, result.value) };
   } catch { return fail(recs, 'AI_RUN_FAILED'); }

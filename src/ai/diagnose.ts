@@ -33,7 +33,7 @@ export type DiagnosisResult =
   | { status: 'confirmation_required'; preview: DiagnosisPreview }
   | DiagnosisError;
 
-export type DiagnosisRunner = (prompt: string, opts: { agent: AnalystAgent; model?: string }) => Promise<{ ok: boolean; text: string }>;
+export type DiagnosisRunner = (prompt: string, opts: { agent: AnalystAgent; model?: string }) => Promise<{ ok: boolean; text: string; capabilityFailed?: boolean }>;
 
 const MESSAGES: Record<DiagnosisErrorCode, string> = {
   UNKNOWN_SESSION: 'Unknown session ID',
@@ -102,7 +102,7 @@ export async function diagnoseSession(db: DB, id: string,
     const { preview } = prepared;
     const result = await confirmedAnalysis(db, 'diagnose', preview, parseDiagnosis, opts);
     if (result.status === 'confirmation_required') return { status: result.status, preview };
-    if (result.status === 'error') return fail(result.code);
+    if (result.status === 'error') return { ...fail(result.code), ...(result.message ? { message: result.message } : {}) };
     return { status: 'ok', cached: result.cached, diagnosis: result.value };
   } catch {
     return fail('AI_RUN_FAILED');
