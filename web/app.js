@@ -419,6 +419,9 @@ async function updateNavBadges() {
 }
 
 let slideOverReturnFocus = null;
+const anomalyKey = a => `${a.day}|${a.projectId}|${a.agent}`;
+const pendingAnomalies = new Set();
+const anomalyButton = key => [...document.querySelectorAll('.anomaly-explain')].find(b => b.dataset.anomalyKey === key);
 
 function openSlideOver(title, content) {
   const el = $('#slide-over');
@@ -446,6 +449,7 @@ function closeSlideOver() {
   backdrop.setAttribute('aria-hidden', 'true');
   if (slideOverReturnFocus?.isConnected) slideOverReturnFocus.focus();
   else if (slideOverReturnFocus?.id === 'btn-explain-ai') $('#btn-explain-ai')?.focus();
+  else if (slideOverReturnFocus?.dataset?.anomalyKey) anomalyButton(slideOverReturnFocus.dataset.anomalyKey)?.focus(); // rerender replaced the opener; find it by stable identity
   slideOverReturnFocus = null;
 }
 
@@ -510,7 +514,7 @@ function renderSkeleton() {
 // ============================================================================
 
 async function overview() {
-  const [s, daily, models, projects, quota, findingsRes, healthRes] = await Promise.all([
+  const [s, daily, models, projects, quota, findingsRes, healthRes, anomalies, aiState] = await Promise.all([
     api('summary'),
     api('daily'),
     api('models'),
@@ -518,6 +522,8 @@ async function overview() {
     api('quota'),
     api('findings').catch(() => ({ findings: [] })),
     api('health').catch(() => null),
+    fetch(`/api/anomalies?${new URLSearchParams({ ...(state.agent ? { agent: state.agent } : {}), ...(state.project ? { project: state.project } : {}) })}`).then(r => r.json()).catch(() => ({ anomalies: [] })),
+    api('ai/status').catch(() => null),
   ]);
   const t = s.totals;
   const days = [...new Set(daily.map((d) => d.day))];
@@ -616,6 +622,14 @@ async function overview() {
 
       ${antigravityNotice}
       ${balanceCard}
+      <section class="card">
+        <div class="card-header"><div><h3 class="card-title">Today's token spikes</h3><span class="card-subtitle">Compared with the median of recent active days</span></div></div>
+        ${(anomalies.anomalies || []).length ? anomalies.anomalies.map((a, i) => `
+          <div class="anomaly-row"><div><strong>${esc(a.project || 'Unknown project')}</strong> · ${esc(AGENTS[a.agent] || a.agent)}<br><span class="card-subtitle">${fmtTok(a.tokens)} tokens · ${a.ratio}× baseline</span></div>
+          ${aiState?.enabled ? `<button type="button" class="btn btn-sm btn-outline anomaly-explain" data-index="${i}" data-anomaly-key="${esc(anomalyKey(a))}"${pendingAnomalies.has(anomalyKey(a)) ? ' disabled' : ''}>${pendingAnomalies.has(anomalyKey(a)) ? 'Preparing…' : 'Explain with AI'}</button>` : ''}</div>
+        `).join('') : '<p class="card-subtitle">No spikes detected today.</p>'}
+        <p id="anomaly-ai-error" class="ai-note" role="status"></p>
+      </section>
 
       <div class="grid-12">
         <div class="col-7 card chart-container">
@@ -680,6 +694,10 @@ async function overview() {
       </div>
     `,
     after: () => {
+      document.querySelectorAll('.anomaly-explain').forEach(btn => {
+        const a = anomalies.anomalies[Number(btn.dataset.index)];
+        wireAnomalyExplain(btn, a);
+      });
       if (days.length) {
         chart(
           'c-daily',
@@ -1339,7 +1357,7 @@ function renderDiagnosis(d, cached) {
   return root;
 }
 
-function renderDiagnosePreview(sessionId, preview, onDone) {
+function renderDiagnosePreview(sessionId, preview, onDone, post = postDiagnose) {
   const root = mk('div', 'ai-diagnosis');
   const agent = preview.model ? `${preview.agent} (${preview.model})` : preview.agent;
   root.append(
@@ -1361,10 +1379,10 @@ function renderDiagnosePreview(sessionId, preview, onDone) {
     send.textContent = 'Sending…';
     status.textContent = '';
     try {
-      const r = await postDiagnose(sessionId, preview.confirmationHash);
+      const r = await post(sessionId, preview.confirmationHash);
       if (r.status === 'ok') return onDone(r);
       // Data changed since the preview: show the fresh one instead of sending stale consent.
-      openSlideOver('Review before sending', renderDiagnosePreview(sessionId, r.preview, onDone));
+      openSlideOver('Review before sending', renderDiagnosePreview(sessionId, r.preview, onDone, post));
     } catch (err) {
       status.textContent = err.message;
       send.disabled = cancel.disabled = false;
@@ -1376,6 +1394,40 @@ function renderDiagnosePreview(sessionId, preview, onDone) {
   root.append(pre, status, actions);
   queueMicrotask(() => send.focus());
   return root;
+}
+
+function wireAnomalyExplain(btn, anomaly) {
+  const post = async (_id, confirm) => {
+    const response = await fetch('/api/ai/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: anomaly.day, project: String(anomaly.projectId), agent: anomaly.agent, ...(confirm ? { confirm } : {}) }) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'Could not prepare the explanation. Try again.');
+    return body;
+  };
+  const showResult = result => {
+    const root = mk('div', 'ai-diagnosis');
+    root.append(mk('p', 'ai-summary', result.explanation));
+    if (result.cached) root.append(mk('p', 'ai-note', 'Saved result from an earlier run. Nothing was sent.'));
+    root.append(mk('p', 'ai-note', 'AI interpretation of structured metadata. Causes are unverified; the detected spike is unchanged.'));
+    openSlideOver('AI explanation', root);
+    $('#slide-over-close')?.focus();
+  };
+  btn.addEventListener('click', async () => {
+    const key = anomalyKey(anomaly);
+    if (pendingAnomalies.has(key)) return;
+    pendingAnomalies.add(key);
+    btn.disabled = true; btn.textContent = 'Preparing…'; $('#anomaly-ai-error').textContent = '';
+    // A rerender during the request replaces the button, so look the live one up again by identity.
+    const settle = () => { pendingAnomalies.delete(key); const live = anomalyButton(key) || btn; live.disabled = false; live.textContent = 'Explain with AI'; live.focus(); };
+    try {
+      const result = await post(null);
+      settle();
+      if (result.status === 'ok') showResult(result);
+      else openSlideOver('Review before sending', renderDiagnosePreview(null, result.preview, showResult, post));
+    } catch (e) {
+      settle(); const status = $('#anomaly-ai-error'); if (status) status.textContent = e.message;
+    }
+  });
 }
 
 function wireExplainWithAi(btn, sessionId) {

@@ -19,6 +19,7 @@ import { diagnoseSession } from './ai/diagnose.ts';
 import { cachedRecommendations, enrichRecommendations } from './ai/recommendations.ts';
 import type { DiagnosisErrorCode, DiagnosisRunner } from './ai/diagnose.ts';
 import { detectAnomalies } from './anomaly.ts';
+import { explainAnomaly } from './ai/explain.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -372,6 +373,30 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
           const result = await enrichRecommendations(db, getRecommendations(db), { confirm: input.confirm, preview: input.preview, runner: opts.aiRunner });
           const status = result.status === 'error' ? AI_ERROR_STATUS[result.code] ?? 502 : 200;
           send(res, status, 'application/json', JSON.stringify(result));
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/ai/explain') {
+        const chunks: Buffer[] = []; let size = 0; let tooLarge = false;
+        req.on('data', (chunk: Buffer) => {
+          if (tooLarge) return;
+          size += chunk.length;
+          if (size > 16384) { tooLarge = true; req.resume(); send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' })); return; }
+          chunks.push(chunk);
+        });
+        req.on('end', async () => {
+          if (tooLarge) return;
+          const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
+          let input: any;
+          try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json(400, { error: 'invalid payload' }); }
+          if (!input || Array.isArray(input) || typeof input !== 'object' || typeof input.date !== 'string' || typeof input.project !== 'string' || !input.project ||
+            (input.agent !== undefined && (typeof input.agent !== 'string' || !input.agent)) || (input.confirm !== undefined && typeof input.confirm !== 'string')) return json(400, { error: 'invalid payload' });
+          const result = await explainAnomaly(db, input.date, input.project, { agent: input.agent, confirm: input.confirm, runner: opts.aiRunner });
+          if (result.status === 'error') return json(({ INVALID_DATE: 400, UNKNOWN_ANOMALY: 404, AMBIGUOUS_ANOMALY: 409 } as Record<string, number>)[result.code] ?? (AI_ERROR_STATUS as Record<string, number>)[result.code] ?? 502, { error: result.message, code: result.code });
+          if (result.status === 'ok') return json(200, result);
+          const { agent, model, prompt, confirmationHash } = result.preview;
+          return json(200, { status: result.status, preview: { agent, model, prompt, confirmationHash } });
         });
         return;
       }
