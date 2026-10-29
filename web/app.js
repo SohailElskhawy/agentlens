@@ -418,14 +418,18 @@ async function updateNavBadges() {
   } catch {}
 }
 
-function openSlideOver(title, contentHtml) {
+let slideOverReturnFocus = null;
+
+function openSlideOver(title, content) {
   const el = $('#slide-over');
   const backdrop = $('#slide-over-backdrop');
   const titleEl = $('#slide-over-title');
   const bodyEl = $('#slide-over-body');
   if (!el || !backdrop) return;
   titleEl.textContent = title;
-  bodyEl.innerHTML = contentHtml;
+  if (typeof content === 'string') bodyEl.innerHTML = content;
+  else bodyEl.replaceChildren(content); // DOM nodes keep model-generated text out of innerHTML
+  if (!el.classList.contains('open')) slideOverReturnFocus = document.activeElement; // keep the original opener across panel swaps
   el.classList.add('open');
   backdrop.classList.add('open');
   el.setAttribute('aria-hidden', 'false');
@@ -440,6 +444,9 @@ function closeSlideOver() {
   backdrop.classList.remove('open');
   el.setAttribute('aria-hidden', 'true');
   backdrop.setAttribute('aria-hidden', 'true');
+  if (slideOverReturnFocus?.isConnected) slideOverReturnFocus.focus();
+  else if (slideOverReturnFocus?.id === 'btn-explain-ai') $('#btn-explain-ai')?.focus();
+  slideOverReturnFocus = null;
 }
 
 function openShortcutsModal() {
@@ -1276,10 +1283,130 @@ async function sessionsPage() {
   };
 }
 
+// Builds DOM with textContent only: prompt and model text must never reach innerHTML.
+function mk(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+async function postDiagnose(sessionId, confirm) {
+  const r = await fetch('/api/ai/diagnose', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(confirm ? { sessionId, confirm } : { sessionId }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const hint = {
+      AI_DISABLED: 'AI is turned off. Run `agentlens ai enable` to opt in, then reload.',
+      AI_INVALID_SETTINGS: 'Your AI settings are invalid. Check them with `agentlens ai status`.',
+      AI_DAILY_LIMIT: 'The daily AI call limit is reached. Try again tomorrow or raise ai_max_calls_per_day.',
+      UNKNOWN_SESSION: 'This session is no longer available. Reload the page.',
+      AI_PROVIDER_UNSUPPORTED: 'Only the Claude Code CLI is supported for diagnosis. Set ai_agent to auto or claude.',
+      AI_RUN_FAILED: 'The AI CLI did not complete. Check that it is installed and signed in, then try again.',
+      AI_INVALID_OUTPUT: 'The AI answered in an unexpected format. Try again; nothing was saved.',
+    }[body.code];
+    throw new Error(hint || 'Could not reach agentlens. Reload the page and try again.');
+  }
+  return body;
+}
+
+function renderDiagnosis(d, cached) {
+  const root = mk('div', 'ai-diagnosis');
+  root.append(mk('p', 'ai-summary', d.summary));
+  if (cached) root.append(mk('p', 'ai-note', 'Saved result from an earlier run. Nothing was sent.'));
+  if (d.causes.length) {
+    root.append(mk('h4', 'ai-heading', 'Likely causes'));
+    for (const c of d.causes) {
+      const item = mk('div', 'ai-item');
+      item.append(mk('strong', null, c.cause), mk('p', null, c.evidence),
+        mk('span', 'badge', `~${fmtInt(Math.round(c.est_tokens))} tokens, unverified AI estimate`));
+      root.append(item);
+    }
+  }
+  if (d.fixes.length) {
+    root.append(mk('h4', 'ai-heading', 'Suggested fixes'));
+    for (const f of d.fixes) {
+      const item = mk('div', 'ai-item');
+      item.append(mk('strong', null, f.action), mk('p', 'ai-note', f.where));
+      if (f.snippet.trim()) item.append(mk('pre', 'ai-pre', f.snippet));
+      root.append(item);
+    }
+  }
+  root.append(mk('p', 'ai-note', 'AI-generated from structured session metadata. Token figures are model estimates, not measurements.'));
+  return root;
+}
+
+function renderDiagnosePreview(sessionId, preview, onDone) {
+  const root = mk('div', 'ai-diagnosis');
+  const agent = preview.model ? `${preview.agent} (${preview.model})` : preview.agent;
+  root.append(
+    mk('p', 'ai-summary', `This sends the data below to your configured provider (${agent}) and uses its quota. Nothing is sent until you confirm.`),
+    mk('h4', 'ai-heading', 'Exact prompt'),
+  );
+  const pre = mk('pre', 'ai-pre ai-prompt', preview.prompt);
+  pre.tabIndex = 0; // scrollable region must be keyboard reachable
+  pre.setAttribute('aria-label', 'Exact prompt that will be sent');
+  const status = mk('p', 'ai-note');
+  status.setAttribute('role', 'status');
+  const send = mk('button', 'btn btn-sm', `Send to ${preview.agent}`);
+  send.type = 'button';
+  const cancel = mk('button', 'btn btn-sm btn-outline', 'Cancel');
+  cancel.type = 'button';
+  cancel.addEventListener('click', closeSlideOver);
+  send.addEventListener('click', async () => {
+    send.disabled = cancel.disabled = true;
+    send.textContent = 'Sending…';
+    status.textContent = '';
+    try {
+      const r = await postDiagnose(sessionId, preview.confirmationHash);
+      if (r.status === 'ok') return onDone(r);
+      // Data changed since the preview: show the fresh one instead of sending stale consent.
+      openSlideOver('Review before sending', renderDiagnosePreview(sessionId, r.preview, onDone));
+    } catch (err) {
+      status.textContent = err.message;
+      send.disabled = cancel.disabled = false;
+      send.textContent = `Send to ${preview.agent}`;
+    }
+  });
+  const actions = mk('div', 'ai-actions');
+  actions.append(send, cancel);
+  root.append(pre, status, actions);
+  queueMicrotask(() => send.focus());
+  return root;
+}
+
+function wireExplainWithAi(btn, sessionId) {
+  const label = btn.textContent;
+  const err = $('#ai-error');
+  const showResult = (r) => {
+    openSlideOver('AI explanation', renderDiagnosis(r.diagnosis, r.cached));
+    $('#slide-over-close')?.focus();
+  };
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Preparing…';
+    if (err) err.textContent = '';
+    const reset = () => { btn.disabled = false; btn.textContent = label; btn.focus(); }; // focus first so closing the panel returns here
+    try {
+      const r = await postDiagnose(sessionId);
+      reset();
+      if (r.status === 'ok') showResult(r);
+      else openSlideOver('Review before sending', renderDiagnosePreview(sessionId, r.preview, showResult));
+    } catch (e) {
+      reset();
+      if (err) err.textContent = e.message;
+    }
+  });
+}
+
 async function sessionPage(id) {
-  const [d, timeline] = await Promise.all([
+  const [d, timeline, aiState] = await Promise.all([
     api('session', { id: decodeURIComponent(id) }),
     api('session/timeline', { id: decodeURIComponent(id) }).catch(() => null),
+    api('ai/status').catch(() => null),
   ]);
   if (!d) return { html: emptyState('Session not found', 'It may not have been ingested yet; check System Health.', '<a href="#/sessions" class="btn btn-sm">Back to Sessions</a>') };
 
@@ -1300,9 +1427,11 @@ async function sessionPage(id) {
           </p>
         </div>
         <div class="page-actions">
+          ${aiState?.enabled ? '<button type="button" id="btn-explain-ai" class="btn btn-sm">Explain with AI</button>' : ''}
           <a href="#/sessions" class="btn btn-sm btn-outline">&larr; All Sessions</a>
         </div>
       </div>
+      ${aiState?.enabled ? '<p id="ai-error" class="ai-error" role="alert"></p>' : ''}
 
       <section class="kpi-grid">
         ${tile('Measured Tokens', fmtTok(d.totals.tokens), `${fmtTok(d.totals.cacheRead)} cache read`)}
@@ -1366,6 +1495,8 @@ async function sessionPage(id) {
       ` : ''}
     `,
     after: () => {
+      const explain = $('#btn-explain-ai');
+      if (explain) wireExplainWithAi(explain, d.id);
       if (turns && turns.length) {
         chart('c-timeline', turns.map((t, idx) => t.turnIndex || (idx + 1)), [
           { label: 'Cache read', color: '#10b981', data: turns.map((t) => t.cacheRead || 0) },
