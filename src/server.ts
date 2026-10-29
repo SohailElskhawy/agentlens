@@ -1,4 +1,4 @@
-import { createServer, type Server, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { homedir } from 'node:os';
@@ -40,6 +40,45 @@ const filterOf = (sp: URLSearchParams): Filter => ({ from: num(sp, 'from'), to: 
 function send(res: ServerResponse, status: number, type: string, body: string | Buffer) {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
   res.end(body);
+}
+
+const MAX_BODY_BYTES = 16384;
+
+// Shared bounded request-body reader for every POST route. Counts bytes before
+// decoding (the cap is UTF-8 bytes, not UTF-16 units), collects only chunks that
+// fit, decodes once at the end so split multi-byte chars survive, responds 413 at
+// most once and drains the request so the client still reads the response.
+// onEnd never runs for oversized, aborted or errored requests; buffers are
+// released and "error" events are handled so a disconnect cannot crash the server.
+function readBody(req: IncomingMessage, res: ServerResponse, onEnd: (body: string) => void) {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  let settled = false;
+  const settle = () => { settled = true; chunks.length = 0; };
+  req.on('data', (c: Buffer) => {
+    if (settled) return;
+    size += c.length;
+    if (size > MAX_BODY_BYTES) {
+      settle();
+      req.resume(); // drain the rest so the client can read our single 413
+      return send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+    }
+    chunks.push(c);
+  });
+  req.on('end', () => {
+    if (settled) return;
+    const body = Buffer.concat(chunks).toString('utf8');
+    settle();
+    try {
+      onEnd(body);
+    } catch (e) {
+      send(res, 500, 'application/json', JSON.stringify({ error: (e as Error).message }));
+    }
+  });
+  req.on('error', () => settle()); // client aborted/destroyed mid-body: let go, keep buffers claimed
+  req.on('aborted', () => settle());
+  req.on('close', () => settle());
+  res.on('error', () => settle()); // socket died before we could write; nothing to send
 }
 
 const AI_ERROR_STATUS: Record<DiagnosisErrorCode, number> = {
@@ -200,19 +239,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
           return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid id encoding' }));
         }
 
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           try {
             const json = JSON.parse(body);
             const VALID_STATUSES = new Set(['open', 'accepted', 'measuring', 'verified', 'no_effect', 'regressed', 'dismissed']);
@@ -249,19 +276,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/reports/generate') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           let week: string | undefined;
           try {
             if (body.trim()) {
@@ -286,19 +301,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/discover') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', async () => {
-          if (tooLarge) return;
+        readBody(req, res, async (body) => {
           let opts: any = {};
           try {
             if (body.trim()) opts = JSON.parse(body);
@@ -325,19 +328,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/settings') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           try {
             const json = JSON.parse(body || '{}');
             if (typeof json.key === 'string' && json.key.startsWith('ai_')
@@ -358,38 +349,23 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/ai/recommendations') {
-        const chunks: Buffer[] = []; let size = 0; let tooLarge = false;
-        req.on('data', (c: Buffer) => {
-          if (tooLarge) return;
-          size += c.length;
-          if (size > 16384) { tooLarge = true; req.resume(); send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' })); return; }
-          chunks.push(c);
-        });
-        req.on('end', async () => {
-          if (tooLarge) return;
+        readBody(req, res, async (body) => {
+          const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
           let input: any;
-          try { input = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' })); }
-          if (!input || typeof input !== 'object' || Array.isArray(input) || (input.confirm !== undefined && (typeof input.confirm !== 'string' || !/^[a-f0-9]{64}$/.test(input.confirm))) || (input.preview !== undefined && typeof input.preview !== 'boolean') || (input.preview && input.confirm)) return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+          try { input = JSON.parse(body || '{}'); } catch { return json(400, { error: 'invalid payload' }); }
+          if (!input || typeof input !== 'object' || Array.isArray(input) || (input.confirm !== undefined && (typeof input.confirm !== 'string' || !/^[a-f0-9]{64}$/.test(input.confirm))) || (input.preview !== undefined && typeof input.preview !== 'boolean') || (input.preview && input.confirm)) return json(400, { error: 'invalid payload' });
           const result = await enrichRecommendations(db, getRecommendations(db), { confirm: input.confirm, preview: input.preview, runner: opts.aiRunner });
           const status = result.status === 'error' ? AI_ERROR_STATUS[result.code] ?? 502 : 200;
-          send(res, status, 'application/json', JSON.stringify(result));
+          json(status, result);
         });
         return;
       }
 
       if (req.method === 'POST' && url.pathname === '/api/ai/explain') {
-        const chunks: Buffer[] = []; let size = 0; let tooLarge = false;
-        req.on('data', (chunk: Buffer) => {
-          if (tooLarge) return;
-          size += chunk.length;
-          if (size > 16384) { tooLarge = true; req.resume(); send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' })); return; }
-          chunks.push(chunk);
-        });
-        req.on('end', async () => {
-          if (tooLarge) return;
+        readBody(req, res, async (body) => {
           const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
           let input: any;
-          try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json(400, { error: 'invalid payload' }); }
+          try { input = JSON.parse(body); } catch { return json(400, { error: 'invalid payload' }); }
           if (!input || Array.isArray(input) || typeof input !== 'object' || typeof input.date !== 'string' || typeof input.project !== 'string' || !input.project ||
             (input.agent !== undefined && (typeof input.agent !== 'string' || !input.agent)) || (input.confirm !== undefined && typeof input.confirm !== 'string')) return json(400, { error: 'invalid payload' });
           const result = await explainAnomaly(db, input.date, input.project, { agent: input.agent, confirm: input.confirm, runner: opts.aiRunner });
@@ -402,24 +378,10 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/ai/diagnose') {
-        const chunks: Buffer[] = [];
-        let size = 0;
-        let tooLarge = false;
-        req.on('data', (c: Buffer) => {
-          if (tooLarge) return;
-          size += c.length;
-          chunks.push(c);
-          if (size > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', async () => {
-          if (tooLarge) return;
+        readBody(req, res, async (body) => {
           const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
           let input: any;
-          try { input = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return json(400, { error: 'invalid payload' }); }
+          try { input = JSON.parse(body || '{}'); } catch { return json(400, { error: 'invalid payload' }); }
           const { sessionId, confirm } = input ?? {};
           if (typeof sessionId !== 'string' || !sessionId || (confirm !== undefined && typeof confirm !== 'string')) {
             return json(400, { error: 'sessionId (string) and optional confirm (string) are required' });
@@ -434,19 +396,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/fix/prompt') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           try {
             const json = JSON.parse(body || '{}');
             const prompt = generateFixPrompt(json);
@@ -459,19 +409,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/fix/run') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', async () => {
-          if (tooLarge) return;
+        readBody(req, res, async (body) => {
           try {
             const json = JSON.parse(body || '{}');
             const { agent, prompt, projectId, recommendationId, headless } = json;
@@ -504,19 +442,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/project/budget') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           try {
             const json = JSON.parse(body || '{}');
             const { projectId, budgetTokens, budgetCost } = json;
