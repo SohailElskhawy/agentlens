@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb, setSetting, upsertEvents, upsertFindings, upsertSessions } from '../src/db.ts';
 import type { DB } from '../src/db.ts';
 import { diagnoseSession, parseDiagnosis, prepareDiagnosis, renderDiagnosisMarkdown, worstSessions } from '../src/ai/diagnose.ts';
+import { sessionDigest } from '../src/ai/payload.ts';
 import { runAnalyst } from '../src/ai/runner.ts';
 import { tmp } from './helpers.ts';
 
@@ -224,6 +225,45 @@ test('worstSessions orders by summed finding estimates, ties by id, optionally p
   assert.deepEqual(worstSessions(db, 10, project), ['a', 'b']);
   assert.deepEqual(worstSessions(db, 10, 999), []);
   db.close();
+});
+
+test('diagnose prompt demands cited, labeled claims and forbids overclaiming', () => {
+  const db = enabled();
+  const prepared = prepareDiagnosis(db, 's1');
+  assert.equal(prepared.status, 'ready');
+  if (prepared.status !== 'ready') return;
+  const { prompt } = prepared.preview;
+  // every claim must cite a supplied field and carry observation/hypothesis/unknown
+  assert.ok(prompt.includes('cite') && prompt.includes('field'), 'citation requirement');
+  for (const label of ['observation', 'hypothesis', 'unknown']) assert.ok(prompt.includes(label), `${label} label missing`);
+  assert.match(prompt, /"kind":"observation"/);
+  // abandoned_session alone proves nothing about outcome or intent
+  assert.match(prompt, /abandoned_session/);
+  assert.match(prompt, /neither outcome nor intent/i);
+  // conditional fixes only; no invented details or savings numbers
+  assert.match(prompt, /no invented settings, commands, or precise savings numbers/);
+  db.close();
+});
+
+test('session digest labels sampling boundaries and units', () => {
+  const db = openDb(':memory:');
+  upsertSessions(db, [{ id: 'big', agent: 'claude', projectId: null, cwd: '/private/source' }]);
+  upsertEvents(db, Array.from({ length: 60 }, (_, i) => ({ id: `e-big${i}`, agent: 'claude', sessionId: 'big', ts: i + 1, kind: 'assistant', model: 'claude-sonnet', input: 10, output: 5 })));
+  upsertFindings(db, [{ id: 'f-big', rule: 'retry_loop', projectId: null, sessionId: 'big', evidence: { tool: 'Bash', count: 3 }, confidence: 'high', confidenceReason: '', estTokensWeek: 50, firstSeen: 1, lastSeen: 1 }]);
+  const digest = sessionDigest(db, 'big');
+  assert.equal(digest.sampling.turns, '40 sampled turns of 60 total');
+  assert.equal(digest.sampling.toolResultBytes, 'aggregate bytes, not per-command');
+  // short sessions state that the sample covers everything
+  upsertSessions(db, [{ id: 'small', agent: 'claude', projectId: null, cwd: '/private/source' }]);
+  upsertEvents(db, [{ id: 'e-small', agent: 'claude', sessionId: 'small', ts: 1, kind: 'assistant', model: 'claude-sonnet', input: 10, output: 5 }]);
+  assert.equal(sessionDigest(db, 'small').sampling.turns, '1 sampled turns of 1 total');
+  db.close();
+});
+
+test('parseDiagnosis keeps a valid kind label and rejects invented ones', () => {
+  const kinded = { summary: 's', causes: [{ cause: 'c', evidence: 'e', est_tokens: 5, kind: 'hypothesis' }], fixes: [] };
+  assert.deepEqual(parseDiagnosis(JSON.stringify(kinded)), kinded);
+  assert.deepEqual(parseDiagnosis(JSON.stringify({ ...kinded, causes: [{ ...kinded.causes[0], kind: 'certainty' }] })), null);
 });
 
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));

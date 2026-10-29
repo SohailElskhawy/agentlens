@@ -15,11 +15,17 @@ export function redact(text: string): string {
 export function buildPrompt(kind: string, data: unknown): { prompt: string; inputHash: string } {
   // Redact strings before JSON escapes newlines, then redact the serialized result too.
   const serialized = JSON.stringify(data, (key, value: unknown) => typeof value === 'string' ? redact(value) : value);
-  let prompt = redact(`Analyze this ${kind} structured data. Return JSON {"summary":string,"causes":[{"cause":string,"evidence":string,"est_tokens":number}],"fixes":[{"action":string,"where":string,"snippet":string}]}\n${serialized}`);
+  const rules = kind === 'diagnose' ? DIAGNOSE_RULES : '';
+  let prompt = redact(`Analyze this ${kind} structured data. Return JSON {"summary":string,"causes":[{"cause":string,"evidence":string,"est_tokens":number${kind === 'diagnose' ? ',"kind":"observation"' : ''}}],"fixes":[{"action":string,"where":string,"snippet":string}]}${rules}\n${serialized}`);
   const marker = '\n[truncated]';
   if (prompt.length > 12000) prompt = prompt.slice(0, 12000 - marker.length) + marker;
   return { prompt, inputHash: createHash('sha256').update(prompt).digest('hex') };
 }
+
+const DIAGNOSE_RULES = `\nRules: every claim must stay inside what the payload shows.
+- Each cause must cite the exact field or value it is based on and carry kind: "observation" (shown in the payload), "hypothesis" (plausible but unproven), or "unknown" (the sample does not show it).
+- abandoned_session alone proves neither outcome nor intent; never infer wasted work, unfinished tasks or work beyond usefulness from that flag.
+- Give a small number of conditional fixes tied to the cited evidence, with no invented settings, commands, or precise savings numbers.`;
 
 const metadata = (value: unknown) => typeof value === 'string' && /^[\w.:-]{1,100}$/.test(value) ? value : null;
 
@@ -35,6 +41,10 @@ export function sessionDigest(db: DB, id: string) {
     tools: detail.tools.slice(0, 20).map(t => ({ tool: metadata(t.tool), calls: t.calls, resultBytes: t.resultBytes, errors: t.errors })),
     totals: { input: detail.totals.input, output: detail.totals.output, cacheRead: detail.totals.cacheRead,
       cacheWrite: detail.totals.cacheWrite, reasoning: detail.totals.reasoning },
+    sampling: {
+      turns: `${Math.min(40, timeline.turns.length)} sampled turns of ${timeline.turns.length} total`,
+      toolResultBytes: 'aggregate bytes, not per-command',
+    },
     turnCount: timeline.turns.length,
     turns: timeline.turns.slice(0, 40).map(t => ({ model: metadata(t.model), input: t.input, output: t.output,
       cacheRead: t.cacheRead, cacheWrite: t.cacheWrite, reasoning: t.reasoning, contextSize: t.contextSize })),

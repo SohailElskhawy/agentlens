@@ -9,7 +9,7 @@ import type { AnalystAgent } from './runner.ts';
 
 export interface Diagnosis {
   summary: string;
-  causes: { cause: string; evidence: string; est_tokens: number }[];
+  causes: { cause: string; evidence: string; est_tokens: number; kind?: 'observation' | 'hypothesis' | 'unknown' }[];
   fixes: { action: string; where: string; snippet: string }[];
 }
 
@@ -76,10 +76,12 @@ export function parseDiagnosis(text: string): Diagnosis | null {
   try { raw = JSON.parse(body); } catch { return null; }
   if (!obj(raw) || !str(raw.summary, MAX_LONG) || !Array.isArray(raw.causes) || !Array.isArray(raw.fixes)
     || raw.causes.length > MAX_ITEMS || raw.fixes.length > MAX_ITEMS) return null;
+  const kinds = ['observation', 'hypothesis', 'unknown'];
   const causes: Diagnosis['causes'] = [];
   for (const c of raw.causes) {
     if (!obj(c) || !str(c.cause) || !str(c.evidence) || typeof c.est_tokens !== 'number' || !Number.isFinite(c.est_tokens) || c.est_tokens < 0) return null;
-    causes.push({ cause: c.cause, evidence: c.evidence, est_tokens: c.est_tokens });
+    if (c.kind !== undefined && (typeof c.kind !== 'string' || !kinds.includes(c.kind))) return null;
+    causes.push({ cause: c.cause, evidence: c.evidence, est_tokens: c.est_tokens, ...(c.kind !== undefined && { kind: c.kind as 'observation' | 'hypothesis' | 'unknown' }) });
   }
   const fixes: Diagnosis['fixes'] = [];
   for (const f of raw.fixes) {
