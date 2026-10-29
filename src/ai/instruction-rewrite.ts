@@ -5,6 +5,7 @@ import { CHARS_PER_TOKEN } from '../audit/constants.ts';
 import { trimInstructions } from '../audit/trimmer.ts';
 import type { InstructionItem } from '../audit/scanners/instruction.ts';
 import type { DB } from '../db.ts';
+import { MAX_BOUNDED_READ_BYTES } from './constants.ts';
 import { confirmedAnalysis } from './confirmed.ts';
 import type { AnalysisPreview } from './confirmed.ts';
 import type { DiagnosisRunner } from './diagnose.ts';
@@ -22,8 +23,8 @@ function readTarget(path: string): string {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const st = fstatSync(fd);
-    if (!st.isFile() || st.size > 10000) throw Error('Target must be a regular file of at most 10000 bytes');
-    const buffer = Buffer.alloc(10001); const n = readSync(fd, buffer, 0, buffer.length, 0);
+    if (!st.isFile() || st.size > MAX_BOUNDED_READ_BYTES) throw Error(`Target must be a regular file of at most ${MAX_BOUNDED_READ_BYTES} bytes`);
+    const buffer = Buffer.alloc(MAX_BOUNDED_READ_BYTES + 1); const n = readSync(fd, buffer, 0, buffer.length, 0);
     const after = fstatSync(fd);
     if (n !== st.size || after.size !== st.size || after.mtimeMs !== st.mtimeMs || after.ctimeMs !== st.ctimeMs) throw Error('Target changed while reading');
     const bytes = buffer.subarray(0, n); const content = bytes.toString('utf8');
@@ -119,7 +120,7 @@ export async function rewriteInstructions(db: DB, path: string, opts: { preview?
       const fd = openSync(file, constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
         const st = fstatSync(fd); const pathStat = lstatSync(file);
-        if (!st.isFile() || st.size > 10000 || st.ino !== pathStat.ino || st.dev !== pathStat.dev) return fail('Target changed since preview or during analysis');
+        if (!st.isFile() || st.size > MAX_BOUNDED_READ_BYTES || st.ino !== pathStat.ino || st.dev !== pathStat.dev) return fail('Target changed since preview or during analysis');
         const buffer = Buffer.alloc(st.size); const bytes = readSync(fd, buffer, 0, st.size, 0);
         if (bytes !== st.size || buffer.toString('utf8') !== original) return fail('Target changed since preview or during analysis');
         try { writeFileSync(file + '.bak', buffer, { flag: 'wx', mode: st.mode }); } catch { return fail('Could not create backup; an existing backup is never overwritten'); }
