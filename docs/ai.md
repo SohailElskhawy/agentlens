@@ -103,6 +103,17 @@ measurements and not realized results. It never creates or changes findings, sco
 
 Sanitized help-only check: Claude Code `2.1.312` reports `--print`, `--output-format`, `--no-session-persistence`, `--safe-mode`, `--restricted`, `--strict-mcp-config`, `--disable-slash-commands`, and `--tools`. The check passed these isolation flags to `--help`; no model was invoked.
 
+### Provider Isolation Matrix
+
+Every analyst provider must guarantee tool-free execution, hook/plugin/skill suppression, ephemeral session handling (no self-ingestion), and preserved subscription authentication.
+
+| Provider | Status | Verified flags | Missing guarantees / reason |
+| --- | --- | --- | --- |
+| `claude` | **Supported** | `-p --output-format json --no-session-persistence --safe-mode --restricted --strict-mcp-config --disable-slash-commands --tools ""` | None — verified via pre-flight `--help` capability probe before execution. |
+| `codex` | **Fail-closed** (`AI_PROVIDER_UNSUPPORTED`) | `exec -s read-only --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check` | No CLI flag to disable built-in shell/read tools (`--tools ""`); `read-only` sandbox still allows model-generated shell commands and disk reads. |
+| `gemini` | **Fail-closed** (`AI_PROVIDER_UNSUPPORTED`) | `-p -o json --approval-mode plan` | No `--no-session-persistence` flag (writes `~/.gemini/history` and session logs); loads all extensions by default unless restricted; `plan` mode still permits read-only file/search/MCP tools. |
+| `opencode` | **Fail-closed** (`AI_PROVIDER_UNSUPPORTED`) | `run --standalone --format json` | No `--ephemeral` or `--no-session-persistence` flag (writes `opencode.db`); no CLI flags to disable configured tools, plugins, skills, or MCP servers. |
+
 ## Instruction rewrite
 
 `agentlens optimize /path/to/AGENTS.md --ai --preview` displays the exact redacted prompt and confirmation hash. After reviewing it, enable AI and run `agentlens optimize /path/to/AGENTS.md --ai --confirm HASH` to request a candidate and display its diff. Add `--apply` to write an accepted candidate and create `AGENTS.md.bak`; an existing backup is never overwritten. `CLAUDE.md` is also supported. A directory is accepted only when it contains exactly one readable supported file. The AI path does not run the ordinary workspace optimization. Without `--ai`, ordinary optimization is unchanged.
