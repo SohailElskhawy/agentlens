@@ -157,3 +157,16 @@ test('checkLiveAlerts fires when project budget crosses 80% and 100%', () => {
   assert.match(notifications[1].title, /Project Budget Exceeded/);
   assert.match(notifications[1].body, /exceeded 100%/);
 });
+
+test('checkLiveAlerts ignores retry loops in temporary projects', () => {
+  clearAlertDebounceCache();
+  const db = openDb(':memory:');
+  const now = Date.now();
+  const projId = upsertProject(db, '/tmp/scratch-project', 'scratch');
+  upsertSessions(db, [{ id: 'sess-temp', agent: 'claude', cwd: '/tmp/scratch-project', projectId: projId }]);
+  upsertEvents(db, [0, 1, 2, 3].map((i) => ({
+    id: `t-${i}`, agent: 'claude' as const, sessionId: 'sess-temp', ts: now - (10 - i) * 60_000,
+    kind: 'tool_call' as const, tool: 'Bash', argsHash: 'hash-fail-cmd',
+  })));
+  assert.equal(checkLiveAlerts(db, { now, notifier: () => true }).length, 0);
+});
