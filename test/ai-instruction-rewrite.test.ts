@@ -48,17 +48,39 @@ test('apply backs up once and guards changed files and existing backups', async 
   }
 });
 
-test('redaction, stale content and failed runner never send without matching consent', async () => {
+test('stale content and failed runner never send without matching consent', async () => {
   const { db, file } = setup(); setSetting(db, 'ai_enabled', 'true');
-  put(file, original + '\nContact person@example.com\n');
   const p = await rewriteInstructions(db, file, { preview: true }); if (p.status !== 'confirmation_required') throw Error();
-  assert.ok(!p.preview.prompt.includes('person@example.com')); assert.ok(p.preview.prompt.includes('[REDACTED]'));
-  put(file, original + '\nContact other@example.com\n'); let calls = 0;
+  put(file, original + '\n\n\n- Another rule.\n'); let calls = 0;
   const runner = async () => { calls++; return { ok: false, text: '' }; };
   assert.equal((await rewriteInstructions(db, file, { confirm: p.preview.confirmationHash, runner })).status, 'confirmation_required'); assert.equal(calls, 0);
   const fresh = await rewriteInstructions(db, file, { preview: true }); if (fresh.status !== 'confirmation_required') throw Error();
   assert.equal((await rewriteInstructions(db, file, { confirm: fresh.preview.confirmationHash, runner })).status, 'error'); assert.equal(calls, 1);
   db.close();
+});
+
+test('refuses before any request when redaction would alter the file or blank lines cannot save 10%', async () => {
+  for (const text of [original + 'Contact person@example.com\n', original + 'See /home/alice/notes.md\n', '# Rules\n- One.\n- Two.\n']) {
+    const { db, file } = setup(); setSetting(db, 'ai_enabled', 'true'); put(file, text); let calls = 0;
+    const runner = async () => { calls++; return { ok: true, text: JSON.stringify({ content: compact }) }; };
+    for (const opts of [{ preview: true }, { runner, confirm: 'a'.repeat(64) }]) {
+      const r = await rewriteInstructions(db, file, opts); assert.equal(r.status, 'error');
+    }
+    assert.equal(calls, 0); assert.equal(readFileSync(file, 'utf8'), text); db.close();
+  }
+});
+
+test('diff is a real unified diff that git apply accepts, with and without trailing newline', async () => {
+  const { spawnSync } = await import('node:child_process');
+  for (const [orig, cand] of [[original, compact], ['# Rules\n\n\n\n\n\n- Keep all tests passing.\n\n\n\n\n\n- Never execute generated commands.', compact.trimEnd()]]) {
+    const { db, file } = setup(); setSetting(db, 'ai_enabled', 'true'); put(file, orig);
+    const p = await rewriteInstructions(db, file, { preview: true }); if (p.status !== 'confirmation_required') throw Error();
+    const r = await rewriteInstructions(db, file, { runner: output(cand), confirm: p.preview.confirmationHash });
+    if (r.status !== 'ok') throw Error(JSON.stringify(r));
+    const dir = join(file, '..'); put(join(dir, 'd.patch'), r.diff + '\n');
+    const git = spawnSync('git', ['apply', '--unsafe-paths', '--directory=.', 'd.patch'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(git.status, 0, git.stderr); assert.equal(readFileSync(file, 'utf8'), cand); db.close();
+  }
 });
 
 test('CLI requires explicit AI and provides a preview without a call', async () => {
