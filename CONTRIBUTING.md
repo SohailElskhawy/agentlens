@@ -24,7 +24,7 @@ Before writing code, please keep these non-negotiable principles in mind:
 4. **Deterministic & Lightweight (AI is optional and separate):**
    - Analyzers must be deterministic, transparent, and fast.
    - Background monitoring must consume minimal CPU/memory (systemd default `MemoryMax=200M`, `Nice=10`) and zero agent token budget.
-   - AI features live in `src/ai/`, are off unless `ai_enabled` is `true`, and never run from ingest, `serve`, or any background path. They send structured, redacted data only, require exact-hash preview confirmation for every new external call, cache only validated output, and never write or alter deterministic findings, scores, IDs, or recommendations.
+   - AI features live in `src/ai/`, are off unless `ai_enabled` is `true` (independent of `allow_agent_launch`), and never run from ingest, `serve`, or any background path. They send redacted data only, preview the exact prompt (with its confirmation hash) before every send, require that hash to be confirmed for every new external call, cache only validated output, cap calls per day, and never write or alter deterministic findings, scores, IDs, or recommendations.
    - Tests must inject a fake runner: never spawn a real agent CLI or touch the network.
 
 ---
@@ -49,7 +49,7 @@ npm install
 We require all tests and typechecks to pass without warnings before merging:
 
 ```bash
-# Run the test suite (119+ tests)
+# Run the test suite
 npm test
 
 # Run TypeScript typechecker
@@ -76,20 +76,21 @@ npm start
 
 ### 1. Adding or Improving an Agent Adapter (`src/adapters/`)
 
-Each agent adapter implements the `AgentAdapter` interface:
+Each agent adapter implements the `Adapter` interface (`src/types.ts`), exported as a named object in `src/ingest.ts`:
 
 ```ts
-export interface AgentAdapter {
-  name: string; // 'claude' | 'codex' | 'opencode' | 'antigravity'
-  discover(home: string): string[];
-  read(filePath: string, cursor: AdapterCursor, options?: AdapterOptions): Promise<AdapterResult>;
-  quota?(home: string): QuotaSnapshot[] | Promise<QuotaSnapshot[]>;
+export interface Adapter {
+  agent: Agent;
+  root(home: string): string;          // directory to watch
+  discover(root: string): string[];    // absolute file paths to ingest
+  read(path: string, cursor: Cursor): ReadResult;
 }
 ```
 
-- Adapters must read incrementally using file offsets and line parsing.
-- Handle malformed, missing, or partial log lines gracefully without throwing unhandled exceptions.
-- Normalize events into `NormalizedEvent` records (`id`, `sessionId`, `ts`, `kind`, `model`, `input`, `output`, `cacheRead`, `cacheWrite`).
+- Adapters read incrementally using the byte-offset `cursor` and return the new `offset` in `ReadResult.cursor`.
+- Handle malformed, missing, or partial log lines gracefully; count them in `ReadResult.errors` / `skipped` instead of throwing.
+- Normalize events into `NormalizedEvent` records (`agent`, `id`, `sessionId`, `ts`, `kind`, `model`, `input`, `output`, `cacheRead`, `cacheWrite`).
+- Return quota observations (where the agent reports them, e.g. Codex) as `QuotaSnapshot[]` in `ReadResult.quotas`.
 
 ### 2. Adding a Workflow Waste Detector (`src/analyze/`)
 

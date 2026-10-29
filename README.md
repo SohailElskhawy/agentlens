@@ -23,17 +23,17 @@ It monitors how you use AI coding agents to **save tokens, avoid hitting subscri
 ## ⚡ Key Capabilities
 
 * **Unified Usage Dashboard (Fluid & Responsive):** Fluid full-width 12-column responsive layout, dense KPI bar, side-by-side uPlot canvas charts, dark/light token design system, collapsible sidebar, and slide-over drawers.
-* **"Fix Now" Project Action Runner:** Instant project fix panel ranking open recommendations by tokens saved, with one-click copyable prompts and opt-in "Send to agent" CLI dispatch (`claude`, `codex`, `opencode`) capturing live `git diff --stat`.
+* **"Fix Now" Project Action Runner:** Instant project fix panel ranking open recommendations by estimated tokens saved, with one-click copyable prompts and opt-in "Send to agent" CLI dispatch (`claude`, `codex`, `opencode`) capturing live `git diff --stat`.
 * **Quota Forecasting & Live Statusline:** Burn rate extrapolation projecting 5-hour and 7-day rate-limit exhaustion times before reset (< 10ms latency in statusline, CLI status, and dashboard top bar).
 * **Omarchy Quattro Desktop Bar Widget (`agentlens.bar-widget`):** Native Quickshell/QML top-bar pill and slide-out telemetry panel with reactive `FileView` watching (`~/.local/state/agentlens/summary.json`), multi-agent 5h/7d progress bars, live token burn velocity (`🔥 X/h`), Today's Activity KPIs, and one-click "Fix Now" prompt copy.
 * **Live Desktop Alerts:** Proactive notifications during `serve` for active retry loops, quota exhaustion predicted within 30 minutes, or project budgets crossing 80%/100%.
 * **Per-Project Weekly Budgets:** Configurable weekly token and cost targets per project with visual progress bars and weekly report integration.
 * **Cross-Agent Quota Balancing:** Evaluates quota headroom across agents to recommend optimal agent switching.
-* **14 Workflow Waste Detectors:** Deterministic detectors covering retry loops, repetitive file reads, context runaway, idle cache misses, large tool dumps, model mismatch, git outcome efficiency, abandoned sessions, compaction churn, and reasoning overuse.
+* **15 Workflow Waste Detectors:** Deterministic detectors covering retry loops, repetitive file reads, context runaway, idle cache misses, large tool dumps, model mismatch, git outcome efficiency, abandoned sessions, compaction churn, and reasoning overuse.
 * **Interactive Session Turn Timeline:** Per-turn stacked token charts (input, output, cache-read) with clickable detector event markers and finding slide-over views.
 * **Instruction Trimmer:** Generates non-destructive unified diffs proposing cuts for duplicate lines, conflicting rules, oversized code blocks, and stale paths across `CLAUDE.md`, `AGENTS.md`, and `GEMINI.md`.
 * **Configuration Audit:** Scans global and project instructions, MCP servers, skills, and plugins. Calculates fixed session token overhead and detects unused (30d), duplicate, or conflicting configurations.
-* **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked actions enriched with vetted open-source tools from `catalog.yaml`.
+* **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked actions enriched with vetted open-source tools from `catalog.yaml`. Finding `est_tokens_week` figures are heuristic estimates (capped by trailing-7-day usage of the finding's scope), not measurements; realized savings are only what `agentlens track` measures after an accepted recommendation.
 * **Automated Weekly Usage Reports:** Generates comprehensive Monday reports in GitHub-flavored Markdown and standalone dark/light HTML (`<dataDir>/reports/`), with native desktop notifications across Linux (`notify-send`), macOS (`osascript`), and Windows (PowerShell toast).
 * **Improvement Tracking with Quality Guardrails:** Tracks accepted recommendations across 14-day before/after windows, verifying real token savings while ensuring error rates and interaction turns don't regress.
 * **Flexible Exports & Prometheus Metrics:** CLI exporter (`agentlens export --format csv|json`), `GET /api/export.csv`, Prometheus `GET /metrics` text endpoint, and in-dashboard CSV table downloads.
@@ -82,7 +82,7 @@ flowchart TD
     subgraph CoreEngine["agentlens Core Engine (Zero External Deps)"]
         Adapters["Streaming Log & SQLite Adapters"]
         DB[("agentlens.db\n(node:sqlite)")]
-        Detectors["14 Workflow Waste Detectors"]
+        Detectors["15 Workflow Waste Detectors"]
         Audit["Config Audit & Instruction Trimmer"]
         Catalog["Curated Catalog\n(catalog.yaml)"]
         Reports["Weekly Report Generator\n(Markdown & HTML)"]
@@ -92,7 +92,7 @@ flowchart TD
     subgraph Outputs["Interfaces & Outputs"]
         Statusline["Live Statusline\n(< 10ms)"]
         Omarchy["Omarchy Quattro Bar Widget\n(agentlens.bar-widget)"]
-        CLI["agentlens CLI\n(status, audit, report, track, export, discover, plugin)"]
+        CLI["agentlens CLI\n(see CLI Reference below)"]
         WebUI["Local Web Dashboard\n(http://127.0.0.1:4711)"]
         Service["Background Service\n(systemd / launchd / schtasks)"]
         Metrics["Prometheus & CSV Exports\n(/metrics, /api/export.csv)"]
@@ -250,16 +250,18 @@ agentlens plugin uninstall
 | Command | Description |
 |---|---|
 | `agentlens serve` | Continuously ingest agent data and serve dashboard on `http://127.0.0.1:4711` |
-| `agentlens ingest` | Perform an incremental backfill of all 4 agents into SQLite and exit |
-| `agentlens export [--format csv\|json] [--type sessions\|daily\|findings] [--from <date>] [--to <date>] [--project <path>]` | Export session history, daily aggregates, or waste findings to CSV or JSON |
+| `agentlens ingest` | Perform an incremental backfill of all supported agents (Claude Code, Codex, OpenCode, Antigravity, Gemini CLI, Aider, Cursor) into SQLite and exit |
+| `agentlens export [--format csv\|json] [--type sessions\|daily\|findings\|all] [--from <date>] [--to <date>] [--project <path>] [--agent <agent>]` | Export session history, daily aggregates, or waste findings to CSV or JSON |
 | `agentlens status [--project <path>]` | Terminal summary of token usage, estimated costs, and active quotas |
 | `agentlens audit [--project <path>]` | Audit instruction overhead, unused MCPs/skills, duplicates, and conflicts |
 | `agentlens report [--week YYYY-Www] [--html] [--json]` | Generate and display weekly usage report |
 | `agentlens track [--project <path>]` | Display before/after improvement tracking for accepted recommendations |
 | `agentlens accept <id>` | Accept a recommendation and start 14-day improvement tracking |
 | `agentlens catalog [--rule <name>] [--json]` | Browse curated tool & MCP catalog mapped to waste patterns |
-| `agentlens discover [--query <terms>] [--dry-run] [--json]` | Opt-in discovery of agent tools and MCPs from GitHub |
+| `agentlens discover [--query <terms>] [--dry-run] [--json] [--token <pat>]` | Opt-in discovery of agent tools and MCPs from GitHub |
 | `agentlens statusline` | Streamlined stdin processor for Claude Code statusline payload |
+| `agentlens savings [--project <path>] [--weeks <N>] [--json] [--snapshot]` | Weekly project token-metric comparison against a captured baseline (default 8 weeks) |
+| `agentlens optimize [<path>] [--ai] [--preview] [--confirm <hash>] [--apply] [--dry-run] [--json]` | Workspace hygiene or opt-in AI instruction rewrite (`--apply` writes a `.bak` backup); see [docs/ai.md](docs/ai.md) |
 | `agentlens install-statusline` | Print configuration instructions for Claude Code statusline |
 | `agentlens install-service` | Install native background service (systemd user unit, launchd agent, or Windows scheduled task) |
 | `agentlens plugin [install\|status\|uninstall] [--enable] [--dir <path>]` | Install, inspect, or remove the native Omarchy Quattro desktop bar plugin (`agentlens.bar-widget`) |
