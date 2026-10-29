@@ -112,6 +112,7 @@ export function startServer(
     '/api/daily': (f) => q.daily(db, f),
     '/api/anomalies': (f) => detectAnomalies(db, f),
     '/api/analytics/tool-failures': (f) => q.toolFailures(db, f),
+    '/api/analytics/model-efficiency': (f) => q.modelEfficiency(db, f),
     '/api/projects': (f) => q.projects(db, f),
     '/api/models': (f) => q.models(db, f),
     '/api/sessions': (f, sp) => q.sessions(db, f, Math.min(Math.max(num(sp, 'limit') ?? 200, 1), 1000)),

@@ -169,6 +169,62 @@ export function toolFailures(db: DB, f: Filter = {}) {
   return { failures, totals };
 }
 
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+
+export interface ModelEfficiency {
+  name: string;
+  sessions: number;
+  tokens: number;
+  tokensPerSession: number;
+  avgTurns: number;
+  toolErrorRate: number;
+  cacheReadRatio: number;
+}
+
+/**
+ * Efficiency comparison per model over actual workspace sessions. A session that uses several
+ * models is counted once per model; its tool stats are attributed to its primary model
+ * (the one with the most tokens in that session, ties broken by name for determinism).
+ */
+export function modelEfficiency(db: DB, f: Filter = {}): ModelEfficiency[] {
+  const w = where(f);
+  const turns = db.prepare(`SELECT e.model AS model, e.session_id AS sessionId,
+      sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens, sum(e.cache_read) AS cacheRead, count(*) AS turns
+    ${FROM} WHERE e.kind = 'assistant'${w.sql} GROUP BY e.model, e.session_id`).all(w.params) as Row[];
+  const tools = db.prepare(`SELECT e.session_id AS sessionId, count(*) AS calls,
+      coalesce(sum(r.is_error = 1), 0) AS errors
+    ${FROM} LEFT JOIN events r ON r.id = e.id || ':result'
+    WHERE e.kind = 'tool_call' AND e.tool IS NOT NULL${w.sql} GROUP BY e.session_id`).all(w.params) as Array<{ sessionId: string; calls: number; errors: number }>;
+
+  const primary = new Map<string, { model: string; tokens: number }>();
+  for (const t of turns) {
+    const model = t.model ?? 'unknown';
+    const p = primary.get(t.sessionId);
+    if (!p || t.tokens > p.tokens || (t.tokens === p.tokens && model < p.model)) primary.set(t.sessionId, { model, tokens: t.tokens });
+  }
+
+  const groups = new Map<string, { model: string; sessions: number; tokens: number; cacheRead: number; turns: number; calls: number; errors: number }>();
+  for (const t of turns) {
+    const model = t.model ?? 'unknown';
+    let g = groups.get(model);
+    if (!g) { g = { model, sessions: 0, tokens: 0, cacheRead: 0, turns: 0, calls: 0, errors: 0 }; groups.set(model, g); }
+    g.sessions++; g.tokens += t.tokens; g.cacheRead += t.cacheRead; g.turns += t.turns;
+  }
+  for (const t of tools) {
+    const g = groups.get(primary.get(t.sessionId)?.model ?? '') ?? null;
+    if (!g) continue;
+    g.calls += t.calls; g.errors += t.errors;
+  }
+
+  return [...groups.values()].map((g) => ({
+    name: g.model, sessions: g.sessions, tokens: g.tokens,
+    tokensPerSession: Math.round(g.tokens / g.sessions),
+    avgTurns: r3(g.turns / g.sessions),
+    toolErrorRate: g.calls ? r3(g.errors / g.calls) : 0,
+    cacheReadRatio: g.tokens ? r3(g.cacheRead / g.tokens) : 0,
+  })).sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name));
+}
+
 export function sessionTimeline(db: DB, id: string) {
   const turns = plain(db.prepare(`
     SELECT id, ts, model, input, output, cache_read AS cacheRead, cache_write AS cacheWrite,
