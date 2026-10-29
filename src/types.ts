@@ -78,6 +78,8 @@ export interface Recommendation {
   title: string;
   body: string;
   actionSnippet?: string;
+  aiBody?: string;
+  aiActionSnippet?: string;
   catalogRef?: string;
   status: RecommendationStatus;
   acceptedAt?: number;
