@@ -149,7 +149,7 @@ export function toolFailures(db: DB, f: Filter = {}) {
       sum(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END) AS errors,
       count(a.prevTs) AS retries,
       coalesce(sum((SELECT coalesce(sum(x.input + x.output + x.cache_read + x.cache_write), 0) FROM events x
-        WHERE x.session_id = a.sessionId AND x.kind = 'assistant' AND x.ts >= a.prevTs AND x.ts < a.ts)), 0) AS wastedTokens
+        WHERE x.session_id = a.sessionId AND x.kind = 'assistant' AND x.ts > a.prevTs AND x.ts <= a.ts)), 0) AS wastedTokens
     FROM attempts a
     LEFT JOIN events r ON r.id = a.id || ':result'
     GROUP BY 1, 2

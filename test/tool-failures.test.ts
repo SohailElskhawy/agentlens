@@ -54,6 +54,22 @@ test('empty db yields empty failures and zeroed totals', () => {
   assert.deepEqual(toolFailures(db), { failures: [], totals: { calls: 0, errors: 0, retries: 0, wastedTokens: 0 } });
 });
 
+test('attributes retry tokens to the retry turn when assistant and tool_call share timestamps', () => {
+  const db = openDb(':memory:');
+  const p = upsertProject(db, '/work/c', 'gamma');
+  upsertSessions(db, [{ id: 's3', agent: 'claude', projectId: p, cwd: '/work/c' }]);
+  upsertEvents(db, [
+    { id: 'a1', sessionId: 's3', agent: 'claude', ts: 1000, kind: 'assistant', output: 100 },
+    { id: 'c1', sessionId: 's3', agent: 'claude', ts: 1000, kind: 'tool_call', tool: 'Bash', argsHash: 'h-same' },
+    { id: 'c1:result', sessionId: 's3', agent: 'claude', ts: 1500, kind: 'tool_result', isError: true },
+    { id: 'a2', sessionId: 's3', agent: 'claude', ts: 2000, kind: 'assistant', output: 250 },
+    { id: 'c2', sessionId: 's3', agent: 'claude', ts: 2000, kind: 'tool_call', tool: 'Bash', argsHash: 'h-same' },
+    { id: 'c2:result', sessionId: 's3', agent: 'claude', ts: 2500, kind: 'tool_result', isError: false },
+  ]);
+  const r = toolFailures(db);
+  assert.equal(r.failures[0].wastedTokens, 250);
+});
+
 test('GET /api/analytics/tool-failures serves the aggregation and honors ?project', async () => {
   const db = openDb(':memory:');
   const { a } = seed(db);
