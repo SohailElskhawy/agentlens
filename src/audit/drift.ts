@@ -1,7 +1,8 @@
-import { constants, openSync, closeSync, fstatSync, readFileSync, lstatSync } from 'node:fs';
+import { constants, openSync, closeSync, fstatSync, readSync, lstatSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import type { Finding } from '../types.ts';
 import type { InstructionItem } from './scanners/instruction.ts';
+import { MAX_BOUNDED_READ_BYTES } from '../ai/constants.ts';
 
 // shortcut: skip files over 64 KiB rather than inspect partial instructions; raise the bound if needed.
 function readBounded(root: string, path: string): string | null {
@@ -18,8 +19,10 @@ function readBounded(root: string, path: string): string | null {
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.size > 65_536) return null;
-    return readFileSync(fd, 'utf8');
+    if (!stat.isFile() || stat.size > MAX_BOUNDED_READ_BYTES) return null;
+    const buffer = Buffer.alloc(MAX_BOUNDED_READ_BYTES + 1);
+    const bytes = readSync(fd, buffer, 0, buffer.length, 0);
+    return bytes > MAX_BOUNDED_READ_BYTES ? null : buffer.toString('utf8', 0, bytes);
   } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
 }
 
@@ -51,8 +54,26 @@ export function detectDrift(items: InstructionItem[], projects: { id: number; ro
       if (source.startsWith('..') || resolve(project.root, source) !== item.sourcePath) continue;
       const text = readBounded(project.root, item.sourcePath);
       if (text === null) continue;
+      let exampleHeading = 0; let exampleProse = false; let fence = ''; let skipFence = false;
       for (const line of text.split('\n')) {
-        if (/\b(?:example|examples|e\.g\.|optional|such as)\b/i.test(line)) continue;
+        const heading = !fence && line.match(/^\s{0,3}(#{1,6})\s+(.+)/);
+        if (heading) {
+          const level = heading[1].length;
+          if (exampleHeading && level <= exampleHeading) exampleHeading = 0;
+          if (/\bexamples?\b/i.test(heading[2]) && !exampleHeading) exampleHeading = level;
+          exampleProse = false;
+          continue;
+        }
+        const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/);
+        if (marker && (!fence || (marker[1][0] === fence[0] && marker[1].length >= fence.length))) {
+          if (fence) { fence = ''; skipFence = false; }
+          else { fence = marker[1]; skipFence = !!exampleHeading || exampleProse; }
+          exampleProse = false;
+          continue;
+        }
+        if (exampleHeading || skipFence) continue;
+        if (/\b(?:example|examples|e\.g\.|optional|such as)\b/i.test(line)) { if (!fence) exampleProse = true; continue; }
+        if (!fence && line.trim()) exampleProse = false;
         if (scripts) for (const match of line.matchAll(/\bnpm\s+run\s+([\w][\w:.-]*)(?=$|[\s`'";&|)])/g)) {
           if (!Object.hasOwn(scripts, match[1])) refs.push({ kind: 'script', reference: match[1], source });
         }
