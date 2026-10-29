@@ -14,7 +14,7 @@ const SUMS = `sum(e.input) AS input, sum(e.output) AS output, sum(e.cache_read) 
 const FROM = 'FROM events e LEFT JOIN sessions s ON s.id = e.session_id';
 const plain = (rows: unknown[]) => rows.map((r) => ({ ...(r as Row) })); // node:sqlite rows have a null prototype
 
-function where(f: Filter & { sessionId?: string }) {
+export function where(f: Filter & { sessionId?: string }) {
   const c: string[] = [];
   const params: Record<string, string | number> = {};
   if (f.from != null) { c.push('e.ts >= $from'); params.from = f.from; }

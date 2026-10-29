@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlink
 import { dirname } from 'node:path';
 import type { DB } from './db.ts';
 import { insertQuotas, tx } from './db.ts';
+import { detectAnomalies, formatLocalDay, type AnomalyResult } from './anomaly.ts';
 import { generateFixPrompt } from './fix-prompts.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
@@ -94,6 +95,7 @@ export interface SummaryData {
   daily7d?: SummaryDailyBucket[];
   topModels?: SummaryModelRow[];
   projectList?: SummaryProjectBudget[];
+  anomalies?: AnomalyResult;
 }
 
 export function formatTokens(tokens: number): string {
@@ -183,13 +185,6 @@ export function drainQuotaSpool(db: DB, spoolPath: string): void {
   try {
     unlinkSync(stagingPath);
   } catch {}
-}
-
-function formatLocalDay(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
 }
 
 export function writeSummary(db: DB, targetPath: string): void {
@@ -598,6 +593,7 @@ export function writeSummary(db: DB, targetPath: string): void {
     daily7d,
     topModels,
     projectList,
+    anomalies: detectAnomalies(db, {}, now),
   };
 
   mkdirSync(dirname(targetPath), { recursive: true });

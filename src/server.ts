@@ -17,6 +17,7 @@ import { exportData, generatePrometheusMetrics } from './export.ts';
 import { aiStatus, validAiSetting } from './ai/gate.ts';
 import { diagnoseSession } from './ai/diagnose.ts';
 import type { DiagnosisErrorCode, DiagnosisRunner } from './ai/diagnose.ts';
+import { detectAnomalies } from './anomaly.ts';
 import * as q from './queries.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
@@ -49,6 +50,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
   const api: Record<string, (f: Filter, sp: URLSearchParams) => unknown> = {
     '/api/summary': (f) => q.summary(db, f),
     '/api/daily': (f) => q.daily(db, f),
+    '/api/anomalies': (f) => detectAnomalies(db, f),
     '/api/projects': (f) => q.projects(db, f),
     '/api/models': (f) => q.models(db, f),
     '/api/sessions': (f, sp) => q.sessions(db, f, Math.min(Math.max(num(sp, 'limit') ?? 200, 1), 1000)),
