@@ -188,7 +188,7 @@ test('ingest recomputes recommendations with calibrated scores and preserves com
   const home = tmp();
   const ts = new Date(Date.now() - 60_000).toISOString(); // inside the trailing week of the real clock
   const file = put(join(home, '.claude/projects/-tmp-x/s1.jsonl'), jsonl(
-    cAssistant({ msg: 'm1', ts, cwd: '/tmp/x' }), // single-turn flagship session -> model_fit
+    cAssistant({ msg: 'm1', ts, cwd: '/home/user/calibration-project' }), // single-turn flagship session -> model_fit
   ));
   const db = openDb(':memory:');
 
@@ -204,7 +204,7 @@ test('ingest recomputes recommendations with calibrated scores and preserves com
   db.prepare('UPDATE recommendations SET status = ?, accepted_at = ?, result = ? WHERE id = ?')
     .run('verified', Date.now() - 30 * 86_400_000, JSON.stringify({ note: 'pending' }), rec.id);
 
-  appendFileSync(file, jsonl(cAssistant({ msg: 'm2', req: 'r2', out: 5, ts, cwd: '/tmp/x' })));
+  appendFileSync(file, jsonl(cAssistant({ msg: 'm2', req: 'r2', out: 5, ts, cwd: '/home/user/calibration-project' })));
   await ingest(db, home, [claude]); // second turn: model_fit no longer fires fresh, stored finding stays
 
   const rec2 = getRecommendations(db).find((r) => r.id === rec.id);

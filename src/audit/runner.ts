@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { DB } from '../db.ts';
-import { getFindings, tx, upsertAuditItems, upsertFindings, upsertRecommendations } from '../db.ts';
+import { tx, upsertAuditItems, upsertFindings } from '../db.ts';
 import { calibrateFindings, capStoredFindings, loadScopeBudgets } from '../analyze/calibration.ts';
-import { generateRecommendations } from '../recommend.ts';
+import { refreshRecommendations } from '../recommend.ts';
+import { isTempProject } from '../temp-project.ts';
 import type { AuditItem, Finding } from '../types.ts';
 import { analyzeOverhead } from './overhead.ts';
 import { analyzeUsage } from './usage.ts';
@@ -30,6 +31,8 @@ export function runAudit(
       name: string;
     }[];
   } catch {}
+
+  projects = projects.filter((p) => !isTempProject(p.root));
 
   // 1. Run all scanners
   const instructions = scanInstructions(userHome, projects);
@@ -98,9 +101,7 @@ export function runAudit(
 
   // Update recommendations with newly discovered findings
   try {
-    const allFindings = getFindings(db);
-    const recs = generateRecommendations(allFindings);
-    upsertRecommendations(db, recs);
+    refreshRecommendations(db);
   } catch {}
 
   return { items: auditItems, findings, trimmings };

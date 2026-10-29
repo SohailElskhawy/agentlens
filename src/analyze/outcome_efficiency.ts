@@ -1,3 +1,4 @@
+import { isTempProject } from '../temp-project.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -118,6 +119,7 @@ export function detectOutcomeEfficiency(
   };
 
   for (const proj of projects) {
+    if (isTempProject(proj.root)) continue;
     // 1. Gather all sessions and tokens in project
     const sessionRows = db.prepare(`
       SELECT s.id, s.agent,

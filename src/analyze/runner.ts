@@ -1,4 +1,5 @@
 import type { DB } from '../db.ts';
+import { excludeTempFindings } from '../temp-project.ts';
 import { tx, upsertFindings } from '../db.ts';
 import type { Finding } from '../types.ts';
 import { detectCacheMisses } from './cache_miss.ts';
@@ -20,7 +21,7 @@ import { calibrateFindings, capStoredFindings, loadScopeBudgets } from './calibr
 
 export function runDetectors(db: DB, options?: { sessionId?: string; projectId?: number; now?: number; gitReader?: typeof readGitNumstat }): Finding[] {
   const now = options?.now ?? Date.now();
-  const findings: Finding[] = [
+  const findings: Finding[] = excludeTempFindings(db, [
     ...detectRetryLoops(db, options),
     ...detectHotFiles(db, options),
     ...detectLargeToolOutput(db, options),
@@ -36,7 +37,7 @@ export function runDetectors(db: DB, options?: { sessionId?: string; projectId?:
     ...detectAbandonedSessions(db, { ...options, now }),
     ...detectCompactionChurn(db, options),
     ...detectReasoningOveruse(db, options),
-  ];
+  ]);
 
   const budgets = loadScopeBudgets(db, now);
   calibrateFindings(findings, budgets);
