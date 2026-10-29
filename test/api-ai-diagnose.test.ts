@@ -96,6 +96,20 @@ test('unknown sessions, bad input and oversize bodies get sibling-style errors',
   assert.equal((await post({ sessionId: 's1', pad: 'x'.repeat(17000) })).status, 413);
 });
 
+test('the body cap counts bytes, and multibyte characters split across chunks survive', async () => {
+  assert.equal((await post({ sessionId: 's1', pad: 'é'.repeat(9000) })).status, 413); // 9k chars, 18k bytes
+  upsertSessions(db, [{ id: 'sé€', agent: 'claude', projectId: null, cwd: '/private/source' }]);
+  const buf = Buffer.from(JSON.stringify({ sessionId: 'sé€' }));
+  const cut = buf.indexOf(0xe2) + 1; // inside the 3-byte €
+  const res = await new Promise<number>((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path: '/api/ai/diagnose', method: 'POST', headers: { 'content-type': 'application/json' } }, (r) => { r.resume(); r.on('end', () => resolve(r.statusCode!)); });
+    req.on('error', reject);
+    req.write(buf.subarray(0, cut));
+    setTimeout(() => req.end(buf.subarray(cut)), 30);
+  });
+  assert.equal(res, 200);
+});
+
 test('daily limit is 429 and failed output is an error that never echoes runner text', async () => {
   setSetting(db, 'ai_max_calls_per_day', '1'); // the confirmed call above already used it
   setSetting(db, 'ai_model', 'm2'); // new model => new cache key and hash

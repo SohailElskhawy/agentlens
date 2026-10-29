@@ -354,12 +354,14 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/ai/diagnose') {
-        let body = '';
+        const chunks: Buffer[] = [];
+        let size = 0;
         let tooLarge = false;
-        req.on('data', (c) => {
+        req.on('data', (c: Buffer) => {
           if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
+          size += c.length;
+          chunks.push(c);
+          if (size > 16384) {
             tooLarge = true;
             req.resume();
             send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
@@ -369,7 +371,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
           if (tooLarge) return;
           const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
           let input: any;
-          try { input = JSON.parse(body || '{}'); } catch { return json(400, { error: 'invalid payload' }); }
+          try { input = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return json(400, { error: 'invalid payload' }); }
           const { sessionId, confirm } = input ?? {};
           if (typeof sessionId !== 'string' || !sessionId || (confirm !== undefined && typeof confirm !== 'string')) {
             return json(400, { error: 'sessionId (string) and optional confirm (string) are required' });
