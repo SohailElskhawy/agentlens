@@ -1,15 +1,16 @@
 import type { DB } from '../db.ts';
 import type { Finding } from '../types.ts';
-import { ABANDONED_SESSION_TOKEN_THRESHOLD, ABANDONED_SESSION_WINDOW_MS } from './constants.ts';
+import { ABANDONED_SESSION_TOKEN_THRESHOLD, ABANDONED_SESSION_WINDOW_MS, CALIBRATION_WINDOW_MS } from './constants.ts';
 import { readGitNumstat } from './outcome_efficiency.ts';
 
 const FILE_EDIT_TOOL_REGEX = /(edit|write|replace|patch|apply|notebook)/i;
 
 export function detectAbandonedSessions(
   db: DB,
-  options?: { sessionId?: string; projectId?: number; gitReader?: typeof readGitNumstat }
+  options?: { sessionId?: string; projectId?: number; gitReader?: typeof readGitNumstat; now?: number }
 ): Finding[] {
   const gitReader = options?.gitReader ?? readGitNumstat;
+  const now = options?.now ?? Date.now();
   let sql = `
     SELECT s.id AS sessionId,
            s.agent,
@@ -18,6 +19,7 @@ export function detectAbandonedSessions(
            count(e.id) AS turns,
            count(DISTINCT e.tool) AS toolCalls,
            sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens,
+           sum(CASE WHEN e.ts >= ? AND e.ts <= ? THEN e.input + e.output + e.cache_read + e.cache_write ELSE 0 END) AS weeklyTokens,
            min(e.ts) AS started,
            max(e.ts) AS ended
     FROM sessions s
@@ -25,7 +27,7 @@ export function detectAbandonedSessions(
     JOIN events e ON e.session_id = s.id
     WHERE 1 = 1
   `;
-  const params: any[] = [];
+  const params: any[] = [now - CALIBRATION_WINDOW_MS, now];
   if (options?.sessionId) {
     sql += ' AND s.id = ?';
     params.push(options.sessionId);
@@ -49,6 +51,7 @@ export function detectAbandonedSessions(
     turns: number;
     toolCalls: number;
     tokens: number;
+    weeklyTokens: number;
     started: number;
     ended: number;
   }>;
@@ -105,7 +108,9 @@ export function detectAbandonedSessions(
       },
       confidence,
       confidenceReason: `Session ${s.sessionId} consumed ${Math.round(s.tokens / 1000)}k tokens over ${s.turns} turns without producing file edits or commits.`,
-      estTokensWeek: s.tokens,
+      // Weekly estimate is the session's trailing-week tokens (calibration); lifetime evidence and
+      // confidence are kept for identification. An old session therefore surfaces with estimate 0.
+      estTokensWeek: s.weeklyTokens,
       firstSeen: s.ended,
       lastSeen: s.ended,
     });

@@ -1,5 +1,5 @@
 import type { DB } from '../db.ts';
-import { upsertFindings } from '../db.ts';
+import { tx, upsertFindings } from '../db.ts';
 import type { Finding } from '../types.ts';
 import { detectCacheMisses } from './cache_miss.ts';
 import { detectContextGrowth } from './context_growth.ts';
@@ -12,12 +12,14 @@ import { detectRepeatedPrompts } from './repeated_prompt.ts';
 import { detectRetryLoops } from './retry_loop.ts';
 import { detectSubagentShare } from './subagent_share.ts';
 import { detectCrossAgentBalance } from './cross_agent_balance.ts';
-import { detectOutcomeEfficiency } from './outcome_efficiency.ts';
+import { detectOutcomeEfficiency, type readGitNumstat } from './outcome_efficiency.ts';
 import { detectAbandonedSessions } from './abandoned_session.ts';
 import { detectCompactionChurn } from './compaction_churn.ts';
 import { detectReasoningOveruse } from './reasoning_overuse.ts';
+import { calibrateFindings, capStoredFindings, loadScopeBudgets } from './calibration.ts';
 
-export function runDetectors(db: DB, options?: { sessionId?: string; projectId?: number }): Finding[] {
+export function runDetectors(db: DB, options?: { sessionId?: string; projectId?: number; now?: number; gitReader?: typeof readGitNumstat }): Finding[] {
+  const now = options?.now ?? Date.now();
   const findings: Finding[] = [
     ...detectRetryLoops(db, options),
     ...detectHotFiles(db, options),
@@ -31,14 +33,17 @@ export function runDetectors(db: DB, options?: { sessionId?: string; projectId?:
     ...detectQuotaPressure(db),
     ...detectCrossAgentBalance(db, options),
     ...detectOutcomeEfficiency(db, options),
-    ...detectAbandonedSessions(db, options),
+    ...detectAbandonedSessions(db, { ...options, now }),
     ...detectCompactionChurn(db, options),
     ...detectReasoningOveruse(db, options),
   ];
 
-  if (findings.length > 0) {
+  const budgets = loadScopeBudgets(db, now);
+  calibrateFindings(findings, budgets);
+  tx(db, () => {
     upsertFindings(db, findings);
-  }
+    capStoredFindings(db, budgets);
+  });
 
   return findings;
 }

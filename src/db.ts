@@ -136,7 +136,7 @@ export function upsertFindings(db: DB, findings: Finding[]): void {
       evidence = excluded.evidence,
       confidence = excluded.confidence,
       confidence_reason = excluded.confidence_reason,
-      est_tokens_week = max(findings.est_tokens_week, excluded.est_tokens_week),
+      est_tokens_week = excluded.est_tokens_week,
       last_seen = excluded.last_seen
   `);
   for (const f of findings) {

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { DB } from '../db.ts';
-import { getFindings, upsertAuditItems, upsertFindings, upsertRecommendations } from '../db.ts';
+import { getFindings, tx, upsertAuditItems, upsertFindings, upsertRecommendations } from '../db.ts';
+import { calibrateFindings, capStoredFindings, loadScopeBudgets } from '../analyze/calibration.ts';
 import { generateRecommendations } from '../recommend.ts';
 import type { AuditItem, Finding } from '../types.ts';
 import { analyzeOverhead } from './overhead.ts';
@@ -80,15 +81,20 @@ export function runAudit(
   });
 
   // 5. Persist to DB and prune obsolete items
+  const budgets = loadScopeBudgets(db, now);
+  calibrateFindings(findings, budgets);
   if (auditItems.length > 0) {
     upsertAuditItems(db, auditItems);
     db.prepare('DELETE FROM audit_items WHERE updated_at < ?').run(now);
   }
-  if (findings.length > 0) {
-    upsertFindings(db, findings);
-    const auditRules = ['instruction_bloat', 'unused_config', 'duplicate_config', 'config_conflict'];
-    db.prepare(`DELETE FROM findings WHERE rule IN ('${auditRules.join("','")}') AND last_seen < ?`).run(now);
-  }
+  tx(db, () => {
+    if (findings.length > 0) {
+      upsertFindings(db, findings);
+      const auditRules = ['instruction_bloat', 'unused_config', 'duplicate_config', 'config_conflict'];
+      db.prepare(`DELETE FROM findings WHERE rule IN ('${auditRules.join("','")}') AND last_seen < ?`).run(now);
+    }
+    capStoredFindings(db, budgets);
+  });
 
   // Update recommendations with newly discovered findings
   try {
