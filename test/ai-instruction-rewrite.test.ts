@@ -103,6 +103,54 @@ test('selection preserves unselected flagged lines and rejects invented code cut
   assert.equal(invalid.status, 'ok'); other.close();
 });
 
+const dupLong = '- Always run the full lint, typecheck and test gates before merging any branch — even for tiny fixes.';
+const staleLong = '- Remove obsolete docs/old-guide.md reference from this long instruction right away — urgent.';
+// Pad the last line with multibyte characters until the UTF-8 size matches so the fixture byte count is exact.
+function sized(lines: string[], bytes: number) {
+  const base = lines.join('\n');
+  const missing = bytes - Buffer.byteLength(base, 'utf8') - 2;
+  if (missing < 4) throw Error('fixture already exceeds target size');
+  const rem = missing % 3;
+  const pad = rem === 0 ? '—'.repeat(missing / 3) : rem === 2 ? '—'.repeat((missing - 2) / 3) + 'é' : '—'.repeat((missing - 4) / 3) + 'éé';
+  return base + '\n' + pad + '\n';
+}
+const big = sized(['# Rules', ...Array<string>(40).fill(dupLong), ...Array<string>(4).fill(staleLong)], 10_439);
+const tooBigPrompt = sized(['# Rules', ...Array<string>(150).fill(dupLong)], 20_000);
+
+test('reads a ~10.4KB multibyte target and flows through preview, selection and apply', async () => {
+  assert.equal(Buffer.byteLength(big, 'utf8'), 10_439);
+  const { db, file, dir } = setup(big);
+  put(join(dir, 'CLAUDE.md'), dupLong + '\n');
+  setSetting(db, 'ai_enabled', 'true'); const p = await preview(db, file);
+  assert.ok(p.prompt.length < 12000);
+  const ids = JSON.parse(p.prompt.slice(p.prompt.indexOf('\n') + 1)).cuts.map((c: { id: string }) => c.id);
+  assert.ok(ids.length >= 40);
+  const r = await rewriteInstructions(db, file, { runner: output(ids), confirm: p.confirmationHash, apply: true });
+  assert.equal(r.status, 'ok');
+  const kept = readFileSync(file, 'utf8'); assert.ok(!kept.includes('quality gate') && !kept.includes('docs/old-guide.md'));
+  assert.equal(readFileSync(file + '.bak', 'utf8'), big); db.close();
+});
+
+test('targets and siblings over the 64 KiB read budget fail before the analyst is invoked', async () => {
+  const dir = tmp(); const path = put(join(dir, 'AGENTS.md'), 'x'.repeat(65_537));
+  const db = openDb(':memory:'); setSetting(db, 'ai_enabled', 'true'); let calls = 0;
+  const result = await rewriteInstructions(db, path, { runner: async () => { calls++; return { ok: true, text: '{}' }; }, confirm: 'a'.repeat(64) });
+  assert.equal(result.status, 'error'); if (result.status !== 'error') throw Error();
+  assert.match(result.message, /at most 65536 bytes/); assert.equal(calls, 0); db.close();
+  const other = tmp(); const target = put(join(other, 'AGENTS.md'), original);
+  put(join(other, 'CLAUDE.md'), 'y'.repeat(65_537)); const odb = openDb(':memory:');
+  assert.equal((await rewriteInstructions(odb, target, { preview: true })).status, 'confirmation_required'); odb.close();
+});
+
+test('the 12000 character egress cap still bounds prompts built from the larger read budget', async () => {
+  const { db, file, dir } = setup(tooBigPrompt);
+  put(join(dir, 'CLAUDE.md'), dupLong + '\n');
+  setSetting(db, 'ai_enabled', 'true'); let calls = 0;
+  const result = await rewriteInstructions(db, file, { runner: async () => { calls++; return { ok: true, text: '{}' }; }, confirm: 'a'.repeat(64) });
+  assert.equal(result.status, 'error'); if (result.status !== 'error') throw Error();
+  assert.match(result.message, /12000 character prompt limit/); assert.equal(calls, 0); db.close();
+});
+
 test('bounded reads reject symlink and FIFO targets and ignore unsafe siblings', async () => {
   const { symlinkSync } = await import('node:fs');
   for (const kind of ['symlink', 'fifo', 'oversize']) {

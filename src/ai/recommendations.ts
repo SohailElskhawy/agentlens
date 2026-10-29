@@ -4,6 +4,7 @@ import { isAbsolute, join, relative } from 'node:path';
 import { getFindings, getRecommendations } from '../db.ts';
 import type { DB } from '../db.ts';
 import type { Recommendation } from '../types.ts';
+import { MAX_BOUNDED_READ_BYTES } from './constants.ts';
 import { aiStatus } from './gate.ts';
 import { redact } from './payload.ts';
 import { buildAnalystCommand } from './runner.ts';
@@ -32,7 +33,7 @@ function readProjectFile(root: string, path: string): string | null {
     const resolved = realpathSync(path); const rel = relative(root, resolved);
     if (!rel || rel.startsWith('..' + '/') || rel === '..' || isAbsolute(rel)) return null;
     fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const stat = fstatSync(fd); if (!stat.isFile() || stat.size > 65536) return null;
+    const stat = fstatSync(fd); if (!stat.isFile() || stat.size > MAX_BOUNDED_READ_BYTES) return null;
     // Read no more than the checked size even if the file grows after fstat.
     const buffer = Buffer.alloc(stat.size);
     const bytes = readSync(fd, buffer, 0, buffer.length, 0);
