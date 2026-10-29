@@ -19,6 +19,7 @@ export interface ProjectSummary {
   name: string;
   tokensToday: number;
   costToday?: number;
+  contextWarning?: string;
 }
 
 export interface SummaryRecommendation {
@@ -269,6 +270,41 @@ export function writeSummary(db: DB, targetPath: string): void {
       tokensToday: p.tokensToday,
       costToday: Number(p.costTodayRaw.toFixed(4)),
     };
+  }
+
+  const activeSessions = db.prepare(`
+    SELECT DISTINCT s.id AS sessionId, p.id AS projectId, p.root AS root, p.name AS name
+    FROM events e
+    JOIN sessions s ON s.id = e.session_id
+    JOIN projects p ON p.id = s.project_id
+    WHERE e.ts >= ? AND p.root IS NOT NULL AND p.root != ''
+  `).all(now - 900_000) as { sessionId: string; projectId: number; root: string; name: string }[];
+
+  const turnStmt = db.prepare(`
+    SELECT (input + cache_read + cache_write) AS contextSize
+    FROM events
+    WHERE session_id = ? AND kind = 'assistant'
+    ORDER BY ts DESC, id DESC
+    LIMIT 2
+  `);
+
+  for (const session of activeSessions) {
+    const turns = turnStmt.all(session.sessionId) as { contextSize: number }[];
+    if (turns.length === 2 && turns[0].contextSize >= 120_000 && (turns[0].contextSize - turns[1].contextSize) >= 20_000) {
+      const rootKey = session.root;
+      if (projects[rootKey]) {
+        projects[rootKey].contextWarning = '[COMPACT RECOMMENDED]';
+      } else {
+        projects[rootKey] = {
+          projectId: session.projectId,
+          root: rootKey,
+          name: session.name,
+          tokensToday: 0,
+          costToday: 0,
+          contextWarning: '[COMPACT RECOMMENDED]',
+        };
+      }
+    }
   }
 
   // Active agents today
@@ -685,8 +721,12 @@ export function formatStatusline(summaryPath: string, projectCwd: string): strin
   const d7Str = claude7d != null ? `${Math.round(claude7d)}%` : '--';
 
   const base = `${name} · ${tokensTodayStr} · 5h ${h5Str} · 7d ${d7Str}`;
+  let line = base;
   if (data?.statuslineForecast) {
-    return `${base} · ${data.statuslineForecast}`;
+    line += ` · ${data.statuslineForecast}`;
   }
-  return base;
+  if (proj?.contextWarning) {
+    line += ` · ${proj.contextWarning}`;
+  }
+  return line;
 }
