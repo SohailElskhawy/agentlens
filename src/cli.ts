@@ -32,6 +32,7 @@ import { checkLiveAlerts } from './alerts.ts';
 import { exportData } from './export.ts';
 import { formatOptimizeReport, optimizeWorkspace } from './optimize.ts';
 import { getOmarchyPluginStatus, installOmarchyPlugin, uninstallOmarchyPlugin } from './omarchy-plugin.ts';
+import { generateCheatsheet } from './cheatsheet.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -53,6 +54,7 @@ const HELP = `Usage: agentlens <command>
   explain anomaly     explain a detected spike <date> <project> [--agent <agent>] [--preview | --confirm <hash>] [--json]
   diagnose            AI diagnosis of a session <id> or --worst <N> (--project, --json, --preview, --confirm <hash>)
   optimize [path]     workspace hygiene or instruction rewrite (--ai, --preview, --confirm <hash>, --apply, --json)
+  cheatsheet [path]   architecture cheat-sheet from hot_files (--project <path>, --top <N>, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
   report              generate and display weekly usage report (--week, --html, --json)
@@ -871,6 +873,42 @@ const commands: Record<string, () => unknown> = {
         console.log(`Manifest valid: ${res.manifestValid ? 'yes' : 'no'}`);
         console.log(`Enabled in shell.json: ${res.enabledInShellConfig ? 'yes' : 'no'}`);
       }
+    }
+  },
+  cheatsheet: () => {
+    let projectArg: string | undefined;
+    let topArg: number | undefined;
+    let isJson = false;
+
+    for (let i = 3; i < process.argv.length; i++) {
+      const arg = process.argv[i];
+      if (arg === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      } else if (arg.startsWith('--project=')) {
+        projectArg = arg.slice('--project='.length);
+      } else if (arg === '--top' && process.argv[i + 1]) {
+        topArg = Number(process.argv[i + 1]);
+        i++;
+      } else if (arg.startsWith('--top=')) {
+        topArg = Number(arg.slice('--top='.length));
+      } else if (arg === '--json') {
+        isJson = true;
+      } else if (!arg.startsWith('-') && !projectArg) {
+        projectArg = arg;
+      }
+    }
+
+    const db = existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      const res = generateCheatsheet(db, { projectRoot: projectArg, top: topArg });
+      if (isJson) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(res.markdown);
+      }
+    } finally {
+      db.close();
     }
   },
   help: () => console.log(HELP),
