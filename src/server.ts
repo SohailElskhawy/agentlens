@@ -12,6 +12,7 @@ import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates, loadDiscoveredCandidates } from './discover.ts';
 import { getPlatformPaths } from './paths.ts';
 import { generateFixPrompt } from './fix-prompts.ts';
+import { tailorFixPrompt } from './ai/fix-prompt.ts';
 import { runFix } from './fix-runner.ts';
 import { exportData, generatePrometheusMetrics } from './export.ts';
 import { aiStatus, validAiSetting } from './ai/gate.ts';
@@ -98,7 +99,14 @@ const AI_ERROR_STATUS: Record<DiagnosisErrorCode, number> = {
 };
 
 // aiRunner is a test seam: tests inject a fake so no agent CLI is ever spawned.
-export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { aiRunner?: DiagnosisRunner } = {}): Promise<Server> {
+export function startServer(
+  db: DB,
+  port: number,
+  hostOrOpts: string | { aiRunner?: DiagnosisRunner } = '127.0.0.1',
+  maybeOpts: { aiRunner?: DiagnosisRunner } = {},
+): Promise<Server> {
+  const host = typeof hostOrOpts === 'string' ? hostOrOpts : '127.0.0.1';
+  const opts = typeof hostOrOpts === 'string' ? maybeOpts : hostOrOpts;
   const api: Record<string, (f: Filter, sp: URLSearchParams) => unknown> = {
     '/api/summary': (f) => q.summary(db, f),
     '/api/daily': (f) => q.daily(db, f),
@@ -407,9 +415,26 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
       }
 
       if (req.method === 'POST' && url.pathname === '/api/fix/prompt') {
-        readBody(req, res, (body) => {
+        readBody(req, res, async (body) => {
           try {
             const json = JSON.parse(body || '{}');
+            if (!json || typeof json !== 'object' || Array.isArray(json)) {
+              return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+            }
+            if (url.searchParams.get('ai') === '1') {
+              if (
+                (json.confirm !== undefined && typeof json.confirm !== 'string') ||
+                (json.preview !== undefined && typeof json.preview !== 'boolean')
+              ) {
+                return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+              }
+              const result = await tailorFixPrompt(db, json, {
+                confirm: json.confirm,
+                preview: json.preview,
+                runner: opts.aiRunner,
+              });
+              return send(res, 200, 'application/json', JSON.stringify(result));
+            }
             const prompt = generateFixPrompt(json);
             send(res, 200, 'application/json', JSON.stringify({ ok: true, prompt }));
           } catch (e: any) {
