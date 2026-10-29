@@ -2,9 +2,9 @@
 
 agentlens is deterministic by default. The AI analyst is an optional extra that explains structured session waste signals and enriches recommendations. It is **off** until you enable it and it never runs automatically (not on ingest, `serve`, or any schedule).
 
-Currently implemented: session diagnosis and recommendation enrichment through the **Claude Code CLI (`claude`) only**. Other `ai_agent` values are
+Currently implemented: session diagnosis, anomaly explanation, and recommendation enrichment through the **Claude Code CLI (`claude`) only**. Other `ai_agent` values are
 accepted as settings but fail closed before anything is launched, because their CLIs cannot be reliably started without
-user hooks, plugins, and tools. Excerpt-based analysis is not implemented. The dashboard offers session diagnosis (see below).
+user hooks, plugins, and tools. Excerpt-based analysis is not implemented. The dashboard offers session diagnosis and anomaly explanation (see below).
 
 ## Commands
 
@@ -14,6 +14,7 @@ user hooks, plugins, and tools. Excerpt-based analysis is not implemented. The d
 | `agentlens ai enable` / `disable` | Set `ai_enabled` (opt in or out) |
 | `agentlens ai preview <diagnose\|session> <id>` | Print the exact JSON preview (prompt, command, `inputHash`, `confirmationHash`). Read-only, works while AI is off, never counts against the cap |
 | `agentlens recommend [--ai] [--preview] [--confirm <hash>]` | Show deterministic recommendations, optionally with AI enrichment; preview works while disabled |
+| `agentlens explain anomaly <YYYY-MM-DD> <project> [--agent <agent>] [--preview] [--confirm <hash>] [--json]` | Explain a detected local-calendar spike; project is a name or numeric ID |
 | `agentlens diagnose <session-id> [--json] [--preview] [--confirm <hash>]` | Diagnose one session |
 | `agentlens diagnose --worst <N> [--project <path>] [...]` | Diagnose the N sessions with the largest summed finding estimates (1-99; ties by session id; `--project` matches the project root like `savings --project`) |
 
@@ -39,6 +40,14 @@ accepts `{}`, `{"preview":true}`, or `{"confirm":"<confirmationHash>"}`. It uses
 byte cap as diagnosis. It returns deterministic `recommendations` with `confirmation_required` and the exact command and prompt
 for an uncached request; a matching confirmation executes, and a cache hit returns `ok` without another call. Errors return
 `status`, `code`, `message`, and the deterministic recommendations. Explicit preview also works while AI is disabled.
+
+### Anomaly explanations
+
+`agentlens explain anomaly 2026-10-20 my-project --preview` shows the exact command, prompt, and hash, even while AI is disabled. Enable AI and repeat with `--confirm HASH` to send; use `--json` for machine-readable output. If a project name or ID has spikes for multiple agents, add `--agent claude` (or the matching agent); use a numeric project ID to disambiguate duplicate names. The literal `null` selects events without a project. Invalid or future dates and dates without a detected spike fail. Historical dates are evaluated through the end of the local calendar day; today is evaluated through the current instant. A changed spike or contributor digest requires a fresh confirmation.
+
+Overview shows the deterministic spike list whether or not AI is enabled, and offers **Explain with AI** only when enabled. `POST /api/ai/explain` accepts `{"date":"YYYY-MM-DD","project":"name or ID","agent":"optional agent","confirm":"optional hash"}`. It has a 16,384-byte request limit and the same loopback Origin guard as diagnosis. A cache miss without the exact hash returns `confirmation_required` with `{agent, model, prompt, confirmationHash}`; a successful or cached result returns `{status:"ok", cached, explanation}`. Errors use `{error, code}` with 400 for invalid input/date, 404 for no matching spike, 409 for ambiguous selection, 403 for disabled/invalid settings, 422 for an unsupported provider, 429 for the cap, and 502 for runner or output failure.
+
+The prompt contains the spike's day, project ID, agent, token total, baseline median, sample count, ratio, and bounded structured digests of its top contributing sessions. It excludes raw prompts, instruction bodies, file paths, session IDs, and arbitrary files. Redaction is applied and the prompt remains valid JSON data under 12,000 characters by dropping detail as needed. Only a bounded, non-empty single-paragraph JSON explanation is cached. The explanation is a model interpretation of limited metadata, not proof of a cause; it does not alter the deterministic anomalies, scores, findings, or recommendations.
 
 ## Settings
 

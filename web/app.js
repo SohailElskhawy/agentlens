@@ -510,7 +510,7 @@ function renderSkeleton() {
 // ============================================================================
 
 async function overview() {
-  const [s, daily, models, projects, quota, findingsRes, healthRes] = await Promise.all([
+  const [s, daily, models, projects, quota, findingsRes, healthRes, anomalies, aiState] = await Promise.all([
     api('summary'),
     api('daily'),
     api('models'),
@@ -518,6 +518,8 @@ async function overview() {
     api('quota'),
     api('findings').catch(() => ({ findings: [] })),
     api('health').catch(() => null),
+    fetch(`/api/anomalies?${new URLSearchParams({ ...(state.agent ? { agent: state.agent } : {}), ...(state.project ? { project: state.project } : {}) })}`).then(r => r.json()).catch(() => ({ anomalies: [] })),
+    api('ai/status').catch(() => null),
   ]);
   const t = s.totals;
   const days = [...new Set(daily.map((d) => d.day))];
@@ -616,6 +618,14 @@ async function overview() {
 
       ${antigravityNotice}
       ${balanceCard}
+      <section class="card">
+        <div class="card-header"><div><h3 class="card-title">Today's token spikes</h3><span class="card-subtitle">Compared with the median of recent active days</span></div></div>
+        ${(anomalies.anomalies || []).length ? anomalies.anomalies.map((a, i) => `
+          <div class="anomaly-row"><div><strong>${esc(a.project || 'Unknown project')}</strong> · ${esc(AGENTS[a.agent] || a.agent)}<br><span class="card-subtitle">${fmtTok(a.tokens)} tokens · ${a.ratio}× baseline</span></div>
+          ${aiState?.enabled ? `<button type="button" class="btn btn-sm btn-outline anomaly-explain" data-index="${i}">Explain with AI</button>` : ''}</div>
+        `).join('') : '<p class="card-subtitle">No spikes detected today.</p>'}
+        <p id="anomaly-ai-error" class="ai-note" role="status"></p>
+      </section>
 
       <div class="grid-12">
         <div class="col-7 card chart-container">
@@ -680,6 +690,10 @@ async function overview() {
       </div>
     `,
     after: () => {
+      document.querySelectorAll('.anomaly-explain').forEach(btn => {
+        const a = anomalies.anomalies[Number(btn.dataset.index)];
+        wireAnomalyExplain(btn, a);
+      });
       if (days.length) {
         chart(
           'c-daily',
@@ -1339,7 +1353,7 @@ function renderDiagnosis(d, cached) {
   return root;
 }
 
-function renderDiagnosePreview(sessionId, preview, onDone) {
+function renderDiagnosePreview(sessionId, preview, onDone, post = postDiagnose) {
   const root = mk('div', 'ai-diagnosis');
   const agent = preview.model ? `${preview.agent} (${preview.model})` : preview.agent;
   root.append(
@@ -1361,10 +1375,10 @@ function renderDiagnosePreview(sessionId, preview, onDone) {
     send.textContent = 'Sending…';
     status.textContent = '';
     try {
-      const r = await postDiagnose(sessionId, preview.confirmationHash);
+      const r = await post(sessionId, preview.confirmationHash);
       if (r.status === 'ok') return onDone(r);
       // Data changed since the preview: show the fresh one instead of sending stale consent.
-      openSlideOver('Review before sending', renderDiagnosePreview(sessionId, r.preview, onDone));
+      openSlideOver('Review before sending', renderDiagnosePreview(sessionId, r.preview, onDone, post));
     } catch (err) {
       status.textContent = err.message;
       send.disabled = cancel.disabled = false;
@@ -1376,6 +1390,36 @@ function renderDiagnosePreview(sessionId, preview, onDone) {
   root.append(pre, status, actions);
   queueMicrotask(() => send.focus());
   return root;
+}
+
+function wireAnomalyExplain(btn, anomaly) {
+  const post = async (_id, confirm) => {
+    const response = await fetch('/api/ai/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: anomaly.day, project: String(anomaly.projectId), agent: anomaly.agent, ...(confirm ? { confirm } : {}) }) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'Could not prepare the explanation. Try again.');
+    return body;
+  };
+  const showResult = result => {
+    const root = mk('div', 'ai-diagnosis');
+    root.append(mk('p', 'ai-summary', result.explanation));
+    if (result.cached) root.append(mk('p', 'ai-note', 'Saved result from an earlier run. Nothing was sent.'));
+    root.append(mk('p', 'ai-note', 'AI interpretation of structured metadata. Causes are unverified; the detected spike is unchanged.'));
+    openSlideOver('AI explanation', root);
+    $('#slide-over-close')?.focus();
+  };
+  btn.addEventListener('click', async () => {
+    const status = $('#anomaly-ai-error');
+    btn.disabled = true; btn.textContent = 'Preparing…'; status.textContent = '';
+    try {
+      const result = await post(null);
+      btn.disabled = false; btn.textContent = 'Explain with AI'; btn.focus();
+      if (result.status === 'ok') showResult(result);
+      else openSlideOver('Review before sending', renderDiagnosePreview(null, result.preview, showResult, post));
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Explain with AI'; btn.focus(); status.textContent = e.message;
+    }
+  });
 }
 
 function wireExplainWithAi(btn, sessionId) {

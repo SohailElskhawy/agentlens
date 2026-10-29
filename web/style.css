@@ -1226,3 +1226,7 @@ kbd {
 .ai-actions .btn:disabled, #btn-explain-ai:disabled { opacity: 0.6; cursor: progress; }
 .ai-error { margin: 0 0 var(--space-3); font-size: 13px; color: var(--danger); }
 .ai-error:empty { display: none; }
+
+.anomaly-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; flex-wrap: wrap; }
+.anomaly-explain { min-height: 44px; }
+.anomaly-explain:disabled { opacity: 0.6; cursor: progress; }

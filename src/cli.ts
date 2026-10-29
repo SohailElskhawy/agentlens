@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { openDb, getRecommendations, setSetting, updateRecommendationStatus } from './db.ts';
 import { aiStatus } from './ai/gate.ts';
+import { explainAnomaly, prepareExplanation } from './ai/explain.ts';
 import { enrichRecommendations } from './ai/recommendations.ts';
 import { rewriteInstructions } from './ai/instruction-rewrite.ts';
 import { diagnoseSession, prepareDiagnosis, renderDiagnosisMarkdown, worstSessions } from './ai/diagnose.ts';
@@ -49,6 +50,7 @@ const HELP = `Usage: agentlens <command>
   status              show terminal summary for current project or --project <path>
   ai <action>         AI status, enable, disable, or preview <diagnose|session> <id>
   recommend           show recommendations [--ai] [--preview] [--confirm <hash>]
+  explain anomaly     explain a detected spike <date> <project> [--agent <agent>] [--preview | --confirm <hash>] [--json]
   diagnose            AI diagnosis of a session <id> or --worst <N> (--project, --json, --preview, --confirm <hash>)
   optimize [path]     workspace hygiene or instruction rewrite (--ai, --preview, --confirm <hash>, --apply, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
@@ -182,6 +184,35 @@ const commands: Record<string, () => unknown> = {
       console.log(JSON.stringify(result, null, 2));
       if (result.status !== 'ok' && !values.preview) process.exitCode = 1;
     } finally { db.close(); }
+  },
+  explain: async () => {
+    const usage = 'Usage: agentlens explain anomaly <YYYY-MM-DD> <project name or ID> [--agent <agent>] [--preview | --confirm <hash>] [--json]';
+    let parsed;
+    try { parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
+      agent: { type: 'string' }, preview: { type: 'boolean' }, confirm: { type: 'string' }, json: { type: 'boolean' },
+    } }); } catch { console.error(usage); process.exitCode = 1; return; }
+    const { values, positionals } = parsed;
+    if (positionals.length !== 3 || positionals[0] !== 'anomaly' || !positionals[2] || (values.agent !== undefined && !values.agent) ||
+      (values.preview && values.confirm) || (values.confirm !== undefined && !/^[a-f0-9]{64}$/.test(values.confirm))) {
+      console.error(usage); process.exitCode = 1; return;
+    }
+    if (!existsSync(DB_PATH)) { console.error('No database found'); process.exitCode = 1; return; }
+    const db = values.preview ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(DB_PATH);
+    try {
+      const [, date, project] = positionals;
+      const result = values.preview ? prepareExplanation(db, date, project, { agent: values.agent }) :
+        await explainAnomaly(db, date, project, { agent: values.agent, confirm: values.confirm });
+      if (result.status === 'error' || result.status === 'confirmation_required') process.exitCode = 1;
+      if (values.json) console.log(JSON.stringify(result, null, 2));
+      else if (result.status === 'error') console.error(`${result.code}: ${result.message}`);
+      else if (result.status === 'ok') console.log(`${result.explanation}\n\nAI interpretation of structured metadata; causes are unverified.${result.cached ? ' (cached)' : ''}`);
+      else {
+        const p = result.preview;
+        console.log(`Provider: ${p.agent}${p.model ? ` (${p.model})` : ''}\nCommand: ${p.bin} ${p.args.slice(0, -1).join(' ')} -- <prompt>\nConfirmation hash: ${p.confirmationHash}\n--- exact prompt sent ---\n${p.prompt}\n--- end prompt ---`);
+        if (result.status === 'confirmation_required') console.error('Confirmation required; review the prompt and rerun with --confirm HASH');
+      }
+    } catch { console.error('explain failed: check the anomaly and settings'); process.exitCode = 1; }
+    finally { db.close(); }
   },
   diagnose: async () => {
     const usage = 'Usage: agentlens diagnose <session-id> | --worst <N> [--project <path>] [--json] [--preview] [--confirm <hash>]...';
