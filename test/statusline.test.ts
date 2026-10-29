@@ -622,5 +622,175 @@ test('writeSummary: ignores newest malformed note and uses valid older note with
   assert.equal(data.topInsight, 'Valid older explanation.');
 });
 
+test('writeSummary: active session (last 15m) with contextSize >= 120k and growth >= 20k sets contextWarning and formatStatusline includes warning in < 10ms', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  const now = Date.now();
+
+  const projId = upsertProject(db, '/work/runaway', 'runaway');
+  upsertSessions(db, [{ id: 's-warn', agent: 'claude', cwd: '/work/runaway', projectId: projId }]);
+
+  // Turn 1 (earlier): contextSize = 100_000
+  // Turn 2 (latest): contextSize = 125_000 (growth = 25_000 >= 20_000, contextSize >= 120_000)
+  upsertEvents(db, [
+    {
+      id: 'e-turn1',
+      agent: 'claude',
+      sessionId: 's-warn',
+      ts: now - 5 * 60_000,
+      kind: 'assistant',
+      input: 70_000,
+      output: 500,
+      cacheRead: 20_000,
+      cacheWrite: 10_000,
+    },
+    {
+      id: 'e-turn2',
+      agent: 'claude',
+      sessionId: 's-warn',
+      ts: now - 2 * 60_000,
+      kind: 'assistant',
+      input: 80_000,
+      output: 500,
+      cacheRead: 30_000,
+      cacheWrite: 15_000,
+    },
+  ]);
+
+  writeSummary(db, summaryPath);
+  assert.ok(existsSync(summaryPath));
+
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+  assert.equal(data.projects['/work/runaway']?.contextWarning, '[COMPACT RECOMMENDED]');
+
+  const start = performance.now();
+  const statusline = formatStatusline(summaryPath, '/work/runaway');
+  const elapsed = performance.now() - start;
+
+  assert.ok(elapsed < 10, `Statusline took ${elapsed}ms (expected < 10ms)`);
+  assert.match(statusline, /· \[COMPACT RECOMMENDED\]/);
+});
+
+test('writeSummary: active session below threshold (contextSize < 120k or growth < 20k) has no contextWarning', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  const now = Date.now();
+
+  // Project A: growth >= 20k, but contextSize < 120k (e.g. 50k -> 80k)
+  const projIdA = upsertProject(db, '/work/sub-threshold-size', 'sub-threshold-size');
+  upsertSessions(db, [{ id: 's-sub-size', agent: 'claude', cwd: '/work/sub-threshold-size', projectId: projIdA }]);
+  upsertEvents(db, [
+    {
+      id: 'e-sub-a1',
+      agent: 'claude',
+      sessionId: 's-sub-size',
+      ts: now - 6 * 60_000,
+      kind: 'assistant',
+      input: 50_000,
+      output: 500,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    {
+      id: 'e-sub-a2',
+      agent: 'claude',
+      sessionId: 's-sub-size',
+      ts: now - 3 * 60_000,
+      kind: 'assistant',
+      input: 80_000,
+      output: 500,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  ]);
+
+  // Project B: contextSize >= 120k, but growth < 20k (e.g. 120k -> 125k)
+  const projIdB = upsertProject(db, '/work/sub-threshold-growth', 'sub-threshold-growth');
+  upsertSessions(db, [{ id: 's-sub-growth', agent: 'claude', cwd: '/work/sub-threshold-growth', projectId: projIdB }]);
+  upsertEvents(db, [
+    {
+      id: 'e-sub-b1',
+      agent: 'claude',
+      sessionId: 's-sub-growth',
+      ts: now - 5 * 60_000,
+      kind: 'assistant',
+      input: 120_000,
+      output: 500,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    {
+      id: 'e-sub-b2',
+      agent: 'claude',
+      sessionId: 's-sub-growth',
+      ts: now - 2 * 60_000,
+      kind: 'assistant',
+      input: 125_000,
+      output: 500,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  ]);
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+
+  assert.equal(data.projects['/work/sub-threshold-size']?.contextWarning, undefined);
+  assert.equal(data.projects['/work/sub-threshold-growth']?.contextWarning, undefined);
+
+  const statuslineA = formatStatusline(summaryPath, '/work/sub-threshold-size');
+  assert.doesNotMatch(statuslineA, /\[COMPACT RECOMMENDED\]/);
+
+  const statuslineB = formatStatusline(summaryPath, '/work/sub-threshold-growth');
+  assert.doesNotMatch(statuslineB, /\[COMPACT RECOMMENDED\]/);
+});
+
+test('writeSummary: inactive session (> 15m ago) is ignored even if turns had contextSize >= 120k and growth >= 20k', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const db = openDb(':memory:');
+  const now = Date.now();
+
+  const projId = upsertProject(db, '/work/inactive-session', 'inactive-session');
+  upsertSessions(db, [{ id: 's-inactive', agent: 'claude', cwd: '/work/inactive-session', projectId: projId }]);
+
+  // Turns happened 30m and 20m ago (> 15m ago, ts < now - 900_000)
+  upsertEvents(db, [
+    {
+      id: 'e-old1',
+      agent: 'claude',
+      sessionId: 's-inactive',
+      ts: now - 30 * 60_000,
+      kind: 'assistant',
+      input: 100_000,
+      output: 500,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    {
+      id: 'e-old2',
+      agent: 'claude',
+      sessionId: 's-inactive',
+      ts: now - 20 * 60_000,
+      kind: 'assistant',
+      input: 130_000,
+      output: 500,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  ]);
+
+  writeSummary(db, summaryPath);
+  const data = JSON.parse(readFileSync(summaryPath, 'utf8'));
+
+  assert.equal(data.projects['/work/inactive-session']?.contextWarning, undefined);
+
+  const statusline = formatStatusline(summaryPath, '/work/inactive-session');
+  assert.doesNotMatch(statusline, /\[COMPACT RECOMMENDED\]/);
+});
+
+
 
 
