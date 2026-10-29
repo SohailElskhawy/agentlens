@@ -106,3 +106,18 @@ test('today stops at now and changed spike data invalidates consent without chan
   assert.equal(prepareExplanation(db, '2026-10-20', 'project', { now: today }).status, 'error');
   db.close();
 });
+
+test('a very large contributor digest is trimmed to valid JSON under the cap', () => {
+  const db = seeded();
+  for (const id of ['b', 'c']) upsertSessions(db, [{ id, agent: 'claude', projectId: 1, cwd: '/private/project' }]);
+  for (const id of ['s', 'b', 'c']) for (let i = 0; i < 60; i++) upsertEvents(db, [{ id: `${id}-big${i}`, sessionId: id, agent: 'claude', ts: new Date(2026, 9, 20, 6, i).getTime(), kind: 'assistant', model: 'claude-sonnet-4', input: 1_000_000 + i, output: 5000 + i, cacheRead: 123456 + i }]);
+  const p = prepareExplanation(db, '2026-10-20', 'project', { now });
+  assert.equal(p.status, 'ready'); if (p.status !== 'ready') return;
+  const [instruction, json] = p.preview.prompt.split('\n');
+  assert.ok(p.preview.prompt.length <= 12000);
+  const data = JSON.parse(json);
+  assert.ok(data.contributors.length > 0);
+  assert.ok(data.contributors.some((c: any) => c.digest.turns.length < Math.min(40, c.digest.turnCount)), 'digest detail was dropped');
+  assert.match(instruction, /uncertainty/);
+  db.close();
+});
