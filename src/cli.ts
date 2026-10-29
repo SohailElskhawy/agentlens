@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { openDb, getRecommendations, setSetting, updateRecommendationStatus } from './db.ts';
 import { aiStatus } from './ai/gate.ts';
+import { enrichRecommendations } from './ai/recommendations.ts';
 import { diagnoseSession, prepareDiagnosis, renderDiagnosisMarkdown, worstSessions } from './ai/diagnose.ts';
 import type { DiagnosisPreview } from './ai/diagnose.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
@@ -46,6 +47,7 @@ const HELP = `Usage: agentlens <command>
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
   ai <action>         AI status, enable, disable, or preview <diagnose|session> <id>
+  recommend           show recommendations [--ai] [--preview] [--confirm <hash>]
   diagnose            AI diagnosis of a session <id> or --worst <N> (--project, --json, --preview, --confirm <hash>)
   optimize [path]     preview or apply workspace hygiene (.claudeignore/.cursorignore, instruction trims, unused MCPs) (--apply, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
@@ -164,6 +166,21 @@ const commands: Record<string, () => unknown> = {
     } finally {
       db.close();
     }
+  },
+  recommend: async () => {
+    let values;
+    try { ({ values } = parseArgs({ args: process.argv.slice(3), options: { ai: { type: 'boolean' }, preview: { type: 'boolean' }, confirm: { type: 'string' } } })); }
+    catch { console.error('Usage: agentlens recommend [--ai] [--preview] [--confirm <hash>]'); process.exitCode = 1; return; }
+    if ((!values.ai && (values.preview || values.confirm)) || (values.preview && values.confirm) || (values.confirm && !/^[a-f0-9]{64}$/.test(values.confirm))) { console.error('Invalid recommendation AI options'); process.exitCode = 1; return; }
+    if (!existsSync(DB_PATH)) { console.error('No database found'); process.exitCode = 1; return; }
+    const db = values.preview ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(DB_PATH);
+    try {
+      const recs = getRecommendations(db);
+      if (!values.ai) { console.log(JSON.stringify(recs, null, 2)); return; }
+      const result = await enrichRecommendations(db, recs, { preview: values.preview, confirm: values.confirm });
+      console.log(JSON.stringify(result, null, 2));
+      if (result.status !== 'ok' && !values.preview) process.exitCode = 1;
+    } finally { db.close(); }
   },
   diagnose: async () => {
     const usage = 'Usage: agentlens diagnose <session-id> | --worst <N> [--project <path>] [--json] [--preview] [--confirm <hash>]...';

@@ -16,6 +16,7 @@ import { runFix } from './fix-runner.ts';
 import { exportData, generatePrometheusMetrics } from './export.ts';
 import { aiStatus, validAiSetting } from './ai/gate.ts';
 import { diagnoseSession } from './ai/diagnose.ts';
+import { cachedRecommendations, enrichRecommendations } from './ai/recommendations.ts';
 import type { DiagnosisErrorCode, DiagnosisRunner } from './ai/diagnose.ts';
 import * as q from './queries.ts';
 
@@ -66,7 +67,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
     '/api/recommendations': (f, sp) => {
       const status = sp.get('status') || undefined;
       const recs = getRecommendations(db, { projectId: f.projectId, status });
-      return { recommendations: recs };
+      return { recommendations: sp.get('ai') === '1' ? cachedRecommendations(db, recs) : recs };
     },
     '/api/audit': (f, sp) => {
       const kind = (sp.get('kind') || undefined) as AuditKind | undefined;
@@ -349,6 +350,26 @@ export function startServer(db: DB, port: number, host = '127.0.0.1', opts: { ai
           } catch {
             send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
           }
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/ai/recommendations') {
+        const chunks: Buffer[] = []; let size = 0; let tooLarge = false;
+        req.on('data', (c: Buffer) => {
+          if (tooLarge) return;
+          size += c.length;
+          if (size > 16384) { tooLarge = true; req.resume(); send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' })); return; }
+          chunks.push(c);
+        });
+        req.on('end', async () => {
+          if (tooLarge) return;
+          let input: any;
+          try { input = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' })); }
+          if (!input || typeof input !== 'object' || Array.isArray(input) || (input.confirm !== undefined && (typeof input.confirm !== 'string' || !/^[a-f0-9]{64}$/.test(input.confirm))) || (input.preview !== undefined && typeof input.preview !== 'boolean') || (input.preview && input.confirm)) return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+          const result = await enrichRecommendations(db, getRecommendations(db), { confirm: input.confirm, preview: input.preview, runner: opts.aiRunner });
+          const status = result.status === 'error' ? AI_ERROR_STATUS[result.code] ?? 502 : 200;
+          send(res, status, 'application/json', JSON.stringify(result));
         });
         return;
       }
