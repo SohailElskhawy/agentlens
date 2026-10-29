@@ -71,7 +71,8 @@ export function generateUnifiedDiff(
 
 export function trimInstructions(
   instructions: InstructionItem[],
-  projects: Array<{ id: number; root: string; name: string }> = []
+  projects: Array<{ id: number; root: string; name: string }> = [],
+  readContent?: (path: string) => string
 ): InstructionTrimmerResult[] {
   const results: InstructionTrimmerResult[] = [];
   const lineOccurrences = new Map<string, string[]>(); // trimmedLine -> [filePaths]
@@ -79,8 +80,8 @@ export function trimInstructions(
   // Pass 1: Collect non-trivial lines across all instruction files
   for (const item of instructions) {
     try {
-      if (!existsSync(item.sourcePath)) continue;
-      const content = readFileSync(item.sourcePath, 'utf-8');
+      if (!readContent && !existsSync(item.sourcePath)) continue;
+      const content = readContent ? readContent(item.sourcePath) : readFileSync(item.sourcePath, 'utf-8');
       const lines = content.split('\n');
       for (const line of lines) {
         const trimmed = line.trim();
@@ -106,8 +107,8 @@ export function trimInstructions(
   // Pass 2: Analyze each instruction file
   for (const item of instructions) {
     try {
-      if (!existsSync(item.sourcePath)) continue;
-      const content = readFileSync(item.sourcePath, 'utf-8');
+      if (!readContent && !existsSync(item.sourcePath)) continue;
+      const content = readContent ? readContent(item.sourcePath) : readFileSync(item.sourcePath, 'utf-8');
       const lines = content.split('\n');
       const cuts: TrimmingCut[] = [];
 
