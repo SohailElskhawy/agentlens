@@ -20,7 +20,7 @@ test('disabled fallback, consent, safe payload, immutable fields, cap and valida
   setSetting(db, 'ai_enabled', 'true');
   const preview = await enrichRecommendations(db, recs, { runner });
   assert.equal(preview.status, 'confirmation_required'); if (preview.status !== 'confirmation_required') return;
-  assert.ok(!preview.preview.prompt.includes('private'));
+  assert.ok(preview.preview.prompt.includes('private'));
   assert.ok(!preview.preview.prompt.includes('rec:5'));
   const stale = await enrichRecommendations(db, recs, { runner, confirm: 'a'.repeat(64) });
   assert.equal(stale.status, 'confirmation_required'); assert.equal(count(db, 'ai_calls'), 0);
@@ -94,4 +94,72 @@ test('CLI preview works disabled and ordinary recommend stays deterministic', as
   const off = run('--ai'); assert.equal(off.status, 1); assert.equal(JSON.parse(off.stdout).code, 'AI_DISABLED');
   const preview = run('--ai', '--preview'); assert.equal(preview.status, 0); assert.equal(JSON.parse(preview.stdout).status, 'confirmation_required');
   assert.equal(run('--preview').status, 1);
+});
+
+test('preview includes bounded evidence, baseline and project metadata and invalidates on changes', async () => {
+  const { upsertProject, upsertFindings, upsertAuditItems } = await import('../src/db.ts');
+  const { tmp, put } = await import('./helpers.ts');
+  const { join } = await import('node:path');
+  const dir = tmp(); const db = openDb(':memory:'); const project = upsertProject(db, dir, 'project');
+  const finding = { id: 'finding:one', rule: 'retry_loop', projectId: project, sessionId: null, evidence: { tool: 'Bash', count: 3, sourcePath: '/home/person/secret', args: 'SECRET_ARGS', model: 'not-for-rule' }, confidence: 'high' as const, confidenceReason: '', estTokensWeek: 5, firstSeen: 1, lastSeen: 1 };
+  upsertFindings(db, [finding]);
+  const rec = { ...recs[0], id: `rec:retry_loop:${project}:finding:one`, projectId: project, body: 'Baseline advice /home/person/private sk-proj-abcdefghijk' };
+  put(join(dir, 'package.json'), JSON.stringify({ dependencies: { react: 'SECRET_VERSION' }, scripts: { test: 'SECRET_COMMAND' }, description: 'SECRET_DESCRIPTION' }));
+  put(join(dir, 'AGENTS.md'), '# Architecture\nSECRET_INSTRUCTION_BODY\n');
+  upsertAuditItems(db, [{ id: 'i', agent: 'all', projectId: project, kind: 'instruction', name: 'AGENTS.md', sourcePath: join(dir, 'AGENTS.md'), tokens: 1, invocations30d: 0, lastInvoked: null, details: {}, status: 'active', updatedAt: 1 }]);
+  const preview = async () => { const r = await enrichRecommendations(db, [rec], { preview: true }); assert.equal(r.status, 'confirmation_required'); if (r.status !== 'confirmation_required') throw Error(); return r.preview; };
+  const first = await preview();
+  for (const value of ['Baseline advice', 'Bash', '"count":3', 'react', 'test', 'Architecture']) assert.ok(first.prompt.includes(value), value);
+  for (const value of ['SECRET_', '/home/person', 'sk-proj-abcdefghijk', 'sourcePath', 'not-for-rule']) assert.ok(!first.prompt.includes(value), value);
+  upsertFindings(db, [{ ...finding, evidence: { ...finding.evidence, count: 4 } }]); assert.notEqual((await preview()).inputHash, first.inputHash);
+  put(join(dir, 'package.json'), JSON.stringify({ dependencies: { next: '1' } })); assert.notEqual((await preview()).inputHash, first.inputHash);
+  put(join(dir, 'AGENTS.md'), '# Changed heading\nSECRET_INSTRUCTION_BODY'); assert.notEqual((await preview()).inputHash, first.inputHash);
+  put(join(dir, 'package.json'), 'x'.repeat(65537) + 'PAST_LIMIT'); put(join(dir, 'AGENTS.md'), '# Oversized\n' + 'x'.repeat(65537));
+  const oversized = await preview(); assert.ok(!oversized.prompt.includes('PAST_LIMIT')); assert.ok(!oversized.prompt.includes('Oversized'));
+  db.close();
+});
+
+test('long top twenty entries remain valid JSON and only selected IDs are accepted', async () => {
+  const db = openDb(':memory:'); setSetting(db, 'ai_enabled', 'true');
+  const { upsertFindings } = await import('../src/db.ts');
+  const many = Array.from({ length: 20 }, (_, i) => ({ ...recs[0], id: `rec:retry_loop:global:${i}:` + 'x'.repeat(200 - `rec:retry_loop:global:${i}:`.length), body: 'b'.repeat(600), actionSnippet: 's'.repeat(300) }));
+  upsertFindings(db, many.map(r => ({ id: r.id.slice('rec:retry_loop:global:'.length), rule: 'retry_loop', projectId: null, sessionId: null, evidence: { tool: 't'.repeat(100), count: 1e100, args: 'z'.repeat(10000) }, confidence: 'high' as const, confidenceReason: '', estTokensWeek: 1, firstSeen: 1, lastSeen: 1 })));
+  const p = await enrichRecommendations(db, many, { topN: 20, preview: true }); assert.equal(p.status, 'confirmation_required'); if (p.status !== 'confirmation_required') throw Error();
+  assert.ok(p.preview.prompt.length <= 12000);
+  const payload = JSON.parse(p.preview.prompt.slice(p.preview.prompt.indexOf('\n') + 1));
+  const entries = Array.isArray(payload) ? payload : payload.recommendations;
+  assert.ok(entries.length < 20 && entries.length > 0);
+  const last = many[19].id; const runner = async () => ({ ok: true, text: JSON.stringify([{ id: last, aiBody: 'bad' }]) });
+  const result = await enrichRecommendations(db, many, { topN: 20, runner, confirm: p.preview.confirmationHash });
+  assert.equal(result.status === 'error' && result.code, 'AI_INVALID_OUTPUT'); db.close();
+});
+
+test('filtered GET uses canonical cache and disabled GET stays deterministic', async () => {
+  const db = openDb(':memory:'); const items: Recommendation[] = recs.map((r, i) => ({ ...r, status: i === 0 ? 'accepted' : 'open' })); upsertRecommendations(db, items);
+  const runner = async () => ({ ok: true, text: output }); const server = await startServer(db, 0, '127.0.0.1', { aiRunner: runner });
+  try {
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/recommendations`;
+    const get = async (query: string) => await (await fetch(url + query)).json() as { recommendations: Recommendation[] };
+    assert.deepEqual(await get('?ai=1'), await get(''));
+    setSetting(db, 'ai_enabled', 'true');
+    const { getRecommendations } = await import('../src/db.ts'); const all = getRecommendations(db);
+    const p = await enrichRecommendations(db, all, { runner }); if (p.status !== 'confirmation_required') throw Error();
+    await enrichRecommendations(db, all, { runner, confirm: p.preview.confirmationHash });
+    assert.equal((await get('?status=accepted&ai=1')).recommendations[0].aiBody, 'Try fewer retries');
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); db.close(); }
+});
+
+
+test('project files cannot escape through symlinks or block on special files', async () => {
+  const { upsertProject, upsertAuditItems } = await import('../src/db.ts');
+  const { tmp, put } = await import('./helpers.ts'); const { join } = await import('node:path');
+  const { symlinkSync } = await import('node:fs'); const { spawnSync } = await import('node:child_process');
+  const dir = tmp(); const outside = tmp(); const db = openDb(':memory:'); const project = upsertProject(db, dir, 'project');
+  put(join(outside, 'outside.md'), '# OUTSIDE_HEADING'); put(join(outside, 'package.json'), '{"dependencies":{"outside-dep":"1"}}');
+  symlinkSync(join(outside, 'outside.md'), join(dir, 'AGENTS.md')); symlinkSync(join(outside, 'package.json'), join(dir, 'package.json'));
+  assert.equal(spawnSync('mkfifo', [join(dir, 'FIFO.md')]).status, 0);
+  upsertAuditItems(db, ['AGENTS.md', 'FIFO.md'].map(name => ({ id: name, agent: 'all' as const, projectId: project, kind: 'instruction' as const, name, sourcePath: join(dir, name), tokens: 1, invocations30d: 0, lastInvoked: null, details: {}, status: 'active' as const, updatedAt: 1 })));
+  const result = await enrichRecommendations(db, [{ ...recs[0], projectId: project }], { preview: true });
+  assert.equal(result.status, 'confirmation_required'); if (result.status !== 'confirmation_required') throw Error();
+  assert.ok(!result.preview.prompt.includes('OUTSIDE_HEADING')); assert.ok(!result.preview.prompt.includes('outside-dep')); db.close();
 });

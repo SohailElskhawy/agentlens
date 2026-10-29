@@ -33,7 +33,7 @@ cross-origin requests rejected). Without a matching `confirm` it returns `200 {"
 with one (or a cached result) `200 {"status":"ok","cached":bool,"diagnosis":{...}}`. Errors carry `{error, code}`:
 403 disabled or invalid settings, 404 unknown session, 422 unsupported provider, 429 daily cap, 502 failed run or invalid output.
 
-`GET /api/recommendations?ai=1` adds validated cached enrichment for the first five returned recommendations when AI is enabled;
+`GET /api/recommendations?ai=1` adds validated cached enrichment for the first five unfiltered recommendations (then merges them into any filtered results) when AI is enabled;
 it never starts a runner or reserves a call. Without `ai=1`, the response remains deterministic. `POST /api/ai/recommendations`
 accepts `{}`, `{"preview":true}`, or `{"confirm":"<confirmationHash>"}`. It uses the same loopback Origin guard and 16 KB
 byte cap as diagnosis. It returns deterministic `recommendations` with `confirmation_required` and the exact command and prompt
@@ -66,7 +66,7 @@ the cache entry and call-log row.
 - For diagnosis, a redacted, structured digest: finding rule names and estimates, tool names, call counts and byte sizes, token totals,
   and the first turns' token counts and model names. No prompt text, tool output, source code, session IDs, or paths.
   Secrets, emails, and home paths are redacted from the payload, which is capped at 12,000 characters.
-- Recommendation enrichment sends only the first five recommendation IDs, rule names, action types and scores; identifiers and labels must pass a strict safe-character check and redaction. It does not read package files, instructions, prompts, or recommendation text.
+- Recommendation enrichment sends bounded, redacted baseline recommendation text and whitelisted finding evidence, plus project dependency and script names and instruction headings when available. It reads only regular project files up to 64 KB each, and sends no instruction bodies or package values. The prompt is capped at 12,000 characters by dropping lower-ranked recommendations; the default is five and the maximum is twenty.
 - agentlens runs `claude -p ...` with hooks, plugins, MCP, slash commands, and tools disabled, in a fresh temporary directory.
 - That CLI authenticates with whatever provider, account, or subscription **you** configured for it, and the prompt goes to
   that provider. Using it consumes that account's quota or billing and the data leaves your machine. agentlens does not
