@@ -1,12 +1,12 @@
-import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { closeSync, constants, existsSync, fstatSync, ftruncateSync, lstatSync, openSync, readdirSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { CHARS_PER_TOKEN } from './audit/constants.ts';
-import { scanInstructions } from './audit/scanners/instruction.ts';
+import type { InstructionItem } from './audit/scanners/instruction.ts';
+import { MAX_BOUNDED_READ_BYTES } from './ai/constants.ts';
 import { trimInstructions, type InstructionTrimmerResult, type TrimmingCut } from './audit/trimmer.ts';
 import { getAuditItems, getFindings, type DB } from './db.ts';
 import { projectName, projectRoot as resolveProjectRoot } from './project.ts';
-import type { AuditItem } from './types.ts';
+import type { Agent, AuditItem } from './types.ts';
 
 export interface IgnoreFileUpdate {
   fileName: '.claudeignore' | '.cursorignore';
@@ -90,6 +90,55 @@ const CORE_INSTRUCTION_FILES = new Set([
 
 const OVERSIZED_FILE_BYTES = 40_000; // ~10k tokens
 
+type Snapshot = { path: string; content: string; dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number; mode: number };
+
+// Check every existing component without following links, including missing leaf paths.
+function checkPath(root: string, path: string): void {
+  const rel = relative(root, path);
+  if (rel.startsWith(`..${sep}`) || rel === '..' || isAbsolute(rel)) throw Error(`Path outside project: ${path}`);
+  let current = root;
+  for (const part of rel.split(sep).filter(Boolean)) {
+    current = join(current, part);
+    let st;
+    try { st = lstatSync(current); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    if (st.isSymbolicLink()) throw Error(`Symlink not allowed: ${current}`);
+    if (current !== path && !st.isDirectory()) throw Error(`Not a directory: ${current}`);
+  }
+}
+
+function snapshot(root: string, path: string): Snapshot | null {
+  checkPath(root, path);
+  let fd: number;
+  try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1 || st.size > MAX_BOUNDED_READ_BYTES) throw Error(`Unsafe or oversized file: ${path}`);
+    const bytes = Buffer.alloc(MAX_BOUNDED_READ_BYTES + 1);
+    const n = readSync(fd, bytes, 0, bytes.length, 0);
+    const after = fstatSync(fd), pathStat = lstatSync(path);
+    if (n !== st.size || after.size !== st.size || after.mtimeMs !== st.mtimeMs || after.ctimeMs !== st.ctimeMs ||
+        pathStat.dev !== st.dev || pathStat.ino !== st.ino || pathStat.nlink !== 1) throw Error(`File changed while reading: ${path}`);
+    const content = bytes.subarray(0, n).toString('utf8');
+    if (!Buffer.from(content).equals(bytes.subarray(0, n))) throw Error(`Invalid UTF-8: ${path}`);
+    return { path, content, dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, mode: st.mode };
+  } finally { closeSync(fd); }
+}
+
+function sameSnapshot(a: Snapshot | null, b: Snapshot | null): boolean {
+  return a === null ? b === null : b !== null && a.dev === b.dev && a.ino === b.ino && a.size === b.size &&
+    a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs && a.content === b.content;
+}
+
+function safePattern(path: string): boolean {
+  if (!path || path !== path.trim() || isAbsolute(path) || /[\\:\x00-\x1f\x7f-\x9f*?!\[\]#]/.test(path)) return false;
+  const parts = path.split('/');
+  return parts.every(part => part !== '' && part !== '.' && part !== '..' && !CORE_INSTRUCTION_FILES.has(part));
+}
+
 function applyCutsToLines(originalLines: string[], cuts: TrimmingCut[]): string[] {
   const newLines = [...originalLines];
   const sortedCuts = [...cuts].sort((a, b) => b.startLine - a.startLine);
@@ -128,9 +177,11 @@ export function optimizeWorkspace(
   } = {}
 ): WorkspaceOptimizeResult {
   const apply = Boolean(options.apply);
-  const home = options.home ?? process.env.AGENTLENS_SOURCE_HOME ?? homedir();
+  // Keep the home option for API compatibility; project optimization never scans global files.
 
-  let root = options.projectRoot ? resolveProjectRoot(resolve(options.projectRoot)) : undefined;
+  const selectedRoot = options.projectRoot ? resolve(options.projectRoot) : undefined;
+  let root = selectedRoot ? resolveProjectRoot(selectedRoot) : undefined;
+  if (selectedRoot && root && relative(root, selectedRoot).startsWith('..')) throw Error('Resolved project root is outside the selected project');
   let projId: number | null = options.projectId ?? null;
   let projName = '';
 
@@ -157,6 +208,9 @@ export function optimizeWorkspace(
       projName = row.name;
     }
   }
+
+  root = resolve(root);
+  if (realpathSync(root) !== root || !lstatSync(root).isDirectory()) throw Error('Project root must be a canonical directory without symlinks');
 
   if (!projName) {
     projName = projectName(root);
@@ -192,7 +246,8 @@ export function optimizeWorkspace(
     ];
     for (const { dir, prefix } of scanDirs) {
       try {
-        if (!existsSync(dir) || !statSync(dir).isDirectory()) continue;
+        checkPath(root, dir);
+        if (!existsSync(dir) || !lstatSync(dir).isDirectory()) continue;
         for (const entry of readdirSync(dir, { withFileTypes: true })) {
           if (!entry.isFile()) continue;
           if (entry.name.startsWith('.')) continue;
@@ -204,7 +259,8 @@ export function optimizeWorkspace(
 
           const fullPath = join(dir, entry.name);
           const relPath = `${prefix}${entry.name}`;
-          const st = statSync(fullPath);
+          const st = lstatSync(fullPath);
+          if (!st.isFile()) continue;
           if (st.size >= OVERSIZED_FILE_BYTES) {
             const estTokens = Math.ceil(st.size / CHARS_PER_TOKEN);
             oversizedFiles.push({
@@ -213,7 +269,7 @@ export function optimizeWorkspace(
               estTokens,
               reason: `Oversized workspace file (${Math.round(st.size / 1024)} KB / ~${estTokens.toLocaleString()} tok) slows context & grep scans`,
             });
-            desiredPatterns.push(relPath);
+            if (safePattern(relPath)) desiredPatterns.push(relPath);
           }
         }
       } catch {}
@@ -226,8 +282,8 @@ export function optimizeWorkspace(
     for (const f of findings) {
       const sampleFiles = Array.isArray(f.evidence?.sampleFiles) ? f.evidence.sampleFiles : [];
       for (const sf of sampleFiles) {
-        if (typeof sf === 'string' && sf.trim() && !CORE_INSTRUCTION_FILES.has(basename(sf))) {
-          desiredPatterns.push(sf.trim());
+        if (typeof sf === 'string' && safePattern(sf)) {
+          desiredPatterns.push(sf);
         }
       }
     }
@@ -243,11 +299,14 @@ export function optimizeWorkspace(
 
   const ignoreTargets: Array<'.claudeignore' | '.cursorignore'> = ['.claudeignore', '.cursorignore'];
   const ignoreFiles: IgnoreFileUpdate[] = [];
+  const planned: Array<{ path: string; before: Snapshot | null; content: string }> = [];
+  const snapshots = new Map<string, Snapshot | null>();
 
   for (const fileName of ignoreTargets) {
     const filePath = join(root, fileName);
-    const existed = existsSync(filePath);
-    const existingContent = existed ? readFileSync(filePath, 'utf-8') : '';
+    const before = snapshot(root, filePath);
+    const existed = before !== null;
+    const existingContent = before?.content ?? '';
     const existingSet = parseExistingIgnoreSet(existingContent);
 
     const addedPatterns = uniqueDesired.filter((pat) => !existingSet.has(pat));
@@ -262,9 +321,7 @@ export function optimizeWorkspace(
       ].join('\n');
       updatedContent = existingContent + prefix + managedBlock;
 
-      if (apply && existsSync(root)) {
-        writeFileSync(filePath, updatedContent, 'utf-8');
-      }
+      planned.push({ path: filePath, before, content: updatedContent });
     }
 
     ignoreFiles.push({
@@ -279,28 +336,72 @@ export function optimizeWorkspace(
 
   // 4. Run instruction trimmer on project instruction files (exclude docs/*.md)
   const projectList = [{ id: projId ?? 1, root, name: projName }];
-  const scannedInstructions = scanInstructions(home, projectList).filter(
-    (item) => item.projectId === (projId ?? 1) && !item.details?.isDoc
-  );
-  const trimResults = trimInstructions(scannedInstructions, projectList);
+  const scannedInstructions: InstructionItem[] = [];
+  const targets: Array<[Agent, string]> = [
+    ['claude', 'CLAUDE.md'], ['claude', '.claude/CLAUDE.md'],
+    ['codex', 'AGENTS.md'], ['codex', '.codex/AGENTS.md'],
+    ['antigravity', 'GEMINI.md'], ['antigravity', '.gemini/GEMINI.md'],
+  ];
+  const rules = join(root, '.claude/rules');
+  checkPath(root, rules);
+  if (existsSync(rules)) {
+    if (!lstatSync(rules).isDirectory()) throw Error(`Not a directory: ${rules}`);
+    for (const name of readdirSync(rules)) if (name.endsWith('.md')) targets.push(['claude', `.claude/rules/${name}`]);
+  }
+  for (const [agent, name] of targets) {
+    const path = join(root, name), data = snapshot(root, path);
+    snapshots.set(path, data);
+    if (!data) continue;
+    scannedInstructions.push({ agent, projectId: projId ?? 1, kind: 'instruction', name: basename(path),
+      sourcePath: path, path, tokens: Math.ceil(data.content.length / CHARS_PER_TOKEN), details: {} });
+  }
+  const trimResults = trimInstructions(scannedInstructions, projectList, path => snapshots.get(path)!.content);
   const instructionTrims: InstructionTrimAction[] = [];
-
   for (const trim of trimResults) {
+    const before = snapshots.get(trim.filePath)!;
     const backupPath = `${trim.filePath}.bak`;
-    let wasApplied = false;
-    if (apply && existsSync(trim.filePath) && trim.cuts.length > 0) {
-      const originalContent = readFileSync(trim.filePath, 'utf-8');
-      copyFileSync(trim.filePath, backupPath);
-      const originalLines = originalContent.split('\n');
-      const trimmedLines = applyCutsToLines(originalLines, trim.cuts);
-      writeFileSync(trim.filePath, trimmedLines.join('\n'), 'utf-8');
-      wasApplied = true;
+    planned.push({ path: trim.filePath, before, content: applyCutsToLines(before.content.split('\n'), trim.cuts).join('\n') });
+    instructionTrims.push({ ...trim, backupPath, applied: apply });
+  }
+
+  if (apply) {
+    // Preflight every target and exclusive backup before creating anything.
+    for (const entry of planned) {
+      if (!sameSnapshot(entry.before, snapshot(root, entry.path))) throw Error(`File changed: ${entry.path}`);
+      if (entry.before && snapshot(root, `${entry.path}.bak`) !== null) throw Error(`Backup already exists: ${entry.path}.bak`);
     }
-    instructionTrims.push({
-      ...trim,
-      backupPath,
-      applied: wasApplied,
-    });
+    // All instruction inputs affect cuts, including files that do not themselves change.
+    for (const [path, before] of snapshots) {
+      if (!sameSnapshot(before, snapshot(root, path))) throw Error(`File changed: ${path}`);
+    }
+    for (const entry of planned) {
+      if (entry.before) {
+        checkPath(root, `${entry.path}.bak`);
+        writeFileSync(`${entry.path}.bak`, entry.before.content, { flag: 'wx', mode: entry.before.mode });
+      }
+    }
+    for (const entry of planned) {
+      if (!sameSnapshot(entry.before, snapshot(root, entry.path))) throw Error(`File changed: ${entry.path}`);
+    }
+    for (const entry of planned) {
+      checkPath(root, entry.path);
+      const fd = openSync(entry.path, entry.before ? constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK :
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, entry.before?.mode ?? 0o666);
+      try {
+        const st = fstatSync(fd), current = lstatSync(entry.path);
+        if (!st.isFile() || st.nlink !== 1 || st.dev !== current.dev || st.ino !== current.ino ||
+          (entry.before && (st.dev !== entry.before.dev || st.ino !== entry.before.ino || st.size !== entry.before.size ||
+            st.mtimeMs !== entry.before.mtimeMs || st.ctimeMs !== entry.before.ctimeMs))) throw Error(`File changed: ${entry.path}`);
+        checkPath(root, entry.path);
+        if (entry.before) {
+          const bytes = Buffer.alloc(entry.before.size + 1);
+          const count = readSync(fd, bytes, 0, bytes.length, 0);
+          if (count !== entry.before.size || bytes.subarray(0, count).toString('utf8') !== entry.before.content) throw Error(`File changed: ${entry.path}`);
+          ftruncateSync(fd, 0);
+        }
+        writeFileSync(fd, entry.content);
+      } finally { closeSync(fd); }
+    }
   }
 
   // 5. Inspect audit_items in DB for unused MCPs/skills and duplicates
