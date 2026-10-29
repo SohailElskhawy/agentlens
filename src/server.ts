@@ -44,6 +44,16 @@ function send(res: ServerResponse, status: number, type: string, body: string | 
 
 const MAX_BODY_BYTES = 16384;
 
+// Single guarded error response for route body callbacks: sync throws and async
+// rejections both land here, and nothing is sent after the response ended or the
+// client died (double-send or writing to a dead socket would crash the server).
+export function failBody(res: ServerResponse, e: unknown) {
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    send(res, 500, 'application/json', JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+  } catch {}
+}
+
 // Shared bounded request-body reader for every POST route. Counts bytes before
 // decoding (the cap is UTF-8 bytes, not UTF-16 units), collects only chunks that
 // fit, decodes once at the end so split multi-byte chars survive, responds 413 at
@@ -70,9 +80,10 @@ function readBody(req: IncomingMessage, res: ServerResponse, onEnd: (body: strin
     const body = Buffer.concat(chunks).toString('utf8');
     settle();
     try {
-      onEnd(body);
+      const out = onEnd(body) as unknown;
+      if (out instanceof Promise) out.catch((e) => failBody(res, e)); // async routes reject instead of throw
     } catch (e) {
-      send(res, 500, 'application/json', JSON.stringify({ error: (e as Error).message }));
+      failBody(res, e);
     }
   });
   req.on('error', () => settle()); // client aborted/destroyed mid-body: let go, keep buffers claimed
