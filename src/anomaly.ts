@@ -37,6 +37,8 @@ export function formatLocalDay(d: Date): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+interface Series { projectId: number | null; agent: Agent; today: number; base: number[] }
+
 function median(xs: number[]): number {
   const s = [...xs].sort((a, b) => a - b);
   const mid = s.length >> 1;
@@ -64,7 +66,7 @@ export function detectAnomalies(db: DB, f: Filter = {}, now = Date.now()): Anoma
     FROM events e LEFT JOIN sessions s ON s.id = e.session_id
     WHERE e.kind = 'assistant'${w.sql} GROUP BY 1, 2, 3`).all(w.params) as { day: string; projectId: number | null; agent: Agent; tokens: number }[];
 
-  const series = new Map<string, { projectId: number | null; agent: Agent; today: number; base: number[] }>();
+  const series = new Map<string, Series>();
   for (const r of rows) {
     if (r.tokens <= 0) continue;
     const key = `${r.projectId}|${r.agent}`;
@@ -74,25 +76,39 @@ export function detectAnomalies(db: DB, f: Filter = {}, now = Date.now()): Anoma
     else s.base.push(r.tokens);
   }
 
-  const topStmt = db.prepare(`
-    SELECT e.session_id AS sessionId, sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens, count(*) AS events,
-      min(e.ts) AS firstTs, max(e.ts) AS lastTs
-    FROM events e LEFT JOIN sessions s ON s.id = e.session_id
-    WHERE e.kind = 'assistant' AND e.agent = $agent AND s.project_id IS $projectId AND e.ts >= $from AND e.ts < $to
-    GROUP BY e.session_id ORDER BY tokens DESC, e.session_id LIMIT ${TOP_SESSIONS}`);
   const nameStmt = db.prepare('SELECT name FROM projects WHERE id = ?');
 
-  const anomalies: Anomaly[] = [];
+  const flagged: [Series, number][] = [];
   for (const s of series.values()) {
     if (s.base.length < MIN_BASELINE_SAMPLES || s.today < MIN_SPIKE_TOKENS) continue;
     const med = median(s.base);
-    if (s.today < med * SPIKE_RATIO) continue;
-    const topSessions = (topStmt.all({ agent: s.agent, projectId: s.projectId, from: lo(todayStart), to: hi }) as Record<string, any>[])
-      .map((r) => ({ sessionId: r.sessionId, tokens: r.tokens, events: r.events, firstTs: r.firstTs, lastTs: r.lastTs }));
+    if (s.today >= med * SPIKE_RATIO) flagged.push([s, med]);
+  }
+
+  // One grouped scan of today's events for all flagged series (not one scan per series); rows arrive largest-first,
+  // ties by session id, so the first TOP_SESSIONS rows seen per series are its top contributors.
+  const top = new Map<string, AnomalySession[]>();
+  if (flagged.length) {
+    const t = where({ ...f, from: lo(todayStart), to: hi });
+    const sessions = db.prepare(`
+      SELECT s.project_id AS projectId, e.agent AS agent, e.session_id AS sessionId,
+        sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens, count(*) AS events, min(e.ts) AS firstTs, max(e.ts) AS lastTs
+      FROM events e LEFT JOIN sessions s ON s.id = e.session_id
+      WHERE e.kind = 'assistant'${t.sql} GROUP BY 1, 2, 3 ORDER BY tokens DESC, e.session_id`).all(t.params) as unknown as (AnomalySession & { projectId: number | null; agent: Agent })[];
+    for (const r of sessions) {
+      const key = `${r.projectId}|${r.agent}`;
+      let list = top.get(key);
+      if (!list) top.set(key, list = []);
+      if (list.length < TOP_SESSIONS) list.push({ sessionId: r.sessionId, tokens: r.tokens, events: r.events, firstTs: r.firstTs, lastTs: r.lastTs });
+    }
+  }
+
+  const anomalies: Anomaly[] = [];
+  for (const [s, med] of flagged) {
     anomalies.push({
       day, projectId: s.projectId, project: s.projectId == null ? null : (nameStmt.get(s.projectId) as { name: string } | undefined)?.name ?? null,
       agent: s.agent, tokens: s.today, baselineMedian: med, baselineSamples: s.base.length,
-      ratio: Number((s.today / med).toFixed(2)), topSessions,
+      ratio: Number((s.today / med).toFixed(2)), topSessions: top.get(`${s.projectId}|${s.agent}`) ?? [],
     });
   }
   anomalies.sort((a, b) => b.tokens - a.tokens);
