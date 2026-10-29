@@ -163,3 +163,70 @@ test('project files cannot escape through symlinks or block on special files', a
   assert.equal(result.status, 'confirmation_required'); if (result.status !== 'confirmation_required') throw Error();
   assert.ok(!result.preview.prompt.includes('OUTSIDE_HEADING')); assert.ok(!result.preview.prompt.includes('outside-dep')); db.close();
 });
+
+test('web/app.js contains Enrich with AI wiring, api call, and escaped enrichment rendering', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { spawnSync } = await import('node:child_process');
+  const check = spawnSync(process.execPath, ['--check', 'web/app.js'], { encoding: 'utf8' });
+  assert.equal(check.status, 0, check.stderr);
+  const appJs = readFileSync('web/app.js', 'utf8');
+  assert.ok(appJs.includes('#btn-enrich-ai') || appJs.includes('id="btn-enrich-ai"'), 'must contain #btn-enrich-ai');
+  assert.ok(appJs.includes('/api/ai/recommendations'), 'must contain /api/ai/recommendations');
+  assert.ok(appJs.includes("api('recommendations', { ai: '1' })"), "must contain api('recommendations', { ai: '1' })");
+  assert.ok(appJs.includes('ai-rec-enrichment'), 'must contain ai-rec-enrichment');
+  assert.ok(appJs.includes('ai-rec-body'), 'must contain ai-rec-body');
+  assert.ok(appJs.includes('AI snippet'), 'must contain AI snippet');
+  assert.ok(appJs.includes('rec-ai-error'), 'must contain rec-ai-error');
+  assert.ok(appJs.includes('esc(g.title)') && appJs.includes('esc(g.body)'), 'preserves deterministic title and body on groups');
+  assert.ok(appJs.includes('esc(r.title)') && appJs.includes('esc(r.body)'), 'preserves deterministic title and body on individual');
+  assert.ok(appJs.includes('esc(g.aiBody)') && appJs.includes('esc(r.aiBody)'), 'escapes aiBody');
+});
+
+test('end-to-end HTTP flow: ai status check, preview, confirm, and enriched recs with immutable deterministic fields', async () => {
+  const db = openDb(':memory:');
+  upsertRecommendations(db, recs);
+  let calls = 0;
+  const runner = async () => { calls++; return { ok: true, text: output }; };
+  const server = await startServer(db, 0, '127.0.0.1', { aiRunner: runner });
+  try {
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const offRes = await (await fetch(`${url}/api/ai/status`)).json() as { enabled: boolean };
+    assert.equal(offRes.enabled, false);
+
+    setSetting(db, 'ai_enabled', 'true');
+    const onRes = await (await fetch(`${url}/api/ai/status`)).json() as { enabled: boolean };
+    assert.equal(onRes.enabled, true);
+
+    const previewRes = await (await fetch(`${url}/api/ai/recommendations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })).json() as { status: string; preview: { confirmationHash: string } };
+    assert.equal(previewRes.status, 'confirmation_required');
+    assert.ok(previewRes.preview?.confirmationHash);
+    assert.equal(calls, 0);
+
+    const confirmRes = await (await fetch(`${url}/api/ai/recommendations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: previewRes.preview.confirmationHash }),
+    })).json() as { status: string };
+    assert.equal(confirmRes.status, 'ok');
+    assert.equal(calls, 1);
+
+    const recsRes = await (await fetch(`${url}/api/recommendations?ai=1`)).json() as { recommendations: Recommendation[] };
+    const r0 = recsRes.recommendations.find(r => r.id === 'rec:0');
+    assert.ok(r0, 'rec:0 found');
+    assert.equal(r0.aiBody, 'Try fewer retries');
+    assert.equal(r0.aiActionSnippet, 'stop');
+    assert.equal(r0.id, recs[0].id);
+    assert.equal(r0.score, recs[0].score);
+    assert.equal(r0.title, recs[0].title);
+    assert.equal(r0.body, recs[0].body);
+    assert.equal(r0.action, recs[0].action);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    db.close();
+  }
+});
+
