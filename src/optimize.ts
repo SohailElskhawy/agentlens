@@ -39,6 +39,10 @@ export interface WorkspaceOptimizeResult {
   instructionTrims: InstructionTrimAction[];
   unusedItems: AuditItem[];
   duplicateOrConflictItems: AuditItem[];
+  // Semantics: conservative proposed reduction in per-turn instruction tokens from
+  // deterministic instruction trims only (character-based estimate, agent-specific,
+  // not realized savings). Oversized-file and unused-config tokens are exposure
+  // categories reported separately, never counted as achieved or per-turn savings.
   estimatedTokensSavedPerTurn: number;
 }
 
@@ -414,10 +418,7 @@ export function optimizeWorkspace(
     (i) => i.status === 'duplicate' || i.status === 'conflict'
   );
 
-  const trimTokensSaved = instructionTrims.reduce((s, t) => s + t.tokensSaved, 0);
-  const unusedTokensSaved = unusedItems.reduce((s, i) => s + (i.tokens || 0), 0);
-  const oversizedTokensSaved = oversizedFiles.reduce((s, f) => s + Math.min(f.estTokens, 15_000), 0);
-  const estimatedTokensSavedPerTurn = trimTokensSaved + unusedTokensSaved + oversizedTokensSaved;
+  const estimatedTokensSavedPerTurn = instructionTrims.reduce((s, t) => s + t.tokensSaved, 0);
 
   return {
     projectId: projId,
@@ -442,7 +443,9 @@ export function formatOptimizeReport(res: WorkspaceOptimizeResult): string {
     `Root: ${res.projectRoot}`,
     '==================================================',
     '',
-    `Estimated Savings: ~${res.estimatedTokensSavedPerTurn.toLocaleString()} tokens/turn`,
+    `Proposed Savings: ~${res.estimatedTokensSavedPerTurn.toLocaleString()} tokens/turn`,
+    '   (proposed instruction-line reductions only: character-based estimate, agent-specific,',
+    '    not realized savings; oversized-file and unused-config exposure is listed separately)',
     '',
   ];
 
@@ -455,10 +458,14 @@ export function formatOptimizeReport(res: WorkspaceOptimizeResult): string {
       lines.push(`   - ${ig.fileName}: ${statusVerb} ${ig.addedPatterns.length} pattern(s): ${ig.addedPatterns.join(', ')}`);
     }
   }
+  lines.push('   Note: .claudeignore has no effect in Claude Code; it does not stop Claude Code tools from Reading files.');
+  lines.push('   Manual alternative: documented Read deny permission rules (access control, not a security sandbox).');
+  lines.push('   agentlens does not write your permission settings.');
+  lines.push('   Note: .cursorignore support is provider-specific (Cursor) and not OS isolation.');
   lines.push('');
 
   if (res.oversizedFiles.length > 0) {
-    lines.push('2. Oversized Workspace Files Shielded from Auto-Ingestion:');
+    lines.push('2. Oversized Workspace Files (context exposure — not counted as savings):');
     for (const f of res.oversizedFiles) {
       lines.push(`   - ${f.relativePath} (${Math.round(f.bytes / 1024)} KB / ~${f.estTokens.toLocaleString()} tokens)`);
     }
@@ -480,7 +487,7 @@ export function formatOptimizeReport(res: WorkspaceOptimizeResult): string {
   lines.push('');
 
   if (res.unusedItems.length > 0) {
-    lines.push(`4. Unused MCP Servers & Skills (0 calls in 30d):`);
+    lines.push(`4. Unused MCP Servers & Skills (0 calls in 30d; config exposure — not counted as savings):`);
     for (const u of res.unusedItems.slice(0, 12)) {
       lines.push(`   - [${u.agent}] ${u.kind.toUpperCase()} '${u.name}' (~${u.tokens.toLocaleString()} tok) -> ${u.sourcePath}`);
     }

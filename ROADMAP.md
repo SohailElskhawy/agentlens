@@ -26,6 +26,7 @@ Every roadmap feature must strictly adhere to the project's foundational constra
   - `preflight_tool_check`: Warns or limits when a command or tool call is about to output > 100KB of raw text (e.g. dumping entire database tables or unpaged logs).
 
 ### 1.2 Automated `.claudeignore` / `.cursorignore` Generator
+- **Status note (2026-10-29, official docs):** `.claudeignore` has no effect in Claude Code, so ignore files are provider-specific hygiene (e.g. `.cursorignore` for Cursor), not OS isolation, not a shield for all tools, and not auto-ingested context savings. Claude Code users should add documented Read deny permission rules manually (access control, not a security sandbox; agentlens does not write those settings). Concept preserved below as historical planning.
 - **Concept**: Analyze `large_tool_output` and `hot_files` detector logs to identify noisy directories and large files repeatedly read or searched by mistake.
 - **Features**:
   - Detects recurring dumps from build artifacts (`dist/`, `.next/`, `build/`), lockfiles (`package-lock.json`, `pnpm-lock.yaml`), large test fixtures, or auto-generated code.
@@ -138,7 +139,7 @@ Every roadmap feature must strictly adhere to the project's foundational constra
 ### 6.1 Git-Backed Repository Optimization File (`.agentlens.json`)
 - **Concept**: Store anonymized project configurations and optimization targets inside the repository.
 - **Contents**:
-  - Recommended `.claudeignore` rules.
+  - Recommended ignore rules (historical: `.claudeignore` has no effect in Claude Code; ignore support is provider-specific).
   - Project weekly token budgets.
   - Key architectural summaries for `CLAUDE.md`.
 - **Benefit**: Team members immediately inherit optimal agent guardrails upon cloning the repository.
