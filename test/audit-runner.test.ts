@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, upsertProject, upsertSessions, upsertEvents, upsertFindings, getAuditItems, getFindings, getRecommendations, updateRecommendationStatus } from '../src/db.ts';
 import { runAudit } from '../src/audit/runner.ts';
@@ -9,7 +8,7 @@ import { CONFIDENCE_WEIGHTS } from '../src/analyze/constants.ts';
 import type { NormalizedEvent } from '../src/types.ts';
 
 test('runAudit calculates overhead, unused configs, duplicates, and conflicts', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'agentlens-audit-runner-'));
+  const tmp = mkdtempSync(join(process.cwd(), '.agentlens-audit-runner-'));
 
   try {
     const home = join(tmp, 'home');

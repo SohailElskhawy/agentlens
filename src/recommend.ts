@@ -1,3 +1,5 @@
+import { getFindings, upsertRecommendations, type DB } from './db.ts';
+import { excludeTempFindings, tempProjectIds } from './temp-project.ts';
 import { CONFIDENCE_WEIGHTS } from './analyze/constants.ts';
 import { findCatalogItemsForRule } from './catalog.ts';
 import type { ActionType, Finding, Recommendation } from './types.ts';
@@ -198,4 +200,16 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
       a.id.localeCompare(b.id)
   );
   return recs;
+}
+
+export function refreshRecommendations(db: DB): void {
+  const ids = tempProjectIds(db);
+  const remove = db.prepare("DELETE FROM recommendations WHERE project_id = ? AND status = 'open' AND accepted_at IS NULL");
+  for (const id of ids) remove.run(id);
+  const all = getFindings(db);
+  const eligible = excludeTempFindings(db, all);
+  const eligibleIds = new Set(eligible.map((f) => f.id));
+  const removeFinding = db.prepare("DELETE FROM recommendations WHERE id = ? AND status = 'open' AND accepted_at IS NULL");
+  for (const f of all) if (!eligibleIds.has(f.id)) removeFinding.run(`rec:${f.rule}:${f.projectId ?? 'global'}:${f.id}`);
+  upsertRecommendations(db, generateRecommendations(eligible));
 }

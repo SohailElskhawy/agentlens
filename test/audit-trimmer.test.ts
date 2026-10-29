@@ -112,7 +112,7 @@ test('trimInstructions detects duplicates, long code blocks, stale paths, and co
 });
 
 test('runAudit includes trimmings and unified diffs in output and database', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'agentlens-trim-audit-'));
+  const tmp = mkdtempSync(join(process.cwd(), '.agentlens-trim-audit-'));
 
   try {
     const home = join(tmp, 'home');
