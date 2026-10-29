@@ -36,7 +36,10 @@ test('all AI callers reject providers marked unsupported before consent or reser
           const result = await run();
           if ('aiError' in result) assert.equal(result.aiError, 'AI_PROVIDER_UNSUPPORTED');
           else if ('message' in result && !('code' in result)) assert.equal(result.message, 'AI_PROVIDER_UNSUPPORTED');
-          else assert.equal(result.status === 'error' && result.code, 'AI_PROVIDER_UNSUPPORTED');
+          else {
+            assert.ok('status' in result && 'code' in result);
+            assert.equal(result.status === 'error' && result.code, 'AI_PROVIDER_UNSUPPORTED');
+          }
         });
       }
     }
