@@ -63,6 +63,18 @@ test('attributes a session tool stats to its primary model', () => {
   assert.deepEqual(r.map((m) => [m.name, m.sessions, m.toolErrorRate]), [['model-a', 1, 1], ['model-b', 1, 0]]);
 });
 
+test('breaks dominant-model ties alphabetically by model name', () => {
+  const db = openDb(':memory:');
+  upsertEvents(db, [
+    { id: 'a1', sessionId: 's1', agent: 'claude', ts: 1000, kind: 'assistant', model: 'model-z', input: 50 },
+    { id: 'a2', sessionId: 's1', agent: 'claude', ts: 2000, kind: 'assistant', model: 'model-a', input: 50 },
+    { id: 'c1', sessionId: 's1', agent: 'claude', ts: 3000, kind: 'tool_call', tool: 'Bash', argsHash: 'h1' },
+    { id: 'c1:result', sessionId: 's1', agent: 'claude', ts: 3100, kind: 'tool_result', isError: true },
+  ]);
+  const r = modelEfficiency(db);
+  assert.deepEqual(r.map((m) => [m.name, m.toolErrorRate]), [['model-a', 1], ['model-z', 0]]);
+});
+
 test('filters narrow by agent', () => {
   const db = openDb(':memory:');
   seed(db);

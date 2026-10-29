@@ -171,12 +171,22 @@ export function toolFailures(db: DB, f: Filter = {}) {
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 
+export interface ModelEfficiency {
+  name: string;
+  sessions: number;
+  tokens: number;
+  tokensPerSession: number;
+  avgTurns: number;
+  toolErrorRate: number;
+  cacheReadRatio: number;
+}
+
 /**
  * Efficiency comparison per model over actual workspace sessions. A session that uses several
  * models is counted once per model; its tool stats are attributed to its primary model
  * (the one with the most tokens in that session, ties broken by name for determinism).
  */
-export function modelEfficiency(db: DB, f: Filter = {}) {
+export function modelEfficiency(db: DB, f: Filter = {}): ModelEfficiency[] {
   const w = where(f);
   const turns = db.prepare(`SELECT e.model AS model, e.session_id AS sessionId,
       sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens, sum(e.cache_read) AS cacheRead, count(*) AS turns
