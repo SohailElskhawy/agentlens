@@ -251,12 +251,15 @@ test('session digest labels sampling boundaries and units', () => {
   upsertEvents(db, Array.from({ length: 60 }, (_, i) => ({ id: `e-big${i}`, agent: 'claude', sessionId: 'big', ts: i + 1, kind: 'assistant', model: 'claude-sonnet', input: 10, output: 5 })));
   upsertFindings(db, [{ id: 'f-big', rule: 'retry_loop', projectId: null, sessionId: 'big', evidence: { tool: 'Bash', count: 3 }, confidence: 'high', confidenceReason: '', estTokensWeek: 50, firstSeen: 1, lastSeen: 1 }]);
   const digest = sessionDigest(db, 'big');
+  assert.ok(digest);
   assert.equal(digest.sampling.turns, '40 sampled turns of 60 total');
   assert.equal(digest.sampling.toolResultBytes, 'aggregate bytes, not per-command');
   // short sessions state that the sample covers everything
   upsertSessions(db, [{ id: 'small', agent: 'claude', projectId: null, cwd: '/private/source' }]);
   upsertEvents(db, [{ id: 'e-small', agent: 'claude', sessionId: 'small', ts: 1, kind: 'assistant', model: 'claude-sonnet', input: 10, output: 5 }]);
-  assert.equal(sessionDigest(db, 'small').sampling.turns, '1 sampled turns of 1 total');
+  const small = sessionDigest(db, 'small');
+  assert.ok(small);
+  assert.equal(small.sampling.turns, '1 sampled turns of 1 total');
   db.close();
 });
 
