@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { openDb, setSetting, upsertEvents, upsertFindings, upsertProject, upsertRecommendations, upsertSessions } from '../src/db.ts';
 import { enrichRecommendations } from '../src/ai/recommendations.ts';
 import type { Recommendation } from '../src/types.ts';
-import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from '../src/summary.ts';
+import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary, type StatuslineFormat } from '../src/summary.ts';
 import { tmp } from './helpers.ts';
 
 test('spoolQuota parses Claude rate_limits and appends to spool file', () => {
@@ -790,6 +792,226 @@ test('writeSummary: inactive session (> 15m ago) is ignored even if turns had co
   const statusline = formatStatusline(summaryPath, '/work/inactive-session');
   assert.doesNotMatch(statusline, /\[COMPACT RECOMMENDED\]/);
 });
+
+const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
+
+test('formatStatusline: formats default, starship, and raw formats without forecast/warning in < 10ms', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const summaryData = {
+    updatedAt: Date.now(),
+    totals: {
+      tokensToday: 3500,
+      costToday: 0.05,
+      burnRateTokensPerHour: 3500,
+      activeSessions: 1,
+    },
+    projects: {
+      '/work/my-app': {
+        projectId: 1,
+        root: '/work/my-app',
+        name: 'my-app',
+        tokensToday: 3500,
+      },
+    },
+    quotas: {
+      claude: {
+        '5h': 33.3,
+        '7d': 12.0,
+      },
+    },
+  };
+  writeFileSync(summaryPath, JSON.stringify(summaryData));
+
+  // Default format
+  const t0 = performance.now();
+  const def = formatStatusline(summaryPath, '/work/my-app', 'default');
+  const dDef = performance.now() - t0;
+  assert.ok(dDef < 10, `default format took ${dDef}ms (expected < 10ms)`);
+  assert.equal(def, 'my-app · 3.5k · 5h 33% · 7d 12%');
+
+  // Starship format
+  const t1 = performance.now();
+  const starship = formatStatusline(summaryPath, '/work/my-app', 'starship');
+  const dStarship = performance.now() - t1;
+  assert.ok(dStarship < 10, `starship format took ${dStarship}ms (expected < 10ms)`);
+  assert.equal(starship, '⚡ 33% 5h | 3.5k/d');
+
+  // Raw format
+  const t2 = performance.now();
+  const raw = formatStatusline(summaryPath, '/work/my-app', 'raw');
+  const dRaw = performance.now() - t2;
+  assert.ok(dRaw < 10, `raw format took ${dRaw}ms (expected < 10ms)`);
+  assert.equal(raw, 'my-app\t3.5k\t33%\t12%\t\t');
+});
+
+test('formatStatusline: formats default, starship, and raw formats with statuslineForecast and contextWarning in < 10ms', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+  const summaryData = {
+    updatedAt: Date.now(),
+    totals: {
+      tokensToday: 50000,
+      costToday: 0.25,
+      burnRateTokensPerHour: 10000,
+      activeSessions: 2,
+    },
+    projects: {
+      '/work/runaway': {
+        projectId: 2,
+        root: '/work/runaway',
+        name: 'runaway',
+        tokensToday: 50000,
+        contextWarning: '[COMPACT RECOMMENDED]',
+      },
+    },
+    quotas: {
+      claude: {
+        '5h': 75.0,
+        '7d': 25.0,
+      },
+    },
+    statuslineForecast: '5h limit hit at 18:00',
+  };
+  writeFileSync(summaryPath, JSON.stringify(summaryData));
+
+  // Default format
+  const t0 = performance.now();
+  const def = formatStatusline(summaryPath, '/work/runaway', 'default');
+  const dDef = performance.now() - t0;
+  assert.ok(dDef < 10, `default took ${dDef}ms`);
+  assert.equal(def, 'runaway · 50.0k · 5h 75% · 7d 25% · 5h limit hit at 18:00 · [COMPACT RECOMMENDED]');
+
+  // Starship format
+  const t1 = performance.now();
+  const starship = formatStatusline(summaryPath, '/work/runaway', 'starship');
+  const dStarship = performance.now() - t1;
+  assert.ok(dStarship < 10, `starship took ${dStarship}ms`);
+  assert.equal(starship, '⚡ 75% 5h | 50.0k/d | 5h limit hit at 18:00 | [COMPACT RECOMMENDED]');
+
+  // Raw format
+  const t2 = performance.now();
+  const raw = formatStatusline(summaryPath, '/work/runaway', 'raw');
+  const dRaw = performance.now() - t2;
+  assert.ok(dRaw < 10, `raw took ${dRaw}ms`);
+  assert.equal(raw, 'runaway\t50.0k\t75%\t25%\t5h limit hit at 18:00\t[COMPACT RECOMMENDED]');
+});
+
+test('formatStatusline: formats starship and raw with only forecast or only contextWarning', () => {
+  const dir = tmp();
+  const summaryPath = join(dir, 'summary.json');
+
+  // Forecast only
+  writeFileSync(summaryPath, JSON.stringify({
+    updatedAt: Date.now(),
+    totals: { tokensToday: 1000, costToday: 0.01, burnRateTokensPerHour: 1000, activeSessions: 1 },
+    projects: { '/work/proj': { projectId: 1, root: '/work/proj', name: 'proj', tokensToday: 1000 } },
+    quotas: { claude: { '5h': 60, '7d': 30 } },
+    statuslineForecast: '5h limit near',
+  }));
+
+  assert.equal(formatStatusline(summaryPath, '/work/proj', 'starship'), '⚡ 60% 5h | 1.0k/d | 5h limit near');
+  assert.equal(formatStatusline(summaryPath, '/work/proj', 'raw'), 'proj\t1.0k\t60%\t30%\t5h limit near\t');
+
+  // Warning only
+  writeFileSync(summaryPath, JSON.stringify({
+    updatedAt: Date.now(),
+    totals: { tokensToday: 2000, costToday: 0.02, burnRateTokensPerHour: 2000, activeSessions: 3 },
+    projects: { '/work/proj': { projectId: 1, root: '/work/proj', name: 'proj', tokensToday: 2000, contextWarning: '[COMPACT RECOMMENDED]' } },
+    quotas: { claude: { '5h': 40, '7d': 20 } },
+  }));
+
+  assert.equal(formatStatusline(summaryPath, '/work/proj', 'starship'), '⚡ 40% 5h | 2.0k/d | [COMPACT RECOMMENDED]');
+  assert.equal(formatStatusline(summaryPath, '/work/proj', 'raw'), 'proj\t2.0k\t40%\t20%\t\t[COMPACT RECOMMENDED]');
+});
+
+test('formatStatusline: missing summary.json produces safe -- placeholders in all 3 formats without throwing in < 10ms', () => {
+  const missingPath = join(tmp(), 'non-existent-summary.json');
+
+  const t0 = performance.now();
+  const def = formatStatusline(missingPath, '/work/missing-app', 'default');
+  const dDef = performance.now() - t0;
+  assert.ok(dDef < 10, `default took ${dDef}ms`);
+  assert.equal(def, 'missing-app · -- · 5h -- · 7d --');
+
+  const t1 = performance.now();
+  const starship = formatStatusline(missingPath, '/work/missing-app', 'starship');
+  const dStarship = performance.now() - t1;
+  assert.ok(dStarship < 10, `starship took ${dStarship}ms`);
+  assert.equal(starship, '⚡ -- 5h | --/d');
+
+  const t2 = performance.now();
+  const raw = formatStatusline(missingPath, '/work/missing-app', 'raw');
+  const dRaw = performance.now() - t2;
+  assert.ok(dRaw < 10, `raw took ${dRaw}ms`);
+  assert.equal(raw, 'missing-app\t--\t--\t--\t\t');
+});
+
+test('cli statusline: supports --format default, starship, raw, and rejects invalid formats', () => {
+  const stateDir = tmp();
+  const summaryPath = join(stateDir, 'summary.json');
+  const projDir = join(stateDir, 'cwd-proj');
+  mkdirSync(projDir, { recursive: true });
+  writeFileSync(summaryPath, JSON.stringify({
+    updatedAt: Date.now(),
+    totals: { tokensToday: 5000, costToday: 0.05, burnRateTokensPerHour: 5000, activeSessions: 1 },
+    projects: { [projDir]: { projectId: 1, root: projDir, name: 'cwd-proj', tokensToday: 5000 } },
+    quotas: { claude: { '5h': 50, '7d': 25 } },
+  }));
+
+  const env = {
+    ...process.env,
+    AGENTLENS_STATE_DIR: stateDir,
+    AGENTLENS_DATA_DIR: tmp(),
+    AGENTLENS_SOURCE_HOME: tmp(),
+  };
+
+  // default flag
+  const outDef = execFileSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, 'statusline', '--format', 'default'], {
+    cwd: projDir,
+    env,
+    input: '',
+    encoding: 'utf8',
+  });
+  assert.equal(outDef.trim(), 'cwd-proj · 5.0k · 5h 50% · 7d 25%');
+
+  // starship flag
+  const outStarship = execFileSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, 'statusline', '--format', 'starship'], {
+    cwd: projDir,
+    env,
+    input: '',
+    encoding: 'utf8',
+  });
+  assert.equal(outStarship.trim(), '⚡ 50% 5h | 5.0k/d');
+
+  // raw flag with = syntax
+  const outRaw = execFileSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, 'statusline', '--format=raw'], {
+    cwd: projDir,
+    env,
+    input: '',
+    encoding: 'utf8',
+  });
+  assert.equal(outRaw.replace(/\r?\n$/, ''), 'cwd-proj\t5.0k\t50%\t25%\t\t');
+
+  // invalid format flag
+  let errOutput = '';
+  let exitCode = 0;
+  try {
+    execFileSync(process.execPath, ['--no-warnings=ExperimentalWarning', CLI, 'statusline', '--format', 'unsupported'], {
+      cwd: projDir,
+      env,
+      input: '',
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err: any) {
+    exitCode = err.status;
+    errOutput = err.stderr;
+  }
+  assert.equal(exitCode, 1);
+  assert.match(errOutput, /Usage: agentlens statusline \[--format default\|starship\|raw\]/);
+});
+
 
 
 
