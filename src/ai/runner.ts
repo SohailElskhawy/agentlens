@@ -12,6 +12,10 @@ export const TEMP_DIR_NAME = 'agentlens-ai';
 const execFileAsync = promisify(execFile);
 // Other CLIs cannot reliably disable all configured hooks, plugins, and tools.
 const agents = ['claude'] as const;
+const safetyArgs = ['--no-session-persistence', '--safe-mode', '--restricted', '--strict-mcp-config',
+  '--disable-slash-commands', '--tools', ''];
+const requiredOptions = ['--print', '--output-format', '--no-session-persistence', '--safe-mode', '--restricted',
+  '--strict-mcp-config', '--disable-slash-commands', '--tools'];
 export type AnalystAgent = Extract<Agent, 'claude' | 'codex' | 'gemini' | 'opencode'>;
 export type AnalystExec = (
   bin: string, args: string[], options: ExecFileOptionsWithStringEncoding,
@@ -30,6 +34,7 @@ export interface RunAnalystResult {
   agent: AnalystAgent;
   durationMs: number;
   error?: string;
+  capabilityFailed?: boolean;
 }
 
 export async function detectAgents(exec: AnalystExec = execFileAsync, platform: NodeJS.Platform = process.platform): Promise<AnalystAgent[]> {
@@ -45,8 +50,7 @@ export async function detectAgents(exec: AnalystExec = execFileAsync, platform: 
 
 export function buildAnalystArgs(prompt: string, opts: { agent: AnalystAgent; model?: string }): string[] {
   if (opts.agent !== 'claude') throw new Error('Analyst provider is not supported safely');
-  const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--safe-mode', '--restricted',
-    '--strict-mcp-config', '--disable-slash-commands', '--tools', ''];
+  const args = ['-p', '--output-format', 'json', ...safetyArgs];
   if (opts.model) args.push(`--model=${opts.model}`);
   args.push('--', prompt);
   return args;
@@ -65,11 +69,22 @@ export async function runAnalyst(prompt: string, opts: RunAnalystOptions): Promi
     }
     cwd = await mkdtemp(join(tmpdir(), `${TEMP_DIR_NAME}-`));
     const { bin, args } = buildAnalystCommand(prompt, opts);
-    const { stdout } = await (opts.exec ?? execFileAsync)(bin, args, {
+    const exec = opts.exec ?? execFileAsync;
+    const options: ExecFileOptionsWithStringEncoding = {
       cwd, encoding: 'utf8', shell: false,
       timeout: opts.timeout ?? DEFAULT_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024,
-    });
+    };
+    try {
+      const help = await exec(bin, [...safetyArgs, '--help'], options);
+      if (!requiredOptions.every(flag => new RegExp(`^[ \\t]+(?:-\\w,[ \\t]+)?${flag}(?=[ \\t,]|$)`, 'm').test(help.stdout))) {
+        throw new Error('Missing required option');
+      }
+    } catch {
+      return { ok: false, text: '', agent: opts.agent, durationMs: Date.now() - start,
+        error: 'Claude CLI safety capability check failed; upgrade Claude Code and try again', capabilityFailed: true };
+    }
+    const { stdout } = await exec(bin, args, options);
     const data = JSON.parse(stdout);
     if (!data || data.is_error || data.error) throw new Error('Agent returned an error');
     const text = data.result;

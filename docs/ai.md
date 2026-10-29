@@ -44,7 +44,7 @@ invalid stored values fail closed.
 | `ai_enabled` | `false` | Must be exactly `true`. `allow_agent_launch` does not enable AI |
 | `ai_agent` | `auto` | `auto` resolves to `claude`; other providers are unsupported today |
 | `ai_model` | empty | Optional `--model` passed to the CLI |
-| `ai_max_calls_per_day` | `20` | Local-midnight cap. Failed attempts count; cache hits and previews do not |
+| `ai_max_calls_per_day` | `20` | Local-midnight cap. Failed attempts, including failed capability checks, count; cache hits and previews do not |
 
 ## Preview and confirmation
 
@@ -59,7 +59,8 @@ the cache entry and call-log row.
 - A redacted, structured digest: finding rule names and estimates, tool names, call counts and byte sizes, token totals,
   and the first turns' token counts and model names. No prompt text, tool output, source code, session IDs, or paths.
   Secrets, emails, and home paths are redacted from the payload, which is capped at 12,000 characters.
-- agentlens runs `claude -p ...` with hooks, plugins, MCP, slash commands, and tools disabled, in a fresh temporary directory.
+- Before each uncached diagnosis, agentlens runs a local, prompt-free `claude --help` capability check with the same isolation controls, in a fresh temporary directory. It requires help to advertise print, output format, no session persistence, safe mode, restricted mode, strict MCP configuration, disabled slash commands, and tool selection. Missing or broken help fails closed with upgrade guidance; no prompt is sent. The check does not initialize hooks, plugins, or skills.
+- Once the check passes, agentlens runs `claude -p ...` with hooks, plugins, MCP, slash commands, and tools disabled in that directory.
 - That CLI authenticates with whatever provider, account, or subscription **you** configured for it, and the prompt goes to
   that provider. Using it consumes that account's quota or billing and the data leaves your machine. agentlens does not
   use any API key of its own, and enabling AI means egress is no longer purely local.
@@ -79,3 +80,7 @@ the cache entry and call-log row.
 
 The diagnosis is an AI explanation of structured data. Its `est_tokens` figures are unverified model estimates, not
 measurements and not realized results. It never creates or changes findings, scores, IDs, or recommendations.
+
+## Local CLI evidence
+
+Sanitized help-only check: Claude Code `2.1.312` reports `--print`, `--output-format`, `--no-session-persistence`, `--safe-mode`, `--restricted`, `--strict-mcp-config`, `--disable-slash-commands`, and `--tools`. The check passed these isolation flags to `--help`; no model was invoked.

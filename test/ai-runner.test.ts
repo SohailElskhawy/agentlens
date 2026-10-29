@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import { DEFAULT_TIMEOUT_MS, TEMP_DIR_NAME, detectAgents, runAnalyst } from '../src/ai/runner.ts';
 import type { AnalystExec } from '../src/ai/runner.ts';
+import { capabilityHelp } from './helpers.ts';
+
+const withHelp = (exec: AnalystExec): AnalystExec => async (bin, args, options) =>
+  args.includes('--help') ? { stdout: capabilityHelp, stderr: '' } : exec(bin, args, options);
 
 const prompt = '{"toolCalls":42,"label":"$(touch nope); --help"}';
 
@@ -25,7 +29,7 @@ test('claude extracts analysis and uses the default execution limits', async () 
     assert.ok(existsSync(options.cwd!));
     return { stdout: '{"result":"analysis"}', stderr: 'startup diagnostics' };
   };
-  const result = await runAnalyst(prompt, { agent: 'claude', exec });
+  const result = await runAnalyst(prompt, { agent: 'claude', exec: withHelp(exec) });
   assert.equal(calls, 1);
   assert.equal(result.ok, true, result.error);
   assert.equal(result.text, 'analysis');
@@ -43,8 +47,8 @@ test('concurrent invocations use distinct private directories and remove them', 
     return { stdout: '{"result":"analysis"}', stderr: '' };
   };
   const results = await Promise.all([
-    runAnalyst(prompt, { agent: 'claude', exec }),
-    runAnalyst(prompt, { agent: 'claude', exec }),
+    runAnalyst(prompt, { agent: 'claude', exec: withHelp(exec) }),
+    runAnalyst(prompt, { agent: 'claude', exec: withHelp(exec) }),
   ]);
   assert.equal(paths.length, 2);
   assert.notEqual(paths[0], paths[1]);
@@ -55,7 +59,7 @@ test('concurrent invocations use distinct private directories and remove them', 
 test('claude rejects malformed JSON and missing or erroneous answers', async () => {
   for (const stdout of ['not json', 'null', '{}', '{"result":42}',
     '{"is_error":true,"result":"failed"}', '{"error":{"message":"failed"}}']) {
-    const result = await runAnalyst(prompt, { agent: 'claude', exec: async () => ({ stdout, stderr: '' }) });
+    const result = await runAnalyst(prompt, { agent: 'claude', exec: withHelp(async () => ({ stdout, stderr: '' })) });
     assert.equal(result.ok, false, stdout);
     assert.equal(result.text, '');
     assert.ok(result.error);
@@ -64,10 +68,10 @@ test('claude rejects malformed JSON and missing or erroneous answers', async () 
 
 test('failed executions clean up their private directory', async () => {
   let cwd = '';
-  const result = await runAnalyst(prompt, { agent: 'claude', exec: async (_bin, _args, options) => {
+  const result = await runAnalyst(prompt, { agent: 'claude', exec: withHelp(async (_bin, _args, options) => {
     cwd = String(options.cwd);
     throw new Error('command failed');
-  }});
+  }) });
   assert.equal(result.ok, false);
   assert.equal(result.text, '');
   assert.ok(result.error);
@@ -75,7 +79,7 @@ test('failed executions clean up their private directory', async () => {
 });
 
 test('empty output is an error', async () => {
-  const result = await runAnalyst(prompt, { agent: 'claude', exec: async () => ({ stdout: '{"result":"  "}', stderr: '' }) });
+  const result = await runAnalyst(prompt, { agent: 'claude', exec: withHelp(async () => ({ stdout: '{"result":"  "}', stderr: '' })) });
   assert.equal(result.ok, false);
   assert.ok(result.error);
 });
@@ -85,13 +89,13 @@ test('a binary override cannot bypass the provider safety flags', async () => {
   process.env.AGENTLENS_AI_BIN_OVERRIDE = '/fake/analyst';
   try {
     let called = false;
-    const result = await runAnalyst(prompt, { agent: 'claude', timeout: 25, exec: async (bin, args, options) => {
+    const result = await runAnalyst(prompt, { agent: 'claude', timeout: 25, exec: withHelp(async (bin, args, options) => {
       called = true;
       assert.equal(bin, 'claude');
       assert.equal(options.timeout, 25);
       assert.ok(args.includes('--safe-mode'));
       return { stdout: '{"result":"analysis"}', stderr: '' };
-    }});
+    }) });
     assert.equal(called, true);
     assert.equal(result.ok, true, result.error);
   } finally {
@@ -123,18 +127,18 @@ test('failures never expose command, output, paths, or secrets', async () => {
   ] as const) {
     const secret = 'private-prompt-output-path-secret';
     const error = Object.assign(new Error(secret), properties, { stdout: secret, stderr: secret, path: secret });
-    const result = await runAnalyst(secret, { agent: 'claude', exec: async () => { throw error; } });
+    const result = await runAnalyst(secret, { agent: 'claude', exec: withHelp(async () => { throw error; }) });
     assert.equal(result.error, expected);
     assert.equal(JSON.stringify(result).includes(secret), false);
   }
-  const result = await runAnalyst(prompt, { agent: 'claude', exec: async () => ({ stdout: 'private-invalid-json', stderr: '' }) });
+  const result = await runAnalyst(prompt, { agent: 'claude', exec: withHelp(async () => ({ stdout: 'private-invalid-json', stderr: '' })) });
   assert.equal(JSON.stringify(result).includes('private-invalid-json'), false);
 });
 
 test('claude isolates its workspace and keeps leading-dash prompts and models as data', async () => {
   for (const model of ['model-name', '--model-secret']) {
     let cwd = '';
-    const result = await runAnalyst('--private-prompt', { agent: 'claude', model, exec: async (_bin, args, options) => {
+    const result = await runAnalyst('--private-prompt', { agent: 'claude', model, exec: withHelp(async (_bin, args, options) => {
       cwd = String(options.cwd);
       assert.equal(dirname(cwd), tmpdir());
       assert.ok(existsSync(cwd));
@@ -143,7 +147,7 @@ test('claude isolates its workspace and keeps leading-dash prompts and models as
       for (const flag of ['--safe-mode', '--restricted', '--strict-mcp-config', '--disable-slash-commands']) assert.ok(args.includes(flag), flag);
       assert.deepEqual(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2), ['--tools', '']);
       return { stdout: '{"result":"analysis"}', stderr: '' };
-    }});
+    }) });
     assert.equal(result.ok, true, result.error);
     assert.equal(existsSync(cwd), false);
   }
@@ -167,4 +171,32 @@ test('detectAgents uses the Windows PATH locator and only advertises safe provid
   }, 'win32');
   assert.deepEqual(calls, [['where.exe', 'claude']]);
   assert.deepEqual(found, ['claude']);
+});
+
+test('capability probe checks prompt-free help and fails closed before execution', async () => {
+  for (const help of [capabilityHelp, ...['--print', '--output-format', '--no-session-persistence', '--safe-mode', '--restricted', '--strict-mcp-config', '--disable-slash-commands', '--tools'].map(flag => capabilityHelp.replace(flag, `${flag}-old`)), '', new Error('private failure')]) {
+    const calls: string[][] = [];
+    const result = await runAnalyst(prompt, { agent: 'claude', exec: async (_bin, args) => {
+      calls.push(args);
+      if (args.includes('--help')) {
+        assert.ok(!args.includes(prompt));
+        for (const flag of ['--safe-mode', '--restricted', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence']) assert.ok(args.includes(flag), flag);
+        assert.deepEqual(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2), ['--tools', '']);
+        if (help instanceof Error) throw help;
+        return { stdout: help, stderr: '' };
+      }
+      return { stdout: '{"result":"analysis"}', stderr: '' };
+    }});
+    assert.ok(calls[0].includes('--help'));
+    if (help === capabilityHelp) {
+      assert.equal(result.ok, true, result.error);
+      assert.equal(calls.length, 2);
+      assert.deepEqual(calls[1].slice(-2), ['--', prompt]);
+    } else {
+      assert.equal(result.ok, false);
+      assert.match(result.error!, /upgrade/i);
+      assert.equal(calls.length, 1);
+      assert.ok(!JSON.stringify(result).includes('private failure'));
+    }
+  }
 });

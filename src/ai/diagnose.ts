@@ -33,7 +33,7 @@ export type DiagnosisResult =
   | { status: 'confirmation_required'; preview: DiagnosisPreview }
   | DiagnosisError;
 
-export type DiagnosisRunner = (prompt: string, opts: { agent: AnalystAgent; model?: string }) => Promise<{ ok: boolean; text: string }>;
+export type DiagnosisRunner = (prompt: string, opts: { agent: AnalystAgent; model?: string }) => Promise<{ ok: boolean; text: string; capabilityFailed?: boolean }>;
 
 const MESSAGES: Record<DiagnosisErrorCode, string> = {
   UNKNOWN_SESSION: 'Unknown session ID',
@@ -124,7 +124,9 @@ export async function diagnoseSession(db: DB, id: string,
       try {
         const run = await runner(preview.prompt, { agent: preview.agent, model: preview.model ?? undefined });
         diagnosis = run.ok ? parseDiagnosis(run.text) : null;
-        if (!diagnosis) outcome = fail(run.ok ? 'AI_INVALID_OUTPUT' : 'AI_RUN_FAILED');
+        if (!diagnosis) outcome = run.capabilityFailed
+          ? { ...fail('AI_RUN_FAILED'), message: 'Claude CLI safety capability check failed; upgrade Claude Code and try again' }
+          : fail(run.ok ? 'AI_INVALID_OUTPUT' : 'AI_RUN_FAILED');
       } catch {
         outcome = fail('AI_RUN_FAILED');
       }

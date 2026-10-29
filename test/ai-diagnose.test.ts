@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb, setSetting, upsertEvents, upsertFindings, upsertSessions } from '../src/db.ts';
 import type { DB } from '../src/db.ts';
 import { diagnoseSession, parseDiagnosis, prepareDiagnosis, renderDiagnosisMarkdown, worstSessions } from '../src/ai/diagnose.ts';
+import { runAnalyst } from '../src/ai/runner.ts';
 import { tmp } from './helpers.ts';
 
 const good = {
@@ -266,4 +267,29 @@ test('diagnose CLI validates arguments before any call and previews without AI e
   const check = openDb(join(dir, 'agentlens.db'));
   assert.equal(count(check, 'ai_calls') + count(check, 'ai_notes'), 0);
   check.close();
+});
+
+test('a failed capability probe gives upgrade guidance and consumes the reserved attempt', async () => {
+  const db = enabled();
+  let calls = 0;
+  const result = await diagnoseSession(db, 's1', {
+    confirm: hashOf(db),
+    runner: (prompt, opts) => runAnalyst(prompt, { ...opts, exec: async (_bin, args) => {
+      calls++;
+      assert.ok(args.includes('--help'));
+      assert.ok(!args.includes(prompt));
+      return { stdout: 'unsupported old help', stderr: 'private output' };
+    } }),
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.status, 'error');
+  if (result.status === 'error') {
+    assert.equal(result.code, 'AI_RUN_FAILED');
+    assert.match(result.message, /upgrade Claude Code/i);
+    assert.ok(!result.message.includes('private output'));
+  }
+  assert.equal(count(db, 'ai_calls'), 1);
+  assert.equal((db.prepare('SELECT ok FROM ai_calls').get() as { ok: number }).ok, 0);
+  assert.equal(count(db, 'ai_notes'), 0);
+  db.close();
 });
