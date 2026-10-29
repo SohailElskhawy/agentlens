@@ -12,8 +12,11 @@ export interface MetricBaseline {
   toolCallsPerSession: number;
   uncachedRatio: number;
   toolErrorRate: number;
-  correctionRate: number;
+  // Not measurable: prompts aren't stored. Null marks the metric unavailable
+  // (older persisted results carried a hardcoded 0 — read them tolerantly).
+  correctionRate: number | null;
   avgTurnsPerSession: number;
+  tokensPer1kOutput: number | null;
 }
 
 export interface TrackingResult {
@@ -26,9 +29,17 @@ export interface TrackingResult {
   baselineVal: number;
   currentVal: number;
   deltaPct: number;
+  // Workload-normalized totals (includes cache_write); observational only.
+  // These describe before/after movement, not a causal savings claim:
+  // task mix, model/agent change and output scale are not controlled.
+  tokensPerSessionBefore: number;
+  tokensPerSessionAfter: number;
+  // Tokens per 1000 output tokens; null when the window has no output tokens
+  tokensPer1kOutputBefore: number | null;
+  tokensPer1kOutputAfter: number | null;
   guardrails: {
     toolErrorRateDelta: number;
-    correctionRateDelta: number;
+    correctionRateDelta: number | null;
     turnsPerSessionDelta: number;
     passed: boolean;
   };
@@ -61,8 +72,9 @@ function computeMetrics(db: DB, projectId: number | null, startTs: number, endTs
       toolCallsPerSession: 0,
       uncachedRatio: 0,
       toolErrorRate: 0,
-      correctionRate: 0,
+      correctionRate: null,
       avgTurnsPerSession: 0,
+      tokensPer1kOutput: null,
     };
   }
 
@@ -72,6 +84,7 @@ function computeMetrics(db: DB, projectId: number | null, startTs: number, endTs
       sum(e.input) AS input,
       sum(e.output) AS output,
       sum(e.cache_read) AS cache_read,
+      sum(e.cache_write) AS cache_write,
       count(*) AS cnt,
       sum(case when e.is_error = 1 then 1 else 0 end) AS err_cnt
     FROM events e
@@ -83,6 +96,7 @@ function computeMetrics(db: DB, projectId: number | null, startTs: number, endTs
   let totalInput = 0;
   let totalOutput = 0;
   let totalCacheRead = 0;
+  let totalCacheWrite = 0;
   let totalTurns = 0;
   let totalToolCalls = 0;
   let errorToolCalls = 0;
@@ -96,16 +110,16 @@ function computeMetrics(db: DB, projectId: number | null, startTs: number, endTs
       totalInput += r.input || 0;
       totalOutput += r.output || 0;
       totalCacheRead += r.cache_read || 0;
+      totalCacheWrite += r.cache_write || 0;
     } else if (r.kind === 'tool_call') {
       totalToolCalls += r.cnt;
       errorToolCalls += r.err_cnt;
     }
   }
 
-  const totalTokens = totalInput + totalOutput + totalCacheRead;
+  // Totals include cache_write once, matching queries.ts/savings.ts token math
+  const totalTokens = totalInput + totalOutput + totalCacheRead + totalCacheWrite;
   const turns = Math.max(1, totalTurns);
-  const toolCalls = Math.max(1, totalToolCalls);
-  const users = Math.max(1, userMessages);
 
   return {
     sessionCount,
@@ -116,11 +130,11 @@ function computeMetrics(db: DB, projectId: number | null, startTs: number, endTs
     uncachedRatio: totalInput + totalCacheRead > 0
       ? Number((totalInput / (totalInput + totalCacheRead)).toFixed(4))
       : 0,
-    toolErrorRate: totalToolCalls > 0 ? Number((errorToolCalls / toolCalls).toFixed(4)) : 0,
-    // Privacy-first note: prompt text is not stored; correction rate is a reserved
-    // metric for future heuristic tracking (e.g., rapid consecutive user prompt turns)
-    correctionRate: 0,
+    toolErrorRate: totalToolCalls > 0 ? Number((errorToolCalls / totalToolCalls).toFixed(4)) : 0,
+    // Privacy-first note: prompt text is not stored; no correction heuristic exists yet
+    correctionRate: null,
     avgTurnsPerSession: Number((totalTurns / sessionCount).toFixed(2)),
+    tokensPer1kOutput: totalOutput > 0 ? Math.round(totalTokens / totalOutput * 1000) : null,
   };
 }
 
@@ -192,17 +206,16 @@ export function evaluateRecommendations(db: DB, now = Date.now()): Recommendatio
       ? Number((((currentVal - baselineVal) / baselineVal) * 100).toFixed(1))
       : (currentVal > 0 ? 100 : 0);
 
-    // Quality guardrails check: error rates or turns must not worsen by > 10%
+    // Quality guardrails check: error rates or turns must not worsen by > 10%.
+    // correctionRate is unavailable (no measurable signal) and does not participate.
     const toolErrorRateDelta = Number(((current.toolErrorRate - baseline.toolErrorRate) * 100).toFixed(1));
-    const correctionRateDelta = Number(((current.correctionRate - baseline.correctionRate) * 100).toFixed(1));
     const turnsDeltaPct = baseline.avgTurnsPerSession > 0
       ? Number((((current.avgTurnsPerSession - baseline.avgTurnsPerSession) / baseline.avgTurnsPerSession) * 100).toFixed(1))
       : 0;
 
     const toolErrorOk = current.toolErrorRate <= Math.max(0.05, baseline.toolErrorRate * 1.10);
-    const correctionOk = current.correctionRate <= Math.max(0.05, baseline.correctionRate * 1.10);
     const turnsOk = current.avgTurnsPerSession <= Math.max(1, baseline.avgTurnsPerSession * 1.10);
-    const guardrailsPassed = toolErrorOk && correctionOk && turnsOk;
+    const guardrailsPassed = toolErrorOk && turnsOk;
 
     let verdict: 'insufficient_data' | 'verified' | 'no_effect' | 'regressed' = 'insufficient_data';
     let newStatus: RecommendationStatus = 'measuring';
@@ -234,9 +247,13 @@ export function evaluateRecommendations(db: DB, now = Date.now()): Recommendatio
       baselineVal,
       currentVal,
       deltaPct,
+      tokensPerSessionBefore: baseline.avgTokensPerSession,
+      tokensPerSessionAfter: current.avgTokensPerSession,
+      tokensPer1kOutputBefore: baseline.tokensPer1kOutput,
+      tokensPer1kOutputAfter: current.tokensPer1kOutput,
       guardrails: {
         toolErrorRateDelta,
-        correctionRateDelta,
+        correctionRateDelta: null, // unavailable (no measurable correction signal)
         turnsPerSessionDelta: turnsDeltaPct,
         passed: guardrailsPassed,
       },

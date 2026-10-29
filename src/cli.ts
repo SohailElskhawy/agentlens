@@ -567,8 +567,11 @@ const commands: Record<string, () => unknown> = {
       console.log(`  Rule: ${r.findingRule} | Action: ${r.action}`);
       if (res) {
         const delta = res.deltaPct > 0 ? `+${res.deltaPct}%` : `${res.deltaPct}%`;
+        const fmt = (v: number | null | undefined) => v == null ? 'n/a' : v.toLocaleString('en-US');
         console.log(`  Target Metric: ${res.metricName}`);
         console.log(`  Baseline -> Current: ${res.baselineVal} -> ${res.currentVal} (${delta})`);
+        console.log(`  Tokens/session (incl. cache writes): ${fmt(res.tokensPerSessionBefore)} -> ${fmt(res.tokensPerSessionAfter)}`);
+        console.log(`  Tokens per 1k output: ${fmt(res.tokensPer1kOutputBefore)} -> ${fmt(res.tokensPer1kOutputAfter)}`);
         console.log(`  Samples: ${res.sampleBefore} sessions before, ${res.sampleAfter} sessions after`);
         console.log(`  Guardrails: ${res.guardrails?.passed ? 'PASSED' : 'REGRESSED'} | Verdict: ${res.verdict}`);
       } else {
