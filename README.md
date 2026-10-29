@@ -264,6 +264,7 @@ agentlens plugin uninstall
 | `agentlens install-service` | Install native background service (systemd user unit, launchd agent, or Windows scheduled task) |
 | `agentlens plugin [install\|status\|uninstall] [--enable] [--dir <path>]` | Install, inspect, or remove the native Omarchy Quattro desktop bar plugin (`agentlens.bar-widget`) |
 | `agentlens ai [status\|enable\|disable\|preview <diagnose\|session> <id>]` | Opt-in AI settings and exact preview (off by default; see [docs/ai.md](docs/ai.md)) |
+| `agentlens recommend [--ai] [--preview] [--confirm <hash>]` | Deterministic recommendations with optional, consented AI enrichment (see [docs/ai.md](docs/ai.md)) |
 | `agentlens diagnose <session-id> \| --worst <N> [--project <path>] [--preview] [--confirm <hash>] [--json]` | Opt-in AI diagnosis of structured session waste via your `claude` CLI; each new call needs its exact preview hash |
 
 ---

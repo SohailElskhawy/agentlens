@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { DB } from '../db.ts';
-import { cached } from './cache.ts';
-import { aiStatus, finalizeAiCall, reserveAiCall } from './gate.ts';
+import { confirmedAnalysis } from './confirmed.ts';
+import { aiStatus } from './gate.ts';
 import type { AiErrorCode } from './gate.ts';
 import { buildPrompt, sessionDigest } from './payload.ts';
-import { buildAnalystCommand, runAnalyst } from './runner.ts';
+import { buildAnalystCommand } from './runner.ts';
 import type { AnalystAgent } from './runner.ts';
 
 export interface Diagnosis {
@@ -100,42 +100,10 @@ export async function diagnoseSession(db: DB, id: string,
     const prepared = prepareDiagnosis(db, id);
     if (prepared.status === 'error') return prepared;
     const { preview } = prepared;
-    const gate = aiStatus(db, opts.now);
-    if (gate.error === 'AI_DISABLED' || gate.error === 'AI_INVALID_SETTINGS') return fail(gate.error);
-    const runner = opts.runner ?? runAnalyst;
-    let outcome = undefined as DiagnosisResult | undefined;
-    let ran = false;
-    const result = await cached(db, 'diagnose', preview.inputHash, async () => {
-      ran = true;
-      if (opts.confirm !== preview.confirmationHash) {
-        outcome = { status: 'confirmation_required', preview };
-        return { ok: false, text: '' };
-      }
-      let reservation: number;
-      try {
-        reservation = reserveAiCall(db, { kind: 'diagnose', agent: preview.agent, inputHash: preview.inputHash }, opts.now);
-      } catch (error) {
-        const code = (error as { code?: unknown } | null)?.code;
-        outcome = fail(code === 'AI_DISABLED' || code === 'AI_DAILY_LIMIT' || code === 'AI_INVALID_SETTINGS' ? code : 'AI_RUN_FAILED');
-        return { ok: false, text: '' };
-      }
-      const start = Date.now();
-      let diagnosis: Diagnosis | null = null;
-      try {
-        const run = await runner(preview.prompt, { agent: preview.agent, model: preview.model ?? undefined });
-        diagnosis = run.ok ? parseDiagnosis(run.text) : null;
-        if (!diagnosis) outcome = run.capabilityFailed
-          ? { ...fail('AI_RUN_FAILED'), message: 'Claude CLI safety capability check failed; upgrade Claude Code and try again' }
-          : fail(run.ok ? 'AI_INVALID_OUTPUT' : 'AI_RUN_FAILED');
-      } catch {
-        outcome = fail('AI_RUN_FAILED');
-      }
-      try { finalizeAiCall(db, reservation, diagnosis !== null, Date.now() - start); } catch {}
-      return diagnosis ? { ok: true, text: JSON.stringify(diagnosis) } : { ok: false, text: '' };
-    }, { agent: preview.agent, model: preview.model });
-    if (outcome) return outcome;
-    const diagnosis = result.ok ? parseDiagnosis(result.text) : null;
-    return diagnosis ? { status: 'ok', cached: !ran, diagnosis } : fail('AI_INVALID_OUTPUT');
+    const result = await confirmedAnalysis(db, 'diagnose', preview, parseDiagnosis, opts);
+    if (result.status === 'confirmation_required') return { status: result.status, preview };
+    if (result.status === 'error') return { ...fail(result.code), ...(result.message ? { message: result.message } : {}) };
+    return { status: 'ok', cached: result.cached, diagnosis: result.value };
   } catch {
     return fail('AI_RUN_FAILED');
   }

@@ -127,6 +127,139 @@ function createMockSessionsAndEvents(
   upsertEvents(db, events);
 }
 
+function seedBasicRec(db: any, projId: number, acceptedAt: number, rule: string, id: string) {
+  const rec: Recommendation = {
+    id,
+    findingRule: rule,
+    projectId: projId,
+    action: 'improve',
+    title: 'Reduce tokens',
+    body: 'Reduce tokens',
+    status: 'accepted',
+    acceptedAt,
+  };
+  upsertRecommendations(db, [rec]);
+}
+
+function seedTrackSession(db: any, projId: number, acceptedAt: number, prefix: string, offsetHours: number, tokens: {
+  input: number; output: number; cacheRead: number; cacheWrite: number;
+}) {
+  const sId = `s_${prefix}`;
+  const ts = acceptedAt + offsetHours * 3600_000;
+  upsertSessions(db, [{ id: sId, agent: 'claude', projectId: projId, cwd: '/test/proj' }]);
+  upsertEvents(db, [
+    { id: `e_${prefix}_user`, agent: 'claude', sessionId: sId, ts: ts + 10_000, kind: 'user', input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    {
+      id: `e_${prefix}_a`, agent: 'claude', sessionId: sId, ts: ts + 20_000, kind: 'assistant',
+      input: tokens.input, output: tokens.output, cacheRead: tokens.cacheRead, cacheWrite: tokens.cacheWrite,
+    },
+  ]);
+}
+
+// 5 before + 5 after sessions, uniformly (otherwise `randomly`) tokened
+function seedFive(db: any, projId: number, acceptedAt: number, tokens: {
+  input: number; output: number; cacheRead: number; cacheWrite: number;
+}) {
+  for (let i = 0; i < 5; i++) {
+    seedTrackSession(db, projId, acceptedAt, `b${i}`, -(i + 1), tokens);
+    seedTrackSession(db, projId, acceptedAt, `a${i}`, +(i + 1), tokens);
+  }
+}
+
+test('track: totalTokens includes cache_write once (matches queries/savings totals)', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/test/proj', 'test-proj');
+  const acceptedAt = 1_700_000_000_000;
+  seedBasicRec(db, projId, acceptedAt, 'subagent_share', 'rec_cw');
+
+  // Each session: 1_000 in + 2_000 out + 3_000 cache_read + 4_000 cache_write = 10_000
+  seedFive(db, projId, acceptedAt, { input: 1_000, output: 2_000, cacheRead: 3_000, cacheWrite: 4_000 });
+
+  const evaluated = evaluateRecommendations(db, acceptedAt + 86400_000 * 2);
+  assert.equal(evaluated[0].result?.tokensPerSessionBefore, 10_000);
+  assert.equal(evaluated[0].result?.tokensPerSessionAfter, 10_000);
+});
+
+test('track: per-1k-output normalized metric scales with output (workload normalization)', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/test/proj', 'test-proj');
+  const acceptedAt = 1_700_000_000_000;
+  seedBasicRec(db, projId, acceptedAt, 'subagent_share', 'rec_norm');
+
+  // Before: 5 x (6_000 in + 2_000 out) = 8_000 tokens/session, 4_000 tokens per 1k output
+  for (let i = 0; i < 5; i++) {
+    seedTrackSession(db, projId, acceptedAt, `b${i}`, -(i + 1), { input: 6_000, output: 2_000, cacheRead: 0, cacheWrite: 0 });
+    seedTrackSession(db, projId, acceptedAt, `a${i}`, +(i + 1), { input: 6_000, output: 2_000, cacheRead: 0, cacheWrite: 0 });
+  }
+
+  const evaluated = evaluateRecommendations(db, acceptedAt + 86400_000 * 2);
+  assert.equal(evaluated[0].result?.tokensPer1kOutputBefore, 4_000);
+  assert.equal(evaluated[0].result?.tokensPer1kOutputAfter, 4_000);
+});
+
+test('track: zero output sessions report null per-1k-output, not 0 or Infinity', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/test/proj', 'test-proj');
+  const acceptedAt = 1_700_000_000_000;
+  seedBasicRec(db, projId, acceptedAt, 'subagent_share', 'rec_zeroout');
+
+  // After sessions have no output tokens at all
+  for (let i = 0; i < 5; i++) {
+    seedTrackSession(db, projId, acceptedAt, `b${i}`, -(i + 1), { input: 5_000, output: 2_000, cacheRead: 0, cacheWrite: 0 });
+    seedTrackSession(db, projId, acceptedAt, `a${i}`, +(i + 1), { input: 5_000, output: 0, cacheRead: 0, cacheWrite: 0 });
+  }
+
+  const evaluated = evaluateRecommendations(db, acceptedAt + 86400_000 * 2);
+  assert.equal(typeof evaluated[0].result?.tokensPer1kOutputBefore, 'number');
+  assert.equal(evaluated[0].result?.tokensPer1kOutputAfter, null);
+});
+
+test('track: correctionRate is reported unavailable and never drives guardrails pass', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/test/proj', 'test-proj');
+  const acceptedAt = 1_700_000_000_000;
+  seedBasicRec(db, projId, acceptedAt, 'subagent_share', 'rec_corr');
+
+  seedFive(db, projId, acceptedAt, { input: 1_000, output: 2_000, cacheRead: 0, cacheWrite: 0 });
+
+  const evaluated = evaluateRecommendations(db, acceptedAt + 86400_000 * 2);
+  const g = evaluated[0].result?.guardrails;
+  assert.equal(g?.correctionRateDelta, null);
+  // pass relies only on tool error rate + turns
+  assert.equal(g?.passed, true);
+});
+
+test('track: older persisted results (numeric correctionRateDelta) are read tolerantly', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/test/proj', 'test-proj');
+  const acceptedAt = 1_700_000_000_000;
+  const rec: Recommendation = {
+    id: 'rec_old',
+    findingRule: 'subagent_share',
+    projectId: projId,
+    action: 'improve',
+    title: 'Old format result',
+    body: 'Old format result',
+    status: 'verified',
+    acceptedAt,
+    result: {
+      rule: 'subagent_share', acceptedAt, windowDays: 2, sampleBefore: 5, sampleAfter: 5,
+      metricName: 'avgTokensPerSession', baselineVal: 100, currentVal: 90, deltaPct: -10,
+      guardrails: { toolErrorRateDelta: 0, correctionRateDelta: 0, turnsPerSessionDelta: 0, passed: true },
+      verdict: 'verified',
+    } as any,
+  };
+  upsertRecommendations(db, [rec]);
+
+  // Any later evaluation rewrites the row; reading the old persisted shape must not throw
+  const stored = getRecommendations(db, { projectId: projId });
+  assert.equal(stored[0].result?.guardrails?.correctionRateDelta, 0);
+  assert.equal(stored[0].result?.verdict, 'verified');
+
+  const evaluated = evaluateRecommendations(db, acceptedAt + 86400_000 * 2);
+  assert.equal(evaluated[0].result?.guardrails?.correctionRateDelta, null);
+});
+
 test('evaluateRecommendations: insufficient data (< 5 sessions) keeps measuring status', () => {
   const db = openDb(':memory:');
   const projId = upsertProject(db, '/test/proj', 'test-proj');

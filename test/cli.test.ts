@@ -6,6 +6,8 @@ import { createServer, type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmp, put, jsonl, cAssistant } from './helpers.ts';
+import { openDb, upsertProject, upsertSessions, upsertEvents, upsertRecommendations } from '../src/db.ts';
+import type { NormalizedEvent, Recommendation, SessionInfo } from '../src/types.ts';
 
 const CLI = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const { CLAUDE_CONFIG_DIR: _c, CODEX_HOME: _x, ...baseEnv } = process.env;
@@ -98,4 +100,31 @@ test('serve exits non-zero with a clear message when the port is taken', async (
 
 test('unknown command prints help and fails', () => {
   assert.throws(() => run(['bogus'], {}), /Usage: agentlens/);
+});
+
+test('track prints normalized before/after token metrics from results', () => {
+  const data = tmp();
+  const db = openDb(join(data, 'agentlens.db'));
+  const acceptedAt = Date.now() - 3_600_000;
+  const projId = upsertProject(db, '/test/proj', 'test-proj');
+  upsertRecommendations(db, [{
+    id: 'rec_cli', findingRule: 'subagent_share', projectId: projId, action: 'improve',
+    title: 'Cut subagent tokens', body: 'Reduce tokens', status: 'accepted', acceptedAt,
+  }]);
+  for (let i = 0; i < 5; i++) {
+    const before = { id: `s_b${i}`, agent: 'claude' as const, projectId: projId, cwd: '/test/proj' };
+    const after = { id: `s_a${i}`, agent: 'claude' as const, projectId: projId, cwd: '/test/proj' };
+    upsertSessions(db, [before, after]);
+    upsertEvents(db, [
+      { id: `e_cli_b${i}_u`, agent: 'claude', sessionId: before.id, ts: acceptedAt - (i + 1) * 600_000, kind: 'user', input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      { id: `e_cli_b${i}_a`, agent: 'claude', sessionId: before.id, ts: acceptedAt - (i + 1) * 600_000 + 10_000, kind: 'assistant', input: 1_000, output: 2_000, cacheRead: 3_000, cacheWrite: 4_000 },
+      { id: `e_cli_a${i}_u`, agent: 'claude', sessionId: after.id, ts: acceptedAt + (i + 1) * 60_000, kind: 'user', input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      { id: `e_cli_a${i}_a`, agent: 'claude', sessionId: after.id, ts: acceptedAt + (i + 1) * 60_000 + 10_000, kind: 'assistant', input: 1_000, output: 0, cacheRead: 0, cacheWrite: 9_000 },
+    ]);
+  }
+  db.close();
+
+  const out = run(['track'], { AGENTLENS_DATA_DIR: data });
+  assert.match(out, /Tokens\/session \(incl\. cache writes\): 10,000 -> 10,000/);
+  assert.match(out, /Tokens per 1k output: 5,000 -> n\/a/);
 });
