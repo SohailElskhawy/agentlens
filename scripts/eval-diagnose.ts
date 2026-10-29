@@ -2,15 +2,16 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, relative, resolve, join } from 'node:path';
+import { isAbsolute, relative, resolve, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setSetting } from '../src/db.ts';
+import { getPlatformPaths } from '../src/paths.ts';
 import { diagnoseSession, prepareDiagnosis, worstSessions, renderDiagnosisMarkdown } from '../src/ai/diagnose.ts';
 import type { DiagnosisRunner, DiagnosisResult } from '../src/ai/diagnose.ts';
 import { sessionDigest, redact } from '../src/ai/payload.ts';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const inside = (root: string, path: string) => { const r = relative(root, path); return r !== '' && !r.startsWith('..' + '/') && r !== '..' && !isAbsolute(r); };
+const inside = (root: string, path: string) => { const r = relative(root, path); return r !== '' && r !== '..' && !r.startsWith('..' + sep) && !isAbsolute(r); };
 const clean = (text: string) => redact(text).replace(/(?:\/[\w.@~+-]+){2,}/g, '[REDACTED]');
 function artifact(dir: string, name: string, content: string, snapshot: string) {
   const target = join(dir, name);
@@ -48,7 +49,9 @@ type ManifestSession = { sessionId: string; confirmationHash: string; inputHash:
 type Result = { sessionId: string } & Exclude<DiagnosisResult, { status: 'confirmation_required' }>;
 export async function evaluateDiagnoses(opts: { evalRoot: string; snapshotPath: string; outputDir: string; confirmationHash?: string; runner?: DiagnosisRunner; env?: NodeJS.ProcessEnv }): Promise<{ status: 'preview' | 'complete'; manifest: { version: number; sessions: ManifestSession[] }; manifestHash: string; results: Result[] }> {
   const root = realpathSync(opts.evalRoot); const snapshot = realpathSync(opts.snapshotPath); const output = realpathSync(opts.outputDir);
-  const protectedDirs = [join(homedir(), '.local/share/agentlens'), join(homedir(), '.local/state/agentlens')].map(p => resolve(p));
+  const live = getPlatformPaths();
+  const protectedDirs = [join(homedir(), '.local/share/agentlens'), join(homedir(), '.local/state/agentlens'), live.dataDir, live.stateDir]
+    .flatMap(p => { try { return [resolve(p), realpathSync(p)]; } catch { return [resolve(p)]; } });
   if (!inside(root, snapshot) || !inside(root, output) || protectedDirs.some(p => snapshot === p || inside(p, snapshot) || output === p || inside(p, output) || root === p || inside(p, root))) throw new Error('Snapshot and output must be isolated inside the evaluation directory');
   if (['preview.json', 'results.json', 'results.md'].some(name => join(output, name) === snapshot)) throw new Error('Output cannot replace the snapshot');
   const db = privateSnapshot(snapshot);
