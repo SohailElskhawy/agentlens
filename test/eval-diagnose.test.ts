@@ -45,6 +45,19 @@ test('preview requires ten deterministic sessions and manifest approval plus opt
   assert.equal((source.prepare("SELECT value FROM settings WHERE key='ai_enabled'").get()), undefined); source.close();
 });
 
+test('results.json is persisted after each session with complete=false until all ten finish', async () => {
+  const opts = fixture(); let calls = 0; let second: { n: number; complete: unknown } | undefined;
+  const runner = async () => {
+    if (++calls === 2) { const saved = JSON.parse(readFileSync(join(opts.outputDir, 'results.json'), 'utf8')); second = { n: saved.results.length, complete: saved.complete }; }
+    return { ok: true, text: JSON.stringify({ summary: 'ok', causes: [], fixes: [] }) };
+  };
+  const preview = await evaluateDiagnoses({ ...opts, runner, env: {} });
+  await evaluateDiagnoses({ ...opts, runner, env: { AGENTLENS_EVAL_AI: '1' }, confirmationHash: preview.manifestHash });
+  assert.deepEqual(second, { n: 1, complete: false });
+  const final = JSON.parse(readFileSync(join(opts.outputDir, 'results.json'), 'utf8'));
+  assert.equal(final.complete, true); assert.equal(final.results.length, 10);
+});
+
 test('changed snapshot invalidates manifest and too few sessions cannot execute', async () => {
   const opts = fixture(); let calls = 0; const runner = async () => { calls++; return { ok: false, text: '' }; };
   const preview = await evaluateDiagnoses({ ...opts, runner, env: {} });

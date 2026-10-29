@@ -79,13 +79,13 @@ export async function evaluateDiagnoses(opts: { evalRoot: string; snapshotPath: 
         const diagnosis = JSON.parse(JSON.stringify(result.diagnosis, (_key, value: unknown) => typeof value === 'string' ? clean(value.replaceAll(previews[i].prompt, '[REDACTED]')) : value));
         results.push({ sessionId: publicId(ids[i]), status: 'ok', cached: result.cached, diagnosis });
       } else results.push({ sessionId: publicId(ids[i]), status: 'error', code: result.code, message: clean(result.message) });
+      artifact(output, 'results.json', JSON.stringify({ manifestHash, complete: results.length === ids.length, results }, null, 2) + '\n', snapshot);
     }
     const md = ['# Diagnosis evaluation', '', 'AI-generated diagnoses and token estimates are unverified; external judging is separate.', ''];
     for (const result of results) {
       md.push(`## Session ${result.sessionId}`, '');
       md.push(result.status === 'ok' ? renderDiagnosisMarkdown(result.diagnosis) : `${result.code}: ${result.message}`, '');
     }
-    artifact(output, 'results.json', JSON.stringify({ manifestHash, results }, null, 2) + '\n', snapshot);
     artifact(output, 'results.md', md.join('\n'), snapshot);
     return { status: 'complete', manifest, manifestHash, results };
   } finally { db.close(); }
