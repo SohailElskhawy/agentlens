@@ -1222,6 +1222,7 @@ kbd {
 .ai-pre { margin: 0; padding: 12px; width: 100%; box-sizing: border-box; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }
 .ai-prompt { max-height: 40vh; }
 .ai-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ai-actions .btn, #btn-explain-ai { min-height: 44px; }
 .ai-actions .btn:disabled, #btn-explain-ai:disabled { opacity: 0.6; cursor: progress; }
 .ai-error { margin: 0 0 var(--space-3); font-size: 13px; color: var(--danger); }
 .ai-error:empty { display: none; }

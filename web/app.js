@@ -445,6 +445,7 @@ function closeSlideOver() {
   el.setAttribute('aria-hidden', 'true');
   backdrop.setAttribute('aria-hidden', 'true');
   if (slideOverReturnFocus?.isConnected) slideOverReturnFocus.focus();
+  else if (slideOverReturnFocus?.id === 'btn-explain-ai') $('#btn-explain-ai')?.focus();
   slideOverReturnFocus = null;
 }
 
@@ -1380,7 +1381,10 @@ function renderDiagnosePreview(sessionId, preview, onDone) {
 function wireExplainWithAi(btn, sessionId) {
   const label = btn.textContent;
   const err = $('#ai-error');
-  const showResult = (r) => openSlideOver('AI explanation', renderDiagnosis(r.diagnosis, r.cached));
+  const showResult = (r) => {
+    openSlideOver('AI explanation', renderDiagnosis(r.diagnosis, r.cached));
+    $('#slide-over-close')?.focus();
+  };
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     btn.textContent = 'Preparing…';
