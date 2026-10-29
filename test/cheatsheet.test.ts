@@ -301,3 +301,35 @@ export const APP_NAME = 'CLI Test';
   });
   assert.ok(emptyOut.includes('No hot_files with exported symbols found for'));
 });
+
+test('5. falls back from hash-only findings to bounded repository sources in deterministic order', () => {
+  const root = tmp();
+  const db = openDb(':memory:');
+  const pid = upsertProject(db, root, 'fallback');
+  put(join(root, 'src/index.ts'), 'export const INDEX = 1;\n');
+  put(join(root, 'src/db.ts'), 'export const DB = 1;\n');
+  put(join(root, 'src/z.ts'), 'export const Z = 1;\n' + ' '.repeat(20));
+  put(join(root, 'src/a.ts'), 'export const A = 1;\n' + ' '.repeat(20));
+  put(join(root, 'src/large.ts'), 'export const LARGE = 1;\n' + ' '.repeat(MAX_BOUNDED_READ_BYTES));
+  put(join(root, 'src/nested/hidden.ts'), 'export const HIDDEN = 1;\n');
+  symlinkSync(join(root, 'src/z.ts'), join(root, 'src/cli.ts'));
+  upsertFindings(db, [{ id: 'hash', rule: 'hot_files', projectId: pid, sessionId: null,
+    confidence: 'high', confidenceReason: 'reads', evidence: { argsHash: 'abc', reads: 100 },
+    estTokensWeek: 1, firstSeen: Date.now(), lastSeen: Date.now() }]);
+  const res = generateCheatsheet(db, { projectRoot: root, top: 3 });
+  assert.deepEqual(res.files.map(f => f.relativePath), ['src/index.ts', 'src/db.ts', 'src/a.ts']);
+  assert.ok(res.files.every(f => f.reads === 0));
+  assert.match(res.markdown, /repository source/);
+  assert.doesNotMatch(res.markdown, /100 reads/);
+  const empty = generateCheatsheet(openDb(':memory:'), { projectRoot: root, top: 4 });
+  assert.deepEqual(empty.files.map(f => f.relativePath), ['src/index.ts', 'src/db.ts', 'src/a.ts', 'src/z.ts']);
+});
+
+test('6. fallback refuses a src symlink escaping the project', () => {
+  const root = tmp();
+  const outside = tmp();
+  put(join(outside, 'index.ts'), 'export const SECRET = 1;\n');
+  symlinkSync(outside, join(root, 'src'));
+  const res = generateCheatsheet(openDb(':memory:'), { projectRoot: root });
+  assert.deepEqual(res.files, []);
+});
