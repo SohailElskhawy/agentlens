@@ -127,6 +127,48 @@ export function sessionDetail(db: DB, id: string) {
   };
 }
 
+export interface ToolFailure {
+  tool: string; projectId: number | null; project: string | null;
+  calls: number; errors: number; retries: number; wastedTokens: number;
+}
+
+/**
+ * Tool errors and wasted retry tokens per (tool, project). An error is a paired tool_result with
+ * is_error (the `:result` id suffix). A retry is a repeat of the identical (session, tool, args_hash)
+ * call; its wastedTokens are the assistant tokens spent between the previous attempt and the retry.
+ */
+export function toolFailures(db: DB, f: Filter = {}) {
+  const w = where(f);
+  const rows = db.prepare(`
+    WITH attempts AS (
+      SELECT e.id AS id, e.session_id AS sessionId, e.ts AS ts, e.tool AS tool, s.project_id AS projectId,
+        CASE WHEN e.args_hash IS NOT NULL THEN lag(e.ts) OVER (PARTITION BY e.session_id, e.tool, e.args_hash ORDER BY e.ts, e.id) END AS prevTs
+      ${FROM} WHERE e.kind = 'tool_call' AND e.tool IS NOT NULL${w.sql}
+    )
+    SELECT a.tool, a.projectId, count(*) AS calls,
+      sum(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END) AS errors,
+      count(a.prevTs) AS retries,
+      coalesce(sum((SELECT coalesce(sum(x.input + x.output + x.cache_read + x.cache_write), 0) FROM events x
+        WHERE x.session_id = a.sessionId AND x.kind = 'assistant' AND x.ts >= a.prevTs AND x.ts < a.ts)), 0) AS wastedTokens
+    FROM attempts a
+    LEFT JOIN events r ON r.id = a.id || ':result'
+    GROUP BY 1, 2
+    ORDER BY errors DESC, wastedTokens DESC, a.tool, a.projectId
+  `).all(w.params) as Array<{ tool: string; projectId: number | null; calls: number; errors: number; retries: number; wastedTokens: number }>;
+
+  const nameStmt = db.prepare('SELECT name FROM projects WHERE id = ?');
+  const failures: ToolFailure[] = rows.map((r) => ({
+    tool: r.tool, projectId: r.projectId ?? null,
+    project: r.projectId == null ? null : (nameStmt.get(r.projectId) as { name: string } | undefined)?.name ?? null,
+    calls: r.calls, errors: r.errors, retries: r.retries, wastedTokens: r.wastedTokens,
+  }));
+  const totals = failures.reduce(
+    (t, f) => ({ calls: t.calls + f.calls, errors: t.errors + f.errors, retries: t.retries + f.retries, wastedTokens: t.wastedTokens + f.wastedTokens }),
+    { calls: 0, errors: 0, retries: 0, wastedTokens: 0 },
+  );
+  return { failures, totals };
+}
+
 export function sessionTimeline(db: DB, id: string) {
   const turns = plain(db.prepare(`
     SELECT id, ts, model, input, output, cache_read AS cacheRead, cache_write AS cacheWrite,
