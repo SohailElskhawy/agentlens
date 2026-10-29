@@ -1665,12 +1665,14 @@ async function quotaPage() {
 }
 
 async function recommendationsPage() {
-  const [recData, findData, trackData, projectsList] = await Promise.all([
-    api('recommendations'),
+  const [aiStatus, findData, trackData, projectsList] = await Promise.all([
+    api('ai/status').catch(() => null),
     api('findings'),
     api('tracking'),
     api('projects').catch(() => []),
   ]);
+  const aiOn = Boolean(aiStatus?.enabled && !aiStatus.error);
+  const recData = aiOn ? await api('recommendations', { ai: '1' }) : await api('recommendations');
 
   const projMap = new Map(
     (Array.isArray(projectsList) ? projectsList : []).map((p) => [String(p.projectId), p.name]),
@@ -1705,6 +1707,8 @@ async function recommendationsPage() {
     g.totalScore += (r.score || 0);
     g.ids.push(r.id);
     if (r.projectId != null) g.projectIds.add(String(r.projectId));
+    if (r.aiBody && !g.aiBody) g.aiBody = r.aiBody;
+    if (r.aiActionSnippet && !g.aiActionSnippet) g.aiActionSnippet = r.aiActionSnippet;
   }
   const groupedRecs = [...groupMap.values()].sort((a, b) => b.totalScore - a.totalScore);
 
@@ -1830,10 +1834,23 @@ async function recommendationsPage() {
                   📁 ${esc(projSummary)}
                 </div>
                 <p class="rec-body">${esc(g.body)}</p>
+                ${g.aiBody ? `
+                  <div class="ai-rec-enrichment">
+                    <span class="badge">AI-refined (unverified)</span>
+                    <p class="rec-body ai-rec-body">${esc(g.aiBody)}</p>
+                  </div>
+                ` : ''}
                 ${g.actionSnippet ? `
                   <div class="snippet-box">
                     <code>${esc(g.actionSnippet)}</code>
                     <button type="button" class="btn btn-xs btn-outline btn-copy-snippet" data-snippet="${esc(g.actionSnippet)}">Copy</button>
+                  </div>
+                ` : ''}
+                ${g.aiActionSnippet ? `
+                  <div class="snippet-box">
+                    <span class="badge">AI snippet</span>
+                    <code>${esc(g.aiActionSnippet)}</code>
+                    <button type="button" class="btn btn-xs btn-outline btn-copy-snippet" data-snippet="${esc(g.aiActionSnippet)}">Copy</button>
                   </div>
                 ` : ''}
                 <div class="rec-actions">
@@ -1865,10 +1882,23 @@ async function recommendationsPage() {
                 <h3 class="rec-title">${esc(r.title)}</h3>
                 <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:6px">📁 ${esc(pName)}</div>
                 <p class="rec-body">${esc(r.body)}</p>
+                ${r.aiBody ? `
+                  <div class="ai-rec-enrichment">
+                    <span class="badge">AI-refined (unverified)</span>
+                    <p class="rec-body ai-rec-body">${esc(r.aiBody)}</p>
+                  </div>
+                ` : ''}
                 ${r.actionSnippet ? `
                   <div class="snippet-box">
                     <code>${esc(r.actionSnippet)}</code>
                     <button type="button" class="btn btn-xs btn-outline btn-copy-snippet" data-snippet="${esc(r.actionSnippet)}">Copy</button>
+                  </div>
+                ` : ''}
+                ${r.aiActionSnippet ? `
+                  <div class="snippet-box">
+                    <span class="badge">AI snippet</span>
+                    <code>${esc(r.aiActionSnippet)}</code>
+                    <button type="button" class="btn btn-xs btn-outline btn-copy-snippet" data-snippet="${esc(r.aiActionSnippet)}">Copy</button>
                   </div>
                 ` : ''}
                 <div class="rec-actions">
@@ -1930,12 +1960,14 @@ async function recommendationsPage() {
           <p class="page-subtitle">Deterministic workflow waste patterns, estimated weekly token savings, and 14-day improvement verification.</p>
         </div>
         <div class="page-actions">
+          ${aiOn && openRecs.length > 0 ? '<button type="button" id="btn-enrich-ai" class="btn btn-sm btn-outline">Enrich with AI</button>' : ''}
           <a href="/api/export.csv?type=findings" download="agentlens-findings.csv" class="btn btn-sm btn-outline">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Export Findings CSV
           </a>
         </div>
       </div>
+      <p id="rec-ai-error" class="ai-note" role="alert"></p>
 
       <section class="kpi-grid">
         ${tile('Est. Weekly Savings', fmtTok(savings), 'Potential token reduction across active rules')}
@@ -1963,6 +1995,52 @@ async function recommendationsPage() {
       </div>
     `,
     after: () => {
+      const postRecEnrich = async (_id, confirm) => {
+        const r = await fetch('/api/ai/recommendations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(confirm ? { confirm } : {}),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok || body.status === 'error') {
+          throw new Error(body.message || 'Could not enrich recommendations.');
+        }
+        return body;
+      };
+
+      const enrichBtn = $('#btn-enrich-ai');
+      if (enrichBtn) {
+        enrichBtn.addEventListener('click', async () => {
+          enrichBtn.disabled = true;
+          enrichBtn.textContent = 'Preparing…';
+          const errEl = $('#rec-ai-error');
+          if (errEl) errEl.textContent = '';
+          const reset = () => {
+            enrichBtn.disabled = false;
+            enrichBtn.textContent = 'Enrich with AI';
+          };
+          try {
+            const result = await postRecEnrich(null);
+            reset();
+            if (result.status === 'ok') {
+              closeSlideOver();
+              await render();
+              $('#btn-enrich-ai')?.focus();
+            } else if (result.status === 'confirmation_required') {
+              openSlideOver('Review before sending', renderDiagnosePreview(null, result.preview, async () => {
+                closeSlideOver();
+                await render();
+                $('#btn-enrich-ai')?.focus();
+              }, postRecEnrich));
+            }
+          } catch (e) {
+            reset();
+            const err = $('#rec-ai-error') || errEl;
+            if (err) err.textContent = e.message;
+          }
+        });
+      }
+
       document.querySelectorAll('[data-rec-view]').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           state.recView = e.currentTarget.dataset.recView;
