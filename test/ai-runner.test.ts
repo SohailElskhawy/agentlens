@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import { existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
-import { DEFAULT_TIMEOUT_MS, TEMP_DIR_NAME, detectAgents, runAnalyst } from '../src/ai/runner.ts';
+import {
+  DEFAULT_TIMEOUT_MS,
+  PROVIDER_ISOLATION,
+  TEMP_DIR_NAME,
+  buildAnalystArgs,
+  detectAgents,
+  getProviderIsolation,
+  runAnalyst,
+} from '../src/ai/runner.ts';
 import type { AnalystExec } from '../src/ai/runner.ts';
 import { capabilityHelp } from './helpers.ts';
 
@@ -161,6 +169,41 @@ test('providers without isolated read-only controls fail closed', async () => {
     assert.equal(result.ok, false);
     assert.match(result.error!, /not supported/i);
   }
+});
+
+test('PROVIDER_ISOLATION and getProviderIsolation codify verified isolation guarantees for all four providers', () => {
+  assert.deepEqual(Object.keys(PROVIDER_ISOLATION).sort(), ['claude', 'codex', 'gemini', 'opencode']);
+
+  const claude = getProviderIsolation('claude');
+  assert.equal(claude, PROVIDER_ISOLATION.claude);
+  assert.equal(claude.agent, 'claude');
+  assert.equal(claude.supported, true);
+  assert.equal(claude.disablesTools, true);
+  assert.equal(claude.disablesHooksAndExtensions, true);
+  assert.equal(claude.ephemeralSession, true);
+  assert.equal(claude.preservesSubscriptionAuth, true);
+  assert.deepEqual(claude.missingGuarantees, []);
+  assert.ok(claude.verifiedFlags.includes('--no-session-persistence'));
+  assert.ok(claude.verifiedFlags.includes('--tools'));
+
+  for (const agent of ['codex', 'gemini', 'opencode'] as const) {
+    const info = getProviderIsolation(agent);
+    assert.equal(info, PROVIDER_ISOLATION[agent]);
+    assert.equal(info.agent, agent);
+    assert.equal(info.supported, false);
+    assert.equal(info.disablesTools, false);
+    assert.equal(info.preservesSubscriptionAuth, true);
+    assert.ok(info.missingGuarantees.length > 0);
+    assert.ok(info.reason.length > 0);
+    assert.throws(() => buildAnalystArgs(prompt, { agent, model: 'custom-model' }), /not supported safely/i);
+  }
+
+  assert.equal(PROVIDER_ISOLATION.codex.disablesHooksAndExtensions, true);
+  assert.equal(PROVIDER_ISOLATION.codex.ephemeralSession, true);
+  assert.equal(PROVIDER_ISOLATION.gemini.disablesHooksAndExtensions, false);
+  assert.equal(PROVIDER_ISOLATION.gemini.ephemeralSession, false);
+  assert.equal(PROVIDER_ISOLATION.opencode.disablesHooksAndExtensions, false);
+  assert.equal(PROVIDER_ISOLATION.opencode.ephemeralSession, false);
 });
 
 test('detectAgents uses the Windows PATH locator and only advertises safe providers', async () => {
