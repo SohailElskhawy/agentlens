@@ -420,6 +420,7 @@ async function updateNavBadges() {
 
 let slideOverReturnFocus = null;
 const anomalyKey = a => `${a.day}|${a.projectId}|${a.agent}`;
+const pendingAnomalies = new Set();
 const anomalyButton = key => [...document.querySelectorAll('.anomaly-explain')].find(b => b.dataset.anomalyKey === key);
 
 function openSlideOver(title, content) {
@@ -625,7 +626,7 @@ async function overview() {
         <div class="card-header"><div><h3 class="card-title">Today's token spikes</h3><span class="card-subtitle">Compared with the median of recent active days</span></div></div>
         ${(anomalies.anomalies || []).length ? anomalies.anomalies.map((a, i) => `
           <div class="anomaly-row"><div><strong>${esc(a.project || 'Unknown project')}</strong> · ${esc(AGENTS[a.agent] || a.agent)}<br><span class="card-subtitle">${fmtTok(a.tokens)} tokens · ${a.ratio}× baseline</span></div>
-          ${aiState?.enabled ? `<button type="button" class="btn btn-sm btn-outline anomaly-explain" data-index="${i}" data-anomaly-key="${esc(anomalyKey(a))}">Explain with AI</button>` : ''}</div>
+          ${aiState?.enabled ? `<button type="button" class="btn btn-sm btn-outline anomaly-explain" data-index="${i}" data-anomaly-key="${esc(anomalyKey(a))}"${pendingAnomalies.has(anomalyKey(a)) ? ' disabled' : ''}>${pendingAnomalies.has(anomalyKey(a)) ? 'Preparing…' : 'Explain with AI'}</button>` : ''}</div>
         `).join('') : '<p class="card-subtitle">No spikes detected today.</p>'}
         <p id="anomaly-ai-error" class="ai-note" role="status"></p>
       </section>
@@ -1413,9 +1414,11 @@ function wireAnomalyExplain(btn, anomaly) {
   };
   btn.addEventListener('click', async () => {
     const key = anomalyKey(anomaly);
+    if (pendingAnomalies.has(key)) return;
+    pendingAnomalies.add(key);
     btn.disabled = true; btn.textContent = 'Preparing…'; $('#anomaly-ai-error').textContent = '';
     // A rerender during the request replaces the button, so look the live one up again by identity.
-    const settle = () => { const live = anomalyButton(key) || btn; live.disabled = false; live.textContent = 'Explain with AI'; live.focus(); };
+    const settle = () => { pendingAnomalies.delete(key); const live = anomalyButton(key) || btn; live.disabled = false; live.textContent = 'Explain with AI'; live.focus(); };
     try {
       const result = await post(null);
       settle();
