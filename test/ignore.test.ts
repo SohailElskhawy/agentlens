@@ -332,3 +332,148 @@ test('5. CLI agentlens generate-ignore works end-to-end with isolated AGENTLENS_
   const parsedPos = JSON.parse(posJsonOut);
   assert.ok(parsedPos.ignoreFiles[0].addedPatterns.includes('node_modules/'));
 });
+
+test('6. Finding paths with newline, control chars, or gitignore operators (!, #) are rejected', () => {
+  const root = tmp();
+  const db = openDb(':memory:');
+  const projStmt = db.prepare('INSERT INTO projects (root, name) VALUES (?, ?)');
+  projStmt.run(root, 'injection-test');
+  const proj = db.prepare('SELECT id FROM projects WHERE root = ?').get(root) as { id: number };
+
+  const findStmt = db.prepare(
+    'INSERT INTO findings (id, rule, project_id, session_id, evidence, confidence, confidence_reason, est_tokens_week, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  );
+  findStmt.run(
+    'inj1',
+    'hot_files',
+    proj.id,
+    's1',
+    JSON.stringify({ file: 'x\nCLAUDE.md\ny.log' }),
+    'high',
+    'newline injection test',
+    1000,
+    Date.now(),
+    Date.now()
+  );
+  findStmt.run(
+    'inj2',
+    'large_tool_output',
+    proj.id,
+    's1',
+    JSON.stringify({ path: 'cr\rfile.log' }),
+    'high',
+    'cr injection test',
+    1000,
+    Date.now(),
+    Date.now()
+  );
+  findStmt.run(
+    'inj3',
+    'hot_files',
+    proj.id,
+    's1',
+    JSON.stringify({ target: 'null\0byte.log' }),
+    'high',
+    'null byte test',
+    1000,
+    Date.now(),
+    Date.now()
+  );
+  findStmt.run(
+    'inj4',
+    'hot_files',
+    proj.id,
+    's1',
+    JSON.stringify({ file: '!important.log' }),
+    'high',
+    'negation operator test',
+    1000,
+    Date.now(),
+    Date.now()
+  );
+  findStmt.run(
+    'inj5',
+    'large_tool_output',
+    proj.id,
+    's1',
+    JSON.stringify({ path: '#comment.log' }),
+    'high',
+    'comment character test',
+    1000,
+    Date.now(),
+    Date.now()
+  );
+
+  const res = generateIgnore(db, { projectRoot: root, projectId: proj.id });
+  assert.equal(res.findingPatterns.length, 0);
+
+  for (const ig of res.ignoreFiles) {
+    assert.ok(!ig.addedPatterns.some((p) => p.includes('CLAUDE.md')));
+    assert.ok(!ig.addedPatterns.some((p) => p.includes('important.log')));
+    assert.ok(!ig.addedPatterns.some((p) => p.includes('comment.log')));
+    assert.ok(!ig.addedPatterns.some((p) => /[\r\n\0]/.test(p)));
+    assert.ok(!ig.addedPatterns.some((p) => p.startsWith('!') || p.startsWith('#')));
+    assert.ok(!ig.updatedContent.includes('CLAUDE.md'));
+  }
+});
+
+test('7. When .claudeignore.bak is a symlink, generateIgnore throws and does NOT overwrite target', () => {
+  const root = tmp();
+  mkdirSync(join(root, 'dist'), { recursive: true });
+  put(join(root, '.claudeignore'), 'custom-rule/\n');
+
+  const targetFile = join(tmp(), 'safe-target.txt');
+  put(targetFile, 'DO_NOT_OVERWRITE');
+  symlinkSync(targetFile, join(root, '.claudeignore.bak'));
+
+  const db = openDb(':memory:');
+  assert.throws(
+    () => generateIgnore(db, { projectPath: root, apply: true }),
+    /Refusing to write backup to symlink or non-regular file: \.claudeignore\.bak/
+  );
+
+  // Target file must remain untouched
+  assert.equal(readFileSync(targetFile, 'utf8'), 'DO_NOT_OVERWRITE');
+});
+
+test('8. CLI flag edge cases: missing --project value and --dry-run precedence over --apply', () => {
+  const isolatedDataDir = tmp();
+  const root = tmp();
+  mkdirSync(join(root, 'dist'), { recursive: true });
+
+  // Missing --project value at end of argv
+  assert.throws(
+    () => runCli(['generate-ignore', '--project'], { AGENTLENS_DATA_DIR: isolatedDataDir }),
+    (err: any) => {
+      assert.equal(err.status, 1);
+      assert.ok(err.stderr.includes('Usage: agentlens generate-ignore [--project <dir>] [--apply] [--dry-run] [--json]'));
+      return true;
+    }
+  );
+
+  // --project followed immediately by another flag
+  assert.throws(
+    () => runCli(['generate-ignore', '--project', '--apply'], { AGENTLENS_DATA_DIR: isolatedDataDir }),
+    (err: any) => {
+      assert.equal(err.status, 1);
+      assert.ok(err.stderr.includes('Usage: agentlens generate-ignore [--project <dir>] [--apply] [--dry-run] [--json]'));
+      return true;
+    }
+  );
+
+  // --apply followed by --dry-run: --dry-run must win
+  const out1 = runCli(['generate-ignore', '--project', root, '--apply', '--dry-run', '--json'], {
+    AGENTLENS_DATA_DIR: isolatedDataDir,
+  });
+  const parsed1 = JSON.parse(out1);
+  assert.equal(parsed1.applied, false);
+  assert.ok(!existsSync(join(root, '.claudeignore')));
+
+  // --dry-run followed by --apply: --dry-run must win
+  const out2 = runCli(['generate-ignore', '--project', root, '--dry-run', '--apply', '--json'], {
+    AGENTLENS_DATA_DIR: isolatedDataDir,
+  });
+  const parsed2 = JSON.parse(out2);
+  assert.equal(parsed2.applied, false);
+  assert.ok(!existsSync(join(root, '.claudeignore')));
+});

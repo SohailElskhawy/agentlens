@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import type { DB } from './db.ts';
 import { projectName, projectRoot } from './project.ts';
@@ -71,25 +71,28 @@ const CORE_INSTRUCTION_DOC_FILES = new Set([
 
 const CORE_UPPER = new Set(Array.from(CORE_INSTRUCTION_DOC_FILES).map((s) => s.toUpperCase()));
 
-function isSafeRelativePath(rel: string, root: string): boolean {
-  if (typeof rel !== 'string' || !rel.trim()) return false;
-  const trimmed = rel.trim();
-  if (trimmed.startsWith('/') || trimmed.startsWith('\\') || isAbsolute(trimmed)) return false;
+function isSafeRelativePath(p: string, projectRoot: string): boolean {
+  if (typeof p !== 'string' || !p.trim()) return false;
+  if (/[\r\n\0]/.test(p)) return false;
+  const trimmed = p.trim();
+  const norm = trimmed.replace(/\\/g, '/');
+  if (norm.startsWith('/') || isAbsolute(trimmed)) return false;
+  if (norm.startsWith('!') || norm.startsWith('#')) return false;
 
-  const segments = trimmed.split(/[/\\]/);
+  const segments = norm.split('/');
   if (segments.some((s) => s === '..')) return false;
 
-  const base = basename(trimmed);
+  const base = basename(norm);
   if (CORE_UPPER.has(base.toUpperCase())) return false;
 
-  const fullPath = resolve(root, trimmed);
-  if (!fullPath.startsWith(root + '/') && fullPath !== root) return false;
+  const fullPath = resolve(projectRoot, trimmed);
+  if (!fullPath.startsWith(projectRoot + '/') && fullPath !== projectRoot) return false;
 
   try {
     const lstat = lstatSync(fullPath);
     if (lstat.isSymbolicLink()) return false;
     const real = realpathSync(fullPath);
-    if (!real.startsWith(root + '/') && real !== root) return false;
+    if (!real.startsWith(projectRoot + '/') && real !== projectRoot) return false;
   } catch (err: any) {
     if (err?.code !== 'ENOENT') return false;
   }
@@ -141,7 +144,7 @@ function parseExistingIgnoreSet(content: string): Set<string> {
 
 export function generateIgnore(
   db: DB,
-  opts?: { projectRoot?: string; projectId?: number; apply?: boolean }
+  opts?: { projectRoot?: string; projectPath?: string; projectId?: number; apply?: boolean }
 ): GenerateIgnoreResult {
   const apply = Boolean(opts?.apply);
   let root: string | undefined;
@@ -154,7 +157,7 @@ export function generateIgnore(
         | { id: number; root: string; name: string }
         | undefined;
       if (row) {
-        if (!opts?.projectRoot) {
+        if (!opts?.projectRoot && !opts?.projectPath) {
           root = row.root;
         }
         projName = row.name;
@@ -162,7 +165,7 @@ export function generateIgnore(
     } catch {}
   }
 
-  const rawRoot = root ?? opts?.projectRoot ?? process.cwd();
+  const rawRoot = root ?? opts?.projectPath ?? opts?.projectRoot ?? process.cwd();
   const resolvedRoot = projectRoot(resolve(rawRoot));
   let finalRoot: string;
   try {
@@ -231,6 +234,7 @@ export function generateIgnore(
         const candidates = [ev.file, ev.target, ev.path];
         for (const cand of candidates) {
           if (typeof cand !== 'string') continue;
+          if (/[\r\n\0]/.test(cand)) continue;
           const trimmed = cand.trim();
           if (!trimmed) continue;
           if (!isSafeRelativePath(trimmed, finalRoot)) continue;
@@ -320,6 +324,21 @@ export function generateIgnore(
     if (apply && addedPatterns.length > 0) {
       if (existed) {
         backupPath = `${filePath}.bak`;
+        const name = fileName;
+        let bstat;
+        try {
+          bstat = lstatSync(backupPath);
+        } catch (err: any) {
+          if (err?.code !== 'ENOENT') {
+            throw err;
+          }
+        }
+        if (bstat) {
+          if (bstat.isSymbolicLink() || !bstat.isFile()) {
+            throw new Error('Refusing to write backup to symlink or non-regular file: ' + name + '.bak');
+          }
+          unlinkSync(backupPath);
+        }
         copyFileSync(filePath, backupPath);
       }
       writeFileSync(filePath, updatedContent, 'utf8');

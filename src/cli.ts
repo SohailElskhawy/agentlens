@@ -521,26 +521,41 @@ const commands: Record<string, () => unknown> = {
   },
   'generate-ignore': async () => {
     let projectArg: string | undefined;
-    let apply = false;
+    let sawApply = false;
+    let sawDryRun = false;
     let isJson = false;
 
     for (let i = 3; i < process.argv.length; i++) {
       const arg = process.argv[i];
-      if (arg === '--project' && process.argv[i + 1]) {
-        projectArg = process.argv[i + 1];
+      if (arg === '--project') {
+        const next = process.argv[i + 1];
+        if (!next || next.startsWith('--')) {
+          console.error('Usage: agentlens generate-ignore [--project <dir>] [--apply] [--dry-run] [--json]');
+          process.exitCode = 1;
+          return;
+        }
+        projectArg = next;
         i++;
       } else if (arg.startsWith('--project=')) {
-        projectArg = arg.slice('--project='.length);
+        const val = arg.slice('--project='.length);
+        if (!val) {
+          console.error('Usage: agentlens generate-ignore [--project <dir>] [--apply] [--dry-run] [--json]');
+          process.exitCode = 1;
+          return;
+        }
+        projectArg = val;
       } else if (arg === '--apply') {
-        apply = true;
+        sawApply = true;
       } else if (arg === '--dry-run') {
-        apply = false;
+        sawDryRun = true;
       } else if (arg === '--json') {
         isJson = true;
       } else if (!arg.startsWith('-') && !projectArg) {
         projectArg = arg;
       }
     }
+
+    const apply = sawApply && !sawDryRun;
 
     const db = existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
     try {
