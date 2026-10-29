@@ -31,6 +31,7 @@ import { computeQuotaForecasts } from './quota-forecast.ts';
 import { checkLiveAlerts } from './alerts.ts';
 import { exportData } from './export.ts';
 import { formatOptimizeReport, optimizeWorkspace } from './optimize.ts';
+import { formatIgnoreReport, generateIgnore } from './ignore.ts';
 import { getOmarchyPluginStatus, installOmarchyPlugin, uninstallOmarchyPlugin } from './omarchy-plugin.ts';
 
 const env = process.env;
@@ -53,6 +54,7 @@ const HELP = `Usage: agentlens <command>
   explain anomaly     explain a detected spike <date> <project> [--agent <agent>] [--preview | --confirm <hash>] [--json]
   diagnose            AI diagnosis of a session <id> or --worst <N> (--project, --json, --preview, --confirm <hash>)
   optimize [path]     workspace hygiene or instruction rewrite (--ai, --preview, --confirm <hash>, --apply, --json)
+  generate-ignore     generate .claudeignore and .cursorignore (--project <path>, --apply, --dry-run, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
   report              generate and display weekly usage report (--week, --html, --json)
@@ -515,6 +517,41 @@ const commands: Record<string, () => unknown> = {
       console.log(JSON.stringify(res, null, 2));
     } else {
       console.log(formatOptimizeReport(res));
+    }
+  },
+  'generate-ignore': async () => {
+    let projectArg: string | undefined;
+    let apply = false;
+    let isJson = false;
+
+    for (let i = 3; i < process.argv.length; i++) {
+      const arg = process.argv[i];
+      if (arg === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      } else if (arg.startsWith('--project=')) {
+        projectArg = arg.slice('--project='.length);
+      } else if (arg === '--apply') {
+        apply = true;
+      } else if (arg === '--dry-run') {
+        apply = false;
+      } else if (arg === '--json') {
+        isJson = true;
+      } else if (!arg.startsWith('-') && !projectArg) {
+        projectArg = arg;
+      }
+    }
+
+    const db = existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      const res = generateIgnore(db, { projectRoot: projectArg, apply });
+      if (isJson) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(formatIgnoreReport(res));
+      }
+    } finally {
+      try { db.close(); } catch {}
     }
   },
   report: () => {
