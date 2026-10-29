@@ -59,7 +59,8 @@ test('upsertFindings and getFindings persist and filter findings', () => {
   assert.equal(hotFindings.length, 1);
   assert.equal(hotFindings[0].id, 'f2');
 
-  // Upsert conflict updates lastSeen and preserves/maximizes estTokensWeek
+  // Upsert conflict updates lastSeen and sets estTokensWeek to the incoming value:
+  // estimates are calibrated before persistence, so a rerun must be able to lower them.
   const f1Updated: Finding = {
     ...f1,
     estTokensWeek: 20_000,
@@ -71,6 +72,17 @@ test('upsertFindings and getFindings persist and filter findings', () => {
   assert.equal(afterUpdate.length, 1);
   assert.equal(afterUpdate[0].estTokensWeek, 20_000);
   assert.equal(afterUpdate[0].lastSeen, 5000);
+
+  const f1Lower: Finding = {
+    ...f1,
+    estTokensWeek: 5_000,
+    lastSeen: 6000,
+  };
+  upsertFindings(db, [f1Lower]);
+  const afterLower = getFindings(db, { rule: 'retry_loop' });
+  assert.equal(afterLower.length, 1);
+  assert.equal(afterLower[0].estTokensWeek, 5_000, 'incoming (calibrated) estimate is stored even when lower');
+  assert.equal(afterLower[0].lastSeen, 6000);
 });
 
 test('upsertRecommendations, getRecommendations, and updateRecommendationStatus manage recommendation lifecycle', () => {

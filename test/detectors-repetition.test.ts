@@ -92,3 +92,33 @@ test('runDetectors executes all detectors and upserts into database', () => {
   const persisted = getFindings(db);
   assert.equal(persisted.length, findings.length);
 });
+
+test('runDetectors calibrates to trailing-week tokens and lowers estimates after window rollover', () => {
+  const db = openDb(':memory:');
+  const pId = upsertProject(db, '/work/repo', 'repo');
+  upsertSessions(db, [{ id: 's1', agent: 'claude', cwd: '/work/repo', projectId: pId }]);
+  const now = 1_793_000_000_000;
+  upsertEvents(db, [
+    { id: 'e1', agent: 'claude', sessionId: 's1', ts: now - 2000, kind: 'tool_result', resultBytes: 4096, input: 5000 },
+    { id: 'e2', agent: 'claude', sessionId: 's1', ts: now - 1000, kind: 'tool_result', resultBytes: 120_000, input: 5000 },
+  ]);
+
+  const run1 = runDetectors(db, { now });
+  const big1 = run1.find((f) => f.rule === 'large_tool_output');
+  assert.ok(big1, 'large_tool_output fires');
+  assert.ok(big1.estTokensWeek <= 10_000, 'estimate capped by the session trailing-week tokens (2 x 5000)');
+
+  const stored1 = getFindings(db);
+  assert.equal(stored1.find((f) => f.id === big1.id)?.estTokensWeek, big1.estTokensWeek, 'persisted equals returned');
+
+  const run2 = runDetectors(db, { now }); // same fixed now: deterministic ids and estimates
+  assert.deepEqual(
+    run2.map((f) => [f.id, f.estTokensWeek]),
+    run1.map((f) => [f.id, f.estTokensWeek]),
+  );
+
+  runDetectors(db, { now: now + 8 * 7 * 86_400_000 }); // trailing week rolled past all events
+  const stored3 = getFindings(db);
+  assert.equal(stored3.length, stored1.length, 'rollover does not delete findings');
+  assert.equal(stored3.find((f) => f.id === big1.id)?.estTokensWeek, 0, 'previously higher persisted estimate decreases');
+});
