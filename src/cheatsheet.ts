@@ -19,7 +19,7 @@ export interface CheatsheetResult {
   markdown: string;
 }
 
-function extractFilesFromEvidence(evidence: any): Array<{ file: string; reads: number }> {
+export function extractFilesFromEvidence(evidence: any): Array<{ file: string; reads: number }> {
   if (!evidence || typeof evidence !== 'object') return [];
   const results: Array<{ file: string; reads: number }> = [];
 
