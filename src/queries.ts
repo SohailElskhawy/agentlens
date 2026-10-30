@@ -225,6 +225,89 @@ export function modelEfficiency(db: DB, f: Filter = {}): ModelEfficiency[] {
   })).sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name));
 }
 
+export interface SessionFamily {
+  root: string;
+  sessions: number;
+  childSessions: number;
+  totalSessions: number;
+  tokens: number;
+  cost: number;
+  pricedSessions: number;
+}
+
+/**
+ * Informational attribution: which share of tokens sits in which parent-child session family.
+ * A family root is a session with no usable parent (no parent_id, a parent_id with no matching
+ * row, or a cycle back to itself on the parent walk); descendants attach to their ancestor root.
+ * Cycles are cut when the walk revisits a session on the current path, so cyclic data neither
+ * crashes nor hangs; every session lands in exactly one family and is counted once.
+ * Cost covers priced models only via costOf; unpriced sessions keep their tokens but cost 0.
+ */
+export function sessionFamilies(db: DB, f: Filter = {}): SessionFamily[] {
+  const w = where(f);
+  // Family structure comes from the sessions table; tokens/cost come from filtered events. A session
+  // with no events matching the filter contributes no family of its own, but its ancestors' structure
+  // is still walked so its tokens land in the right root's family.
+  const parents = new Map<string, string | null>();
+  for (const r of db.prepare('SELECT id, parent_id AS parentId FROM sessions').all() as Row[]) parents.set(r.id, r.parentId ?? null);
+  const rootsSeed: string[] = []; // sessions seen by the filtered events; family list is built from these
+  for (const r of db.prepare(`SELECT DISTINCT e.session_id AS id ${FROM} WHERE 1 = 1${w.sql}`).all(w.params) as Row[]) { // events whose session row is missing still count, as their own roots
+    if (!parents.has(r.id)) parents.set(r.id, null);
+    rootsSeed.push(r.id);
+  }
+
+  const rootOf = new Map<string, string>();
+  const root = (id: string): string => {
+    const cached = rootOf.get(id);
+    if (cached !== undefined) return cached;
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    let cur = id;
+    let res = '';
+    for (;;) {
+      const memo = rootOf.get(cur);
+      if (memo !== undefined) { res = memo; break; }
+      if (onPath.has(cur)) { res = cur; break; } // cycle: cut here, the re-entry point anchors the family
+      onPath.add(cur);
+      path.push(cur);
+      const parent = parents.get(cur);
+      if (parent == null || !parents.has(parent)) { res = cur; break; } // no parent row: this session is a root
+      cur = parent;
+    }
+    for (const p of path) rootOf.set(p, res);
+    return res;
+  };
+
+  const fams = new Map<string, { sessions: number; tokens: number; cost: number; priced: Set<string> }>();
+  for (const id of rootsSeed) {
+    const r = root(id);
+    let g = fams.get(r);
+    if (!g) { g = { sessions: 0, tokens: 0, cost: 0, priced: new Set() }; fams.set(r, g); }
+    g.sessions++;
+  }
+
+  const stats = db.prepare(`
+    SELECT e.session_id AS sessionId, e.model AS model, sum(e.input) AS input, sum(e.output) AS output,
+      sum(e.cache_read) AS cacheRead, sum(e.cache_write) AS cacheWrite, sum(e.cache_write_1h) AS cacheWrite1h,
+      sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens
+    ${FROM} WHERE e.kind = 'assistant'${w.sql} GROUP BY e.session_id, e.model`).all(w.params) as Row[];
+  for (const s of stats) {
+    const r = root(s.sessionId);
+    const g = fams.get(r)!;
+    g.tokens += s.tokens ?? 0;
+    const c = costOf(s.model, {
+      input: s.input ?? 0, output: s.output ?? 0, cacheRead: s.cacheRead ?? 0,
+      cacheWrite: s.cacheWrite ?? 0, cacheWrite1h: s.cacheWrite1h ?? 0,
+    });
+    if (c != null) { g.cost += c; g.priced.add(s.sessionId); }
+  }
+
+  return [...fams.entries()].map(([rootId, g]): SessionFamily => ({
+    root: rootId, sessions: g.sessions, childSessions: g.sessions - 1, totalSessions: g.sessions,
+    tokens: g.tokens, cost: g.cost, pricedSessions: g.priced.size,
+  })).sort((a, b) => b.tokens - a.tokens || a.root.localeCompare(b.root));
+}
+
 export function sessionTimeline(db: DB, id: string) {
   const turns = plain(db.prepare(`
     SELECT id, ts, model, input, output, cache_read AS cacheRead, cache_write AS cacheWrite,
