@@ -256,7 +256,7 @@ test('web renderDiagnosis shows fixed kind labels as safe text nodes', () => {
   runInNewContext(code, ctx);
   const evil = '<img src=x onerror=alert(1)>';
   const d = { summary: 'Sum', cached: false, causes: [
-    { cause: 'One', evidence: evil, est_tokens: 5, kind: 'observation' },
+    { cause: evil, evidence: 'e1', est_tokens: 5, kind: 'observation' },
     { cause: 'Two', evidence: 'e2', est_tokens: 6, kind: 'hypothesis' },
     { cause: 'Three', evidence: 'e3', est_tokens: 7, kind: 'unknown' },
     { cause: 'Legacy', evidence: 'e4', est_tokens: 8 },
@@ -269,7 +269,7 @@ test('web renderDiagnosis shows fixed kind labels as safe text nodes', () => {
   assert.ok(texts.includes('Causes and hypotheses') && !texts.includes('Likely causes'));
   assert.ok(texts.some((t) => t.includes('unverified AI estimate')), 'estimate warning kept');
   const holder = nodes.find((n) => n.textContent === evil);
-  assert.ok(holder && holder.tag === 'p', 'hostile evidence stays in a text-only p node');
+  assert.ok(holder && holder.tag === 'strong', 'hostile cause stays in a text-only strong node');
   assert.ok(nodes.every((n) => !('innerHTML' in n)), 'never rendered through innerHTML');
   root = ctx.renderDiagnosis(d, true);
   texts.length = 0;
