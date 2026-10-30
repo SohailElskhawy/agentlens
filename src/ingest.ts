@@ -1,5 +1,6 @@
 import { statSync } from 'node:fs';
 import { antigravity } from './adapters/antigravity.ts';
+import { cline } from './adapters/cline.ts';
 import { claude } from './adapters/claude.ts';
 import { codex } from './adapters/codex.ts';
 import { opencode } from './adapters/opencode.ts';
@@ -14,7 +15,7 @@ import type { Adapter, Cursor, ReadResult } from './types.ts';
 import { isAnalystCwd } from './temp-project.ts';
 import { refreshRecommendations } from './recommend.ts';
 
-export const ADAPTERS: Adapter[] = [claude, codex, opencode, antigravity, gemini, aider, cursor];
+export const ADAPTERS: Adapter[] = [claude, codex, opencode, antigravity, gemini, aider, cursor, cline];
 
 export interface IngestStats { files: number; read: number; events: number; errors: number; skipped: number }
 
