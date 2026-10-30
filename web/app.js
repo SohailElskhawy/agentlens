@@ -6,6 +6,7 @@ const fmtUsd = (n) => `$${(n ?? 0).toFixed(2)}`;
 const fmtTime = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 const fmtShortTime = (ms) => (ms ? new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 const fmtDelta = (n) => ((n ?? 0) > 0 ? `+${n}%` : `${n ?? 0}%`);
+const fmtOutcomeRate = (n) => (n != null ? fmtTok(n) : '—');
 
 const AGENTS = {
   claude: 'Claude Code',
@@ -977,14 +978,14 @@ async function projectPage(projectId) {
                 agentCol,
                 { label: 'Tokens', num: true, get: (ag) => fmtTok(ag.tokens) },
                 { label: 'Commits', num: true, get: (ag) => ag.commits },
-                { label: 'Tok / Commit', num: true, get: (ag) => fmtTok(ag.tokensPerCommit) },
-                { label: 'Tok / Line', num: true, get: (ag) => fmtTok(ag.tokensPerChangedLine) },
+                { label: 'Tok / Commit', num: true, get: (ag) => fmtOutcomeRate(ag.tokensPerCommit) },
+                { label: 'Tok / Line', num: true, get: (ag) => fmtOutcomeRate(ag.tokensPerChangedLine) },
               ], outcome.byAgent) : ''}
             </div>
             <div class="col-6">
               ${outcome.trend && outcome.trend.length > 1 ? `
                 <div id="c-outcome-trend" style="height:170px"></div>
-              ` : `<div style="padding:24px;color:var(--text-muted);font-size:12.5px">Overall: <strong>${fmtTok(outcome.tokensPerCommit)}</strong> tokens/commit · <strong>${fmtTok(outcome.tokensPerChangedLine)}</strong> tokens/line changed.</div>`}
+              ` : `<div style="padding:24px;color:var(--text-muted);font-size:12.5px">Overall: <strong>${fmtOutcomeRate(outcome.tokensPerCommit)}</strong> tokens/commit · <strong>${fmtOutcomeRate(outcome.tokensPerChangedLine)}</strong> tokens/line changed.</div>`}
             </div>
           </div>
         </div>

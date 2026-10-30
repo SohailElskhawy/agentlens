@@ -273,6 +273,8 @@ agentlens plugin uninstall
 
 The read-only `agentlens roi` command and `GET /api/analytics/roi?plan=pro&days=30` provide an **estimated API/list-price comparison** for Claude-agent logs. Plans are `pro`, `max5x`, or `max20x` (default `pro`); days are 1–365 (default 30). Team plans are unsupported. The window includes its start and excludes its end. API cost includes only tokens with known model prices, and the result reports token coverage and separate token and plan price dates. The ratio is unavailable when there are no priced tokens. The US monthly list prices ($20/$100/$200, as of 2026-10-30; [Claude pricing](https://claude.com/pricing)) exclude taxes; annual and regional pricing are unsupported. Multiplying by days/30 is illustrative, not an invoice calculation. Conditional API credit benefits are excluded. Local logs can include API-billed Claude usage and omit web chat and other machines, so this is not actual subscription utilization or measured value.
 
+The read-only `GET /api/outcomes` endpoint reports git outcome efficiency metrics per project; `tokensPerCommit` and `tokensPerChangedLine` rates (both overall and in `byAgent`) are nullable (`null` when the respective commit or changed-line denominator is zero).
+
 The dashboard previews workspace optimization without writing files. To apply changes, copy its shell-specific CLI command and run it in the named shell.
 
 Ordinary `optimize --apply` checks planned targets, destination directories, and backup availability before writing. Later filesystem changes or I/O errors can still leave partial results.

@@ -347,16 +347,16 @@ export function outcomeEfficiency(db: DB, f: Filter, gitReader?: typeof readGitN
     const effCommits = attrCommits > 0 ? attrCommits : commits.length;
     const effLines = attrLines > 0 ? attrLines : commits.reduce((acc, c) => acc + c.added + c.deleted, 0);
 
-    const tokensPerCommit = Math.round(p.tokens / Math.max(1, effCommits));
-    const tokensPerChangedLine = Math.round(p.tokens / Math.max(1, effLines));
+    const tokensPerCommit = effCommits > 0 ? Math.round(p.tokens / effCommits) : null;
+    const tokensPerChangedLine = effLines > 0 ? Math.round(p.tokens / effLines) : null;
 
     const byAgent = Array.from(byAgentMap.entries()).map(([agent, data]) => ({
       agent,
       tokens: data.tokens,
       commits: data.commits,
       linesChanged: data.lines,
-      tokensPerCommit: Math.round(data.tokens / Math.max(1, data.commits)),
-      tokensPerChangedLine: Math.round(data.tokens / Math.max(1, data.lines)),
+      tokensPerCommit: data.commits > 0 ? Math.round(data.tokens / data.commits) : null,
+      tokensPerChangedLine: data.lines > 0 ? Math.round(data.tokens / data.lines) : null,
     }));
 
     const dayMap = new Map<string, { commits: number; lines: number }>();

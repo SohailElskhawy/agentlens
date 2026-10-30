@@ -138,12 +138,16 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         body = `Instructions in ${f.evidence?.projectName ?? 'project'} specify conflicting package managers (${f.evidence?.managers?.join(', ')}). Standardize on a single package manager.`;
         break;
 
-      case 'outcome_efficiency':
+      case 'outcome_efficiency': {
         action = 'improve';
         title = 'Improve outcome efficiency with focused task scoping';
-        body = `Project consumed ${f.evidence?.tokensPerCommit?.toLocaleString() ?? 'elevated'} tokens per commit (${f.evidence?.tokensPerChangedLine ?? 'many'} tokens/changed line). Break tasks into atomic milestones to raise commit frequency and reduce wasted turns.`;
+        const lineClause = f.evidence?.tokensPerChangedLine != null
+          ? ` (${Number(f.evidence.tokensPerChangedLine).toLocaleString()} tokens/changed line)`
+          : '';
+        body = `Project consumed ${f.evidence?.tokensPerCommit?.toLocaleString() ?? 'elevated'} tokens per commit${lineClause}. Break tasks into atomic milestones to raise commit frequency and reduce wasted turns.`;
         actionSnippet = 'git commit -m "feat: atomic milestone"';
         break;
+      }
 
       case 'abandoned_session':
         action = 'improve';
