@@ -33,6 +33,7 @@ import { exportData } from './export.ts';
 import { formatOptimizeReport, optimizeWorkspace } from './optimize.ts';
 import { getOmarchyPluginStatus, installOmarchyPlugin, uninstallOmarchyPlugin } from './omarchy-plugin.ts';
 import { generateCheatsheet } from './cheatsheet.ts';
+import { subscriptionComparison } from './roi.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -59,6 +60,7 @@ const HELP = `Usage: agentlens <command>
   audit               audit agent instructions, MCPs, skills, and plugins
   report              generate and display weekly usage report (--week, --html, --json)
   track               show improvement tracking for accepted recommendations
+  roi                 estimated Claude API/list-price comparison (--plan pro|max5x|max20x, --days <N>, --json)
   savings             compare weekly project metrics (--project <path>, --weeks <N> [default 8], --json, --snapshot)
   accept <id>         accept a recommendation and begin 14-day improvement tracking
   catalog             browse curated AI tools, MCPs, and skills (--json, --rule <rule>)
@@ -567,6 +569,25 @@ const commands: Record<string, () => unknown> = {
     } else {
       console.log(rep.markdown);
     }
+  },
+  roi: () => {
+    const { values } = parseArgs({ args: process.argv.slice(3), options: {
+      plan: { type: 'string' }, days: { type: 'string' }, json: { type: 'boolean' },
+    } });
+    const days = values.days === undefined ? undefined : /^\d+$/.test(values.days) ? Number(values.days) : NaN;
+    const db = existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      const r = subscriptionComparison(db, { plan: values.plan, days });
+      if (values.json) console.log(JSON.stringify(r, null, 2));
+      else {
+        console.log(`${r.title} (${r.plan}, ${r.days} days; ${new Date(r.from).toISOString()} to ${new Date(r.to).toISOString()}, end exclusive)`);
+        console.log(`Estimated API cost: $${r.estimatedApiCostUsd.toFixed(2)} (priced tokens only; token prices as of ${r.tokenPricesAsOf})`);
+        console.log(`Token coverage: ${r.tokenCoverage == null ? 'n/a' : `${(r.tokenCoverage * 100).toFixed(1)}%`} (${r.unpricedTokens} unpriced of ${r.tokens} tokens)`);
+        console.log(`US monthly list price: $${r.monthlyPlanPriceUsd}; illustrative ${r.days}/30 reference: $${r.periodPlanPriceUsd.toFixed(2)} (plan prices as of ${r.planPricesAsOf}; ${r.planPriceSource})`);
+        console.log(`Estimated API/list-price ratio: ${r.estimatedRatio == null ? 'n/a' : r.estimatedRatio.toFixed(2)}`);
+        console.log(r.disclosure);
+      }
+    } finally { db.close(); }
   },
   savings: () => {
     const { values } = parseArgs({ args: process.argv.slice(3), options: {

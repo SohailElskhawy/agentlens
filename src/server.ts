@@ -22,6 +22,7 @@ import type { DiagnosisErrorCode, DiagnosisRunner } from './ai/diagnose.ts';
 import { detectAnomalies } from './anomaly.ts';
 import { explainAnomaly } from './ai/explain.ts';
 import * as q from './queries.ts';
+import { subscriptionComparison } from './roi.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
 const TYPES: Record<string, string> = {
@@ -535,6 +536,17 @@ export function startServer(
         }
       }
 
+      if (url.pathname === '/api/analytics/roi' && req.method === 'GET') {
+        const plan = url.searchParams.get('plan') ?? undefined;
+        const rawDays = url.searchParams.get('days');
+        const days = rawDays === null ? undefined : /^\d+$/.test(rawDays) ? Number(rawDays) : NaN;
+        try {
+          return send(res, 200, 'application/json', JSON.stringify(subscriptionComparison(db, { plan, days })));
+        } catch (e) {
+          if (e instanceof Error && /^(plan must|days must|Team plans)/.test(e.message)) return send(res, 400, 'application/json', JSON.stringify({ error: e.message }));
+          throw e;
+        }
+      }
       const handler = api[url.pathname];
       if (handler) return send(res, 200, 'application/json', JSON.stringify(handler(filterOf(url.searchParams), url.searchParams)));
       const file = normalize(join(WEB, url.pathname === '/' ? 'index.html' : url.pathname));
