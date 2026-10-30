@@ -12,11 +12,21 @@ export function subscriptionComparison(db: DB, { plan = 'pro', days = 30, now = 
   if (!Number.isSafeInteger(days) || days < 1 || days > 365) throw new Error('days must be an integer from 1 to 365');
   const from = now - days * 86400_000;
   const { totals, pricesAsOf } = summary(db, { agent: 'claude', from, to: now });
+  // observed metadata is descriptive only: counts are scoped to the requested window, but first/last
+  // observed span all retained Claude logs, so the window is never implied to be fully covered
+  const inWindow = db.prepare(
+    `SELECT count(*) AS events, count(DISTINCT e.session_id) AS sessions FROM events e WHERE e.agent = $agent AND e.ts >= $from AND e.ts < $to`,
+  ).get({ agent: 'claude', from, to: now }) as { events: number; sessions: number };
+  const span = db.prepare(
+    `SELECT min(ts) AS firstObserved, max(ts) AS lastObserved FROM events WHERE agent = $agent`,
+  ).get({ agent: 'claude' }) as { firstObserved: number | null; lastObserved: number | null };
   const pricedTokens = totals.tokens - totals.unpricedTokens;
   const monthlyPlanPriceUsd = PLAN_PRICES[plan];
   const periodPlanPriceUsd = monthlyPlanPriceUsd * days / 30;
   return {
     title: 'Estimated API/list-price comparison', plan, days, from, to: now,
+    observedEvents: inWindow.events, observedSessions: inWindow.sessions,
+    firstObservedAt: span.firstObserved, lastObservedAt: span.lastObserved,
     tokens: totals.tokens, unpricedTokens: totals.unpricedTokens,
     tokenCoverage: totals.tokens ? pricedTokens / totals.tokens : null,
     estimatedApiCostUsd: totals.cost, monthlyPlanPriceUsd, periodPlanPriceUsd,

@@ -581,6 +581,8 @@ const commands: Record<string, () => unknown> = {
       if (values.json) console.log(JSON.stringify(r, null, 2));
       else {
         console.log(`${r.title} (${r.plan}, ${r.days} days; ${new Date(r.from).toISOString()} to ${new Date(r.to).toISOString()}, end exclusive)`);
+        console.log(`Observed in window: ${r.observedEvents} event${r.observedEvents === 1 ? '' : 's'} across ${r.observedSessions} session${r.observedSessions === 1 ? '' : 's'}`);
+        console.log(`First observed: ${r.firstObservedAt == null ? 'n/a' : new Date(r.firstObservedAt).toISOString()}; last observed: ${r.lastObservedAt == null ? 'n/a' : new Date(r.lastObservedAt).toISOString()}`);
         console.log(`Estimated API cost: $${r.estimatedApiCostUsd.toFixed(2)} (priced tokens only; token prices as of ${r.tokenPricesAsOf})`);
         console.log(`Token coverage: ${r.tokenCoverage == null ? 'n/a' : `${(r.tokenCoverage * 100).toFixed(1)}%`} (${r.unpricedTokens} unpriced of ${r.tokens} tokens)`);
         console.log(`US monthly list price: $${r.monthlyPlanPriceUsd}; illustrative ${r.days}/30 reference: $${r.periodPlanPriceUsd.toFixed(2)} (plan prices as of ${r.planPricesAsOf}; ${r.planPriceSource})`);

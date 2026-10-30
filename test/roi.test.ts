@@ -36,12 +36,31 @@ test('compares priced Claude usage over the exact half-open window', () => {
   } finally { db.close(); }
 });
 
+test('observed Claude metadata is scoped to Claude and separate from the requested window', () => {
+  const db = openDb(':memory:');
+  try {
+    upsertEvents(db, [
+      { id: 'old', sessionId: 'sessOld', agent: 'claude', ts: now - 20 * day, kind: 'assistant', model: 'claude-sonnet-4-5', input: 1_000 },
+      { id: 'in1', sessionId: 'sessIn', agent: 'claude', ts: now - 5 * day, kind: 'assistant', model: 'claude-sonnet-4-5', input: 1_000 },
+      { id: 'in2', sessionId: 'sessIn', agent: 'claude', ts: now - day, kind: 'assistant', model: 'claude-sonnet-4-5', input: 1_000 },
+      { id: 'fresh', sessionId: 'sessFresh', agent: 'codex', ts: now - 1, kind: 'assistant', model: 'gpt-5', input: 1_000 },
+    ]);
+    const r = subscriptionComparison(db, { plan: 'pro', days: 15, now });
+    // only the two in-window Claude events are counted, in one session
+    assert.equal(r.observedEvents, 2); assert.equal(r.observedSessions, 1);
+    // first/last observed span the retained Claude logs, not the requested window
+    assert.equal(r.firstObservedAt, now - 20 * day); assert.equal(r.lastObservedAt, now - day);
+  } finally { db.close(); }
+});
+
 test('empty and entirely unpriced usage do not produce an estimated ratio', () => {
   const db = openDb(':memory:');
   try {
     const empty = subscriptionComparison(db, { now });
     assert.equal(empty.plan, 'pro'); assert.equal(empty.days, 30);
     assert.equal(empty.tokenCoverage, null); assert.equal(empty.estimatedRatio, null);
+    assert.equal(empty.observedEvents, 0); assert.equal(empty.observedSessions, 0);
+    assert.equal(empty.firstObservedAt, null); assert.equal(empty.lastObservedAt, null);
     assert.equal(empty.estimatedApiCostUsd, 0); assert.equal(empty.periodPlanPriceUsd, 20);
     event(db, 'unknown', now - 1, 'unknown-model');
     const r = subscriptionComparison(db, { plan: 'max20x', now });
@@ -68,6 +87,7 @@ test('API returns comparison and rejects invalid arguments', async () => {
     assert.equal(response.status, 200);
     const r = await response.json() as any;
     assert.equal(r.estimatedApiCostUsd, 3); assert.equal(r.periodPlanPriceUsd, 100);
+    assert.equal(r.observedEvents, 1); assert.equal(r.observedSessions, 1); assert.ok(r.firstObservedAt > 0);
     assert.match(r.disclosure, /API-billed/i); assert.match(r.disclosure, /web chat/i);
     assert.match(r.disclosure, /other machines/i); assert.match(r.disclosure, /taxes/i);
     assert.match(r.disclosure, /annual and regional/i); assert.match(r.disclosure, /not an invoice/i);
@@ -88,9 +108,12 @@ test('CLI JSON and human output use isolated local data and disclose limits', ()
     const json = run('--plan', 'max5x', '--days', '15', '--json');
     assert.equal(json.status, 0, json.stderr);
     const r = JSON.parse(json.stdout); assert.equal(r.estimatedApiCostUsd, 3); assert.equal(r.periodPlanPriceUsd, 50);
+    assert.equal(r.observedEvents, 1); assert.equal(r.observedSessions, 1);
     assert.match(r.disclosure, /API-billed/i); assert.match(r.disclosure, /credit/i);
     const human = run(); assert.equal(human.status, 0, human.stderr);
     assert.match(human.stdout, /estimated API\/list-price comparison/i); assert.match(human.stdout, /API-billed/i);
+    assert.match(human.stdout, /Observed in window: 1 event across 1 session/i);
+    assert.match(human.stdout, /First observed: .+; last observed: .+/i);
     for (const args of [['--plan', 'team'], ['--days', '0'], ['--days', '1.5']]) assert.notEqual(run(...args).status, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
   assert.equal(existsSync(dir), false);
