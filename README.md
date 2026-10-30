@@ -270,6 +270,8 @@ agentlens plugin uninstall
 | `agentlens explain anomaly <date> <project> [--agent <agent>] [--preview] [--confirm <hash>] [--json]` | Explain a detected token spike with opt-in AI and exact preview consent |
 | `agentlens diagnose <session-id> \| --worst <N> [--project <path>] [--preview] [--confirm <hash>] [--json]` | Opt-in AI diagnosis of structured session waste via your `claude` CLI; each new call needs its exact preview hash |
 
+The dashboard previews workspace optimization without writing files. To apply changes, copy its shell-specific CLI command and run it in the named shell.
+
 Ordinary `optimize --apply` checks planned targets, destination directories, and backup availability before writing. Later filesystem changes or I/O errors can still leave partial results.
 
 ---
