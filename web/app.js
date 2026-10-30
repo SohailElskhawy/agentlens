@@ -910,7 +910,7 @@ async function projectPage(projectId) {
                 <span class="card-subtitle">Adds <code class="cell-mono">.claudeignore</code> / <code class="cell-mono">.cursorignore</code> patterns and trims redundant instruction lines with <code class="cell-mono">.bak</code> backups. Ignore files are provider-specific &mdash; <code class="cell-mono">.claudeignore</code> has no effect in Claude Code.</span>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
-                ${optPreview.cliCommand ? `<button type="button" id="btn-copy-optimize-cli" class="btn btn-xs btn-outline" data-cmd="${esc(optPreview.cliCommand)}">Copy CLI Command (${esc(optPreview.cliShell)})</button>` : '<span>CLI command unavailable for this path.</span>'}
+                ${optPreview.cliCommand ? `<button type="button" id="btn-copy-optimize-cli" class="btn btn-xs btn-outline" style="min-height:44px" data-cmd="${esc(optPreview.cliCommand)}">Copy CLI Command (${esc(optPreview.cliShell)})</button>` : '<span>CLI command unavailable for this path.</span>'}
                 ${!hasActionableWrites ? `<span class="pill pill-verified">✓ Clean</span>` : ''}
               </div>
             </div>
@@ -1158,7 +1158,7 @@ async function projectPage(projectId) {
           ` : `<p style="font-size:12.5px;color:var(--success)">✓ Zero unused MCPs detected.</p>`}
 
           <h4>CLI command (${esc(data.cliShell || 'unavailable')})</h4>
-          ${data.cliCommand ? `<pre><code>${esc(data.cliCommand)}</code></pre><button type="button" id="btn-drawer-copy-optimize-cli" class="btn btn-sm" data-cmd="${esc(data.cliCommand)}">Copy CLI Command</button>` : '<p>CLI command unavailable for this path.</p>'}
+          ${data.cliCommand ? `<pre><code>${esc(data.cliCommand)}</code></pre><button type="button" id="btn-drawer-copy-optimize-cli" class="btn btn-sm" style="min-height:44px" data-cmd="${esc(data.cliCommand)}">Copy CLI Command</button>` : '<p>CLI command unavailable for this path.</p>'}
         `);
 
         $('#btn-drawer-copy-optimize-cli')?.addEventListener('click', (e) => copyText(e.currentTarget.dataset.cmd, 'CLI optimize command copied to clipboard'));
