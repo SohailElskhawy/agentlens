@@ -259,7 +259,8 @@ agentlens plugin uninstall
 | `agentlens accept <id>` | Accept a recommendation and start 14-day improvement tracking |
 | `agentlens catalog [--rule <name>] [--json]` | Browse curated tool & MCP catalog mapped to waste patterns |
 | `agentlens discover [--query <terms>] [--dry-run] [--json] [--token <pat>]` | Opt-in discovery of agent tools and MCPs from GitHub |
-| `agentlens statusline` | Streamlined stdin processor for Claude Code statusline payload |
+| `agentlens statusline [--format default\|starship\|raw]` | Streamlined stdin processor for Claude Code statusline payload; see [Live statusline output formats](#live-statusline-output-formats) |
+| `agentlens cheatsheet [path] [--project <path>] [--top <N>] [--json]` | Generate a local Markdown architecture cheat-sheet from a project's top hot files; see [Analytics & cheat-sheet](#analytics--cheat-sheet) |
 | `agentlens roi [--plan pro\|max5x\|max20x] [--days <N>] [--json]` | Compare locally observed Claude estimated API cost with an illustrative US monthly list-price reference |
 | `agentlens savings [--project <path>] [--weeks <N>] [--json] [--snapshot]` | Weekly project token-metric comparison against a captured baseline (default 8 weeks) |
 | `agentlens optimize [<path>] [--ai] [--preview] [--confirm <hash>] [--apply] [--dry-run] [--json]` | Workspace hygiene or opt-in AI instruction rewrite (`--apply` writes a `.bak` backup); see [docs/ai.md](docs/ai.md) |
@@ -274,6 +275,65 @@ agentlens plugin uninstall
 The read-only `agentlens roi` command and `GET /api/analytics/roi?plan=pro&days=30` provide an **estimated API/list-price comparison** for Claude-agent logs. Plans are `pro`, `max5x`, or `max20x` (default `pro`); days are 1–365 (default 30). Team plans are unsupported. The window includes its start and excludes its end. API cost includes only tokens with known model prices, and the result reports token coverage and separate token and plan price dates. The ratio is unavailable when there are no priced tokens. The US monthly list prices ($20/$100/$200, as of 2026-10-30; [Claude pricing](https://claude.com/pricing)) exclude taxes; annual and regional pricing are unsupported. Multiplying by days/30 is illustrative, not an invoice calculation. Conditional API credit benefits are excluded. Local logs can include API-billed Claude usage and omit web chat and other machines, so this is not actual subscription utilization or measured value.
 
 Ordinary `optimize --apply` checks planned targets, destination directories, and backup availability before writing. Later filesystem changes or I/O errors can still leave partial results.
+
+### Analytics & cheat-sheet
+
+Two read-only JSON endpoints compare tools and models. Both accept the standard API filters:
+`from` / `to` (epoch ms; the window includes its start and excludes its end), `agent`, and
+`project` (numeric project ID).
+
+- `GET /api/analytics/tool-failures` — tool errors and wasted retry tokens per (tool, project).
+  An error is a paired tool result marked as an error. A retry is a repeat of an identical call
+  (same session, tool, and argument hash) within the filtered window; its `wastedTokens` are the
+  assistant tokens (input + output + cache read + cache write) between the previous attempt and
+  the retry. The result is `{failures: [{tool, projectId, project, calls, errors, retries, wastedTokens}], totals}`
+  over the same metrics, sorted by errors then wasted tokens. Calls with different arguments are
+  never counted as retries, and no tool output or arguments are returned.
+- `GET /api/analytics/model-efficiency` — one row per model: `name`, `sessions`, `tokens`
+  (input + output + cache read + cache write), `tokensPerSession`, `avgTurns` (turns = assistant
+  events per session), `toolErrorRate` (errors / tool calls), and `cacheReadRatio` (cache read /
+  total tokens), the two ratios rounded to 3 decimals. A session that used several models is
+  counted once per model, but its tool stats are attributed to that session's primary model
+  (most tokens in the session; ties broken by name). Models without a recorded name are listed
+  as `unknown`. Sorted by tokens descending.
+
+`agentlens cheatsheet` generates a ~10-line starter architecture summary locally, with no AI and
+no HTTP endpoint or dashboard page:
+
+```bash
+agentlens cheatsheet            # current project (or pass a path / --project <path>)
+agentlens cheatsheet --top 10 --json
+```
+
+```markdown
+## Architecture Cheat-Sheet (myproj)
+- `src/cli.ts` (23 reads): `fn main(...)`, `fn run(...)`
+```
+
+It ranks the project's `hot_files` findings by summed evidence reads and extracts up to 12
+exported symbols per file (functions, interfaces, types, consts/lets, classes) from
+TypeScript/JavaScript only. Files are read with a 64 KiB cap, restricted to regular files inside
+the project root; unreadable files and paths outside the root are skipped. `--top` defaults to 5
+(clamped 1–20). Without hot-file evidence it falls back to a size-ranked scan of `src/`; those
+fallback entries carry no read counts (`reads: 0`). It is a starting point for a CLAUDE.md
+architecture section, not a complete project map.
+
+### Live statusline output formats
+
+`agentlens statusline [--format default|starship|raw]` reads the Claude Code statusline JSON from
+stdin, spools its rate limits for quota tracking, and prints one line from `summary.json` for the
+current working directory's project:
+
+| Format | Example output | Notes |
+|---|---|---|
+| `default` | `myproj · 12.3k · 5h 18% · 7d 42% · at this pace you hit the 5h limit at 15:30` | Appends `[COMPACT RECOMMENDED]` when session context is large. |
+| `starship` | `⚡ 18% 5h \| 12.3k/d \| at this pace you hit the 5h limit at 15:30` | Quota percent, today's tokens, forecast; no project name and no 7-day quota. |
+| `raw` | `myproj<TAB>12.3k<TAB>18%<TAB>42%<TAB>forecast<TAB>warning` | Tab-separated: project, today's tokens, 5h, 7d, forecast, context warning. |
+
+Missing fields print as `--`; tokens are compact (`12.3k`, `1.2M`). The forecast is the active
+quota-exhaustion estimate (time of day when the limit will be hit, or a "limit currently
+exhausted" message); it reflects the last `summary.json` written by `serve` or `ingest`, so
+without those running the quota and token fields read `--`.
 
 ---
 
