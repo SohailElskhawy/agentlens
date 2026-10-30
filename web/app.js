@@ -909,9 +909,9 @@ async function projectPage(projectId) {
             <div class="card-header">
               <div>
                 <h3 class="card-title" style="color:var(--success)">
-                  ⚡ Pre-Session Workspace Hygiene (${hasActionableWrites ? `~${fmtTok(optPreview.estimatedTokensSavedPerTurn)} tok/turn est. savings` : 'Optimized'})
+                  ⚡ Pre-Session Workspace Hygiene (${hasActionableWrites ? `~${fmtTok(optPreview.estimatedTokensSavedPerTurn)} tok/turn est. reduction` : 'Optimized'})
                 </h3>
-                <span class="card-subtitle">Generates <code class="cell-mono">.claudeignore</code> / <code class="cell-mono">.cursorignore</code> shields and trims redundant instruction lines with <code class="cell-mono">.bak</code> backups.</span>
+                <span class="card-subtitle">Adds <code class="cell-mono">.claudeignore</code> / <code class="cell-mono">.cursorignore</code> patterns and trims redundant instruction lines with <code class="cell-mono">.bak</code> backups. Ignore files are provider-specific &mdash; <code class="cell-mono">.claudeignore</code> has no effect in Claude Code.</span>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button type="button" id="btn-copy-optimize-cli" class="btn btn-xs btn-outline" data-cmd="agentlens optimize --project &quot;${esc(p.root)}&quot; --apply">Copy CLI Command</button>
@@ -920,7 +920,7 @@ async function projectPage(projectId) {
             </div>
             <div class="grid-12" style="margin-bottom:0;gap:12px">
               <div class="col-4" style="background:var(--bg-elevated);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border)">
-                <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Ignore Shields (.claudeignore / .cursorignore)</div>
+                <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Ignore Files (.claudeignore / .cursorignore)</div>
                 ${(claudeIg?.addedPatterns?.length || 0) > 0 ? `
                   <div style="font-size:12.5px;color:var(--text);margin-bottom:6px"><strong>${claudeIg.addedPatterns.length}</strong> missing pattern(s) ready to add:</div>
                   <div style="display:flex;flex-wrap:wrap;gap:4px">
@@ -933,7 +933,7 @@ async function projectPage(projectId) {
                 <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Oversized Files & Instruction Trims</div>
                 ${oversizedCount > 0 ? `
                   <div style="font-size:12px;color:var(--warn);margin-bottom:6px">
-                    Shielding <strong>${oversizedCount}</strong> large root file(s): ${optPreview.oversizedFiles.map((f) => `<code class="cell-mono">${esc(f.relativePath)}</code> (${fmtTok(f.estTokens)} tok)`).join(', ')}
+                    Flagging <strong>${oversizedCount}</strong> large root file(s) (context exposure, not savings): ${optPreview.oversizedFiles.map((f) => `<code class="cell-mono">${esc(f.relativePath)}</code> (${fmtTok(f.estTokens)} tok)`).join(', ')}
                   </div>
                 ` : ''}
                 ${trimCount > 0 ? `
@@ -1141,7 +1141,7 @@ async function projectPage(projectId) {
           const addedCount = data.ignoreFiles?.reduce((s, f) => s + (f.addedPatterns?.length || 0), 0) || 0;
           const trimCount = data.instructionTrims?.filter((t) => t.applied).length || 0;
           showToast(
-            `Applied workspace hygiene to ${p.name}: +${addedCount} ignore rule(s), ${trimCount} file(s) trimmed (~${fmtTok(data.estimatedTokensSavedPerTurn)} tok/turn saved)`,
+            `Applied workspace hygiene to ${p.name}: +${addedCount} ignore rule(s), ${trimCount} file(s) trimmed (est. ~${fmtTok(data.estimatedTokensSavedPerTurn)} tok/turn reduction)`,
             'success'
           );
           closeSlideOver();
@@ -1168,7 +1168,7 @@ async function projectPage(projectId) {
         openSlideOver(`⚡ Optimize Workspace: ${p.name}`, `
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.28);border-radius:var(--radius-sm);margin-bottom:16px">
             <div>
-              <div style="font-weight:700;color:var(--success);font-size:14px">Estimated Savings: ~${fmtTok(data.estimatedTokensSavedPerTurn)} tokens / turn</div>
+              <div style="font-weight:700;color:var(--success);font-size:14px">Estimated Reduction: ~${fmtTok(data.estimatedTokensSavedPerTurn)} instruction tokens / turn (estimate, not measured)</div>
               <div style="font-size:12px;color:var(--text-muted)">Root: <code class="cell-mono">${esc(p.root)}</code></div>
             </div>
             <div style="display:flex;gap:8px">
@@ -1178,10 +1178,11 @@ async function projectPage(projectId) {
             </div>
           </div>
 
-          <h4>1. Ignore Shields (.claudeignore & .cursorignore)</h4>
+          <h4>1. Ignore Files (.claudeignore &amp; .cursorignore)</h4>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Provider-specific: <code class="cell-mono">.claudeignore</code> has no effect in Claude Code; <code class="cell-mono">.cursorignore</code> applies to Cursor only. Not a security or OS isolation mechanism.</p>
           ${(claudeIg?.addedPatterns?.length || 0) > 0 ? `
             <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px">
-              Adding <strong>${claudeIg.addedPatterns.length}</strong> missing pattern(s) so agents skip build artifacts, lockfiles, and oversized dumps:
+              Adding <strong>${claudeIg.addedPatterns.length}</strong> missing pattern(s) covering build artifacts, lockfiles, and oversized dumps:
             </p>
             <pre style="margin-bottom:14px"><code># agentlens-managed (workspace hygiene)\n${esc(claudeIg.addedPatterns.join('\n'))}</code></pre>
           ` : `
@@ -1189,7 +1190,7 @@ async function projectPage(projectId) {
           `}
 
           ${oversized.length > 0 ? `
-            <h4>2. Oversized Workspace Files Shielded (&gt;40 KB)</h4>
+            <h4>2. Oversized Workspace Files (&gt;40 KB) &mdash; context exposure, not savings</h4>
             <ul style="font-size:12.5px;color:var(--text-secondary);padding-left:18px;margin-bottom:14px">
               ${oversized.map((f) => `<li><code class="cell-mono">${esc(f.relativePath)}</code> — ${Math.round(f.bytes / 1024)} KB (~${fmtTok(f.estTokens)} tokens)</li>`).join('')}
             </ul>
@@ -1198,7 +1199,7 @@ async function projectPage(projectId) {
           <h4>3. Instruction File Trimming (CLAUDE.md / AGENTS.md / GEMINI.md)</h4>
           ${trims.length > 0 ? trims.map((t) => `
             <div style="margin-bottom:12px">
-              <div style="font-size:12.5px;font-weight:600;margin-bottom:4px">${esc(t.fileName)} <span class="badge">-${fmtTok(t.tokensSaved)} tok/turn</span></div>
+              <div style="font-size:12.5px;font-weight:600;margin-bottom:4px">${esc(t.fileName)} <span class="badge">-${fmtTok(t.tokensSaved)} tok/turn est.</span></div>
               <pre><code>${esc(t.unifiedDiff || t.cuts.map((c) => `- Line ${c.startLine}: ${c.description}`).join('\n'))}</code></pre>
             </div>
           `).join('') : `
