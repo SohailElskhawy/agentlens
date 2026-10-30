@@ -17,6 +17,7 @@ import { ADAPTERS, ingest } from './ingest.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
 import { startServer } from './server.ts';
+import { sessionFamilies } from './queries.ts';
 import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary, type StatuslineFormat } from './summary.ts';
 import { runAudit } from './audit/runner.ts';
 import { checkWeeklyReportSchedule } from './report-scheduler.ts';
@@ -61,6 +62,7 @@ const HELP = `Usage: agentlens <command>
   report              generate and display weekly usage report (--week, --html, --json)
   track               show improvement tracking for accepted recommendations
   roi                 estimated Claude API/list-price comparison (--plan pro|max5x|max20x, --days <N>, --json)
+  families            informational session-family token attribution (--project <path>, --days <N>, --json)
   savings             compare weekly project metrics (--project <path>, --weeks <N> [default 8], --json, --snapshot)
   accept <id>         accept a recommendation and begin 14-day improvement tracking
   catalog             browse curated AI tools, MCPs, and skills (--json, --rule <rule>)
@@ -588,6 +590,30 @@ const commands: Record<string, () => unknown> = {
         console.log(`US monthly list price: $${r.monthlyPlanPriceUsd}; illustrative ${r.days}/30 reference: $${r.periodPlanPriceUsd.toFixed(2)} (plan prices as of ${r.planPricesAsOf}; ${r.planPriceSource})`);
         console.log(`Estimated API/list-price ratio: ${r.estimatedRatio == null ? 'n/a' : r.estimatedRatio.toFixed(2)}`);
         console.log(r.disclosure);
+      }
+    } finally { db.close(); }
+  },
+  families: () => {
+    const { values } = parseArgs({ args: process.argv.slice(3), options: {
+      project: { type: 'string' }, days: { type: 'string' }, json: { type: 'boolean' },
+    } });
+    const days = values.days === undefined ? undefined : /^\d+$/.test(values.days) ? Number(values.days) : NaN;
+    if (days != null && (!Number.isSafeInteger(days) || days < 1)) throw new Error('days must be a positive integer');
+    const db = existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      let projectId: number | undefined;
+      if (values.project) {
+        const project = db.prepare('SELECT id FROM projects WHERE root = ?').get(projectRoot(resolve(values.project))) as { id: number } | undefined;
+        if (!project) throw new Error(`Unknown project: ${values.project}`);
+        projectId = project.id;
+      }
+      // Informational attribution only: where tokens sit across parent-child session nesting, no savings claim.
+      const families = sessionFamilies(db, { projectId, from: days == null ? undefined : Date.now() - days * 86_400_000 });
+      if (values.json) { console.log(JSON.stringify({ families }, null, 2)); return; }
+      if (!families.length) { console.log('No sessions found.'); return; }
+      console.log('Session families (informational attribution by parent/child nesting; not a savings estimate):');
+      for (const f of families) {
+        console.log(`  ${f.root}: ${f.sessions} session${f.sessions === 1 ? '' : 's'} (${f.childSessions} descendant${f.childSessions === 1 ? '' : 's'}), ${f.tokens} tokens, est. cost $${f.cost.toFixed(4)} (${f.pricedSessions} of ${f.totalSessions} sessions priced)`);
       }
     } finally { db.close(); }
   },
