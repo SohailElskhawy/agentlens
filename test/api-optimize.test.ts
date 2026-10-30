@@ -75,4 +75,5 @@ test('CLI command safely quotes hostile path for both supported shells', () => {
   assert.equal(windows?.command, `agentlens optimize --project '${path.replace(/'/g, "''")}' --apply`);
   assert.equal(build('/tmp/bad\npath', 'linux'), null);
   assert.equal(build('C:\\path\u2019name', 'win32'), null);
+  for (const q of ['\u2018', '\u2019', '\u201a', '\u201b']) assert.equal(build(`C:\\a${q}b`, 'win32'), null, q);
 });

@@ -96,7 +96,7 @@ const OVERSIZED_FILE_BYTES = 40_000; // ~10k tokens
 
 export function optimizeCliCommand(path: string, platform: string): { command: string; shell: string } | null {
   const windows = platform === 'win32';
-  if (/[\x00-\x1f\x7f-\x9f]/.test(path) || (windows && /[\u2018\u2019]/.test(path))) return null;
+  if (/[\x00-\x1f\x7f-\x9f]/.test(path) || (windows && /[\u2018-\u201b]/.test(path))) return null;
   const quoted = windows ? path.replace(/'/g, "''") : path.replace(/'/g, "'\\''");
   return { command: `agentlens optimize --project '${quoted}' --apply`, shell: windows ? 'PowerShell' : 'POSIX shell' };
 }
