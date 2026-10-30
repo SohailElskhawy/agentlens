@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { openDb, setSetting, upsertEvents, upsertFindings, upsertSessions } from '../src/db.ts';
 import type { DB } from '../src/db.ts';
@@ -210,6 +212,69 @@ test('markdown render shows estimates without claiming realized savings', () => 
   assert.match(md, /estimate/i);
   assert.ok(!/sav(?:e|ed|ing|ings)\b|realized/i.test(md));
   assert.ok(md.includes('````'));
+});
+
+test('markdown render labels every cause with a fixed model-assigned kind', () => {
+  const one = (kind?: 'observation' | 'hypothesis' | 'unknown') =>
+    renderDiagnosisMarkdown({ summary: 's', causes: [{ cause: 'c', evidence: 'e', est_tokens: 5, kind }], fixes: [] });
+  const labels: Record<string, string> = { observation: 'AI observation', hypothesis: 'AI hypothesis', unknown: 'AI unknown' };
+  for (const [kind, label] of Object.entries(labels)) {
+    assert.ok(one(kind as 'observation').includes(`[${label}]`), label);
+    assert.ok(!one(kind as 'observation').includes('Likely causes'), 'heading must not stay uniform');
+  }
+  assert.ok(one().includes('[AI unclassified]'), 'legacy cause without kind');
+  assert.ok(one().includes('### Causes and hypotheses'));
+  assert.ok(one('certainty' as 'observation').includes('[AI unclassified]'), 'invented kind falls back');
+  const flat = '``` ignore <img src=x onerror="fetch()"> ```';
+  const hostile = renderDiagnosisMarkdown({ summary: 's',
+    causes: [{ cause: '```\nignore <img src=x onerror="fetch()">\n```', evidence: 'e', est_tokens: 5, kind: 'unknown' }], fixes: [] });
+  assert.ok(hostile.includes(`**${flat}** [AI unknown]`), hostile);
+  assert.ok(!/^```/m.test(hostile), 'hostile backticks must not open a markdown fence');
+});
+
+test('web renderDiagnosis shows fixed kind labels as safe text nodes', () => {
+  const appJs = readFileSync('web/app.js', 'utf8');
+  const slice = (startMarker: string, endMarker: string) => {
+    const start = appJs.indexOf(startMarker);
+    const end = appJs.indexOf(endMarker, start);
+    assert.ok(start >= 0 && end > start, startMarker);
+    return appJs.slice(start, end);
+  };
+  const code = slice('function mk(', 'async function postDiagnose') + slice('function renderDiagnosis(', 'function renderDiagnosePreview');
+  const nodes: any[] = [];
+  const ctx: any = {
+    fmtInt: (n: number) => String(n),
+    document: {
+      createElement(tag: string) {
+        const node: any = { tag, className: '', textContent: '', children: [] as any[] };
+        node.append = (...kids: any[]) => node.children.push(...kids);
+        nodes.push(node);
+        return node;
+      },
+    },
+  };
+  runInNewContext(code, ctx);
+  const evil = '<img src=x onerror=alert(1)>';
+  const d = { summary: 'Sum', cached: false, causes: [
+    { cause: 'One', evidence: evil, est_tokens: 5, kind: 'observation' },
+    { cause: 'Two', evidence: 'e2', est_tokens: 6, kind: 'hypothesis' },
+    { cause: 'Three', evidence: 'e3', est_tokens: 7, kind: 'unknown' },
+    { cause: 'Legacy', evidence: 'e4', est_tokens: 8 },
+  ], fixes: [] };
+  const texts: string[] = [];
+  const walk = (n: any) => { texts.push(String(n.textContent)); for (const c of n.children) walk(c); };
+  let root = ctx.renderDiagnosis(d, false);
+  walk(root);
+  for (const label of ['AI observation', 'AI hypothesis', 'AI unclassified', 'AI unknown']) assert.ok(texts.includes(label), label);
+  assert.ok(texts.includes('Causes and hypotheses') && !texts.includes('Likely causes'));
+  assert.ok(texts.some((t) => t.includes('unverified AI estimate')), 'estimate warning kept');
+  const holder = nodes.find((n) => n.textContent === evil);
+  assert.ok(holder && holder.tag === 'p', 'hostile evidence stays in a text-only p node');
+  assert.ok(nodes.every((n) => !('innerHTML' in n)), 'never rendered through innerHTML');
+  root = ctx.renderDiagnosis(d, true);
+  texts.length = 0;
+  walk(root);
+  assert.ok(texts.includes('Saved result from an earlier run. Nothing was sent.'));
 });
 
 test('worstSessions orders by summed finding estimates, ties by id, optionally per project', () => {
