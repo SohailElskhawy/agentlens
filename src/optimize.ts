@@ -1,5 +1,5 @@
-import { closeSync, constants, existsSync, fstatSync, ftruncateSync, lstatSync, openSync, readdirSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { accessSync, closeSync, constants, existsSync, fstatSync, ftruncateSync, lstatSync, openSync, readdirSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { CHARS_PER_TOKEN } from './audit/constants.ts';
 import type { InstructionItem } from './audit/scanners/instruction.ts';
 import { MAX_BOUNDED_READ_BYTES } from './ai/constants.ts';
@@ -373,6 +373,13 @@ export function optimizeWorkspace(
     for (const entry of planned) {
       if (!sameSnapshot(entry.before, snapshot(root, entry.path))) throw Error(`File changed: ${entry.path}`);
       if (entry.before && snapshot(root, `${entry.path}.bak`) !== null) throw Error(`Backup already exists: ${entry.path}.bak`);
+      const parent = dirname(entry.path), parentMode = lstatSync(parent).mode;
+      if (!(parentMode & 0o222) || !(parentMode & 0o111)) throw Error(`Parent not writable: ${parent}`);
+      accessSync(parent, constants.W_OK | constants.X_OK);
+      if (entry.before) {
+        if (!(entry.before.mode & 0o222)) throw Error(`File not writable: ${entry.path}`);
+        accessSync(entry.path, constants.W_OK);
+      }
     }
     // All instruction inputs affect cuts, including files that do not themselves change.
     for (const [path, before] of snapshots) {
