@@ -1210,6 +1210,13 @@ kbd {
   .grid-12 {
     gap: var(--space-3);
   }
+  /* T61: >=44px touch targets for drawer-interactive buttons at mobile widths (desktop >=768px unchanged) */
+  #slide-over-close {
+    padding: 13px; /* 18px icon + 13px*2 = 44px */
+  }
+  .slide-over .btn {
+    min-height: 44px;
+  }
 }
 
 /* AI diagnosis (slide-over content) */
