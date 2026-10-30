@@ -162,15 +162,21 @@ export function detectOutcomeEfficiency(
       ? attributedLinesChanged
       : commits.reduce((acc, c) => acc + c.added + c.deleted, 0);
 
-    const tokensPerCommit = Math.round(totalTokens / Math.max(1, effectiveCommits));
-    const tokensPerChangedLine = Math.round(totalTokens / Math.max(1, effectiveLines));
+    const tokensPerCommit = effectiveCommits > 0 ? Math.round(totalTokens / effectiveCommits) : null;
+    const tokensPerChangedLine = effectiveLines > 0 ? Math.round(totalTokens / effectiveLines) : null;
 
     const isInefficient =
-      tokensPerCommit >= OUTCOME_EFFICIENCY_TOKENS_PER_COMMIT ||
-      tokensPerChangedLine >= OUTCOME_EFFICIENCY_TOKENS_PER_LINE;
+      (tokensPerCommit !== null && tokensPerCommit >= OUTCOME_EFFICIENCY_TOKENS_PER_COMMIT) ||
+      (tokensPerChangedLine !== null && tokensPerChangedLine >= OUTCOME_EFFICIENCY_TOKENS_PER_LINE);
 
     if (isInefficient) {
-      const confidence = tokensPerCommit >= 250_000 || tokensPerChangedLine >= 1000 ? 'high' : 'medium';
+      const confidence =
+        (tokensPerCommit !== null && tokensPerCommit >= 250_000) ||
+        (tokensPerChangedLine !== null && tokensPerChangedLine >= 1000)
+          ? 'high'
+          : 'medium';
+      const commitPart = tokensPerCommit !== null ? `${tokensPerCommit.toLocaleString()} tokens per commit` : '0 commits';
+      const linePart = tokensPerChangedLine !== null ? ` (${tokensPerChangedLine} tokens/changed line)` : '';
       findings.push({
         id: `outcome_efficiency:${proj.id}`,
         rule: 'outcome_efficiency',
@@ -186,7 +192,7 @@ export function detectOutcomeEfficiency(
           tokensPerChangedLine,
         },
         confidence,
-        confidenceReason: `${proj.name} averaged ${tokensPerCommit.toLocaleString()} tokens per commit (${tokensPerChangedLine} tokens/changed line), indicating low outcome efficiency.`,
+        confidenceReason: `${proj.name} averaged ${commitPart}${linePart}, indicating low outcome efficiency.`,
         estTokensWeek: Math.round(totalTokens * 0.25),
         firstSeen: Date.now() - 7 * 86400_000,
         lastSeen: Date.now(),
