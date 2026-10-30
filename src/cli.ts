@@ -19,6 +19,7 @@ import { projectName, projectRoot } from './project.ts';
 import { startServer } from './server.ts';
 import { sessionFamilies } from './queries.ts';
 import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary, type StatuslineFormat } from './summary.ts';
+import { startTui } from './tui.ts';
 import { runAudit } from './audit/runner.ts';
 import { checkWeeklyReportSchedule } from './report-scheduler.ts';
 import { generateWeeklyReport } from './report.ts';
@@ -51,6 +52,7 @@ const HELP = `Usage: agentlens <command>
   serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
+  tui                 read-only terminal view of the summary cache (non-TTY prints once)
   ai <action>         AI status, enable, disable, or preview <diagnose|session> <id>
   recommend           show recommendations [--ai] [--preview] [--confirm <hash>]
   explain anomaly     explain a detected spike <date> <project> [--agent <agent>] [--preview | --confirm <hash>] [--json]
@@ -293,6 +295,19 @@ const commands: Record<string, () => unknown> = {
     console.log(
       `${s.read}/${s.files} files read, ${s.events} events, ${s.errors} bad lines, ${s.skipped} oversized lines skipped`,
     );
+  },
+  tui: () => {
+    const cleanup = startTui({
+      summaryPath: SUMMARY_PATH,
+      stdout: process.stdout,
+      intervalMs: 60_000,
+      setInterval,
+      clearInterval,
+    });
+    process.once('SIGINT', () => {
+      cleanup();
+      process.exit(0);
+    });
   },
   statusline: async () => {
     let format: StatuslineFormat = 'default';
