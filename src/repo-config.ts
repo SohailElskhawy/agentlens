@@ -234,9 +234,10 @@ export function initRepoConfig(
       0o666,
     );
     try {
-      if (!fstatSync(fd).isFile()) throw Error(`Not a regular file: ${configPath}`);
+      const st = fstatSync(fd);
+      if (!st.isFile() || st.nlink !== 1) throw Error(`Not a regular file: ${configPath}`);
+      if (existing) ftruncateSync(fd, 0);
       writeFileSync(fd, content);
-      if (existing) ftruncateSync(fd, content.length);
     } finally {
       closeSync(fd);
     }

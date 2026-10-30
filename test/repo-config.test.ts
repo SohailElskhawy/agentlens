@@ -103,7 +103,7 @@ test('c. dry-run default: no file written without --apply', () => {
 test('d. --apply writes the file + .bak backup preserving prior content; refuses symlinked target without following it', () => {
   const projDir = tmp();
   const db = openDb(':memory:');
-  upsertProject(db, projDir, 'apply-project');
+  upsertProject(db, projDir, 'apply-project-🚀');
 
   // First apply writes fresh file
   const first = initRepoConfig(db, { projectRoot: projDir, apply: true });
@@ -111,12 +111,14 @@ test('d. --apply writes the file + .bak backup preserving prior content; refuses
   const written = JSON.parse(readFileSync(join(projDir, '.agentlens.json'), 'utf8'));
   assert.deepEqual(written, first.config);
 
-  // Second apply backs up prior content
-  writeFileSync(join(projDir, '.agentlens.json'), '{"weeklyBudgetTokens":42}\n');
+  // Second apply backs up prior content even when existing file is longer
+  writeFileSync(join(projDir, '.agentlens.json'), '{"weeklyBudgetTokens":42,"long":"' + 'a'.repeat(300) + '"}\n');
   const second = initRepoConfig(db, { projectRoot: projDir, apply: true });
   assert.equal(second.wrote, true);
   assert.equal(second.backupPath, join(projDir, '.agentlens.json.bak'));
-  assert.equal(readFileSync(second.backupPath!, 'utf8'), '{"weeklyBudgetTokens":42}\n');
+  assert.equal(readFileSync(second.backupPath!, 'utf8'), '{"weeklyBudgetTokens":42,"long":"' + 'a'.repeat(300) + '"}\n');
+  const writtenSecond = JSON.parse(readFileSync(join(projDir, '.agentlens.json'), 'utf8'));
+  assert.deepEqual(writtenSecond, second.config);
 
   // Symlinked target is refused (O_NOFOLLOW), the link is not followed
   const linkProj = tmp();
