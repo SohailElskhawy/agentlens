@@ -27,3 +27,37 @@ test('optimize surfaces avoid unsupported savings/shield claims in web/app.js', 
   // Oversized-file exposure is labeled exposure, not savings.
   assert.ok(appJs.includes('context exposure'), 'oversized files must be labeled context exposure');
 });
+
+// Fixture: Claude patterns current, Cursor pending. Both surfaces must use the whole
+// ignoreFiles result array and show the pending Cursor patterns instead of claiming
+// both files are up to date.
+test('fixture claude-current cursor-pending shows per-file pending status, not a shared up-to-date claim', async () => {
+  const view = await import('../web/optimize-view.js');
+  const ig = (fileName, addedPatterns) => ({ fileName, addedPatterns });
+  const fixture = [ig('.claudeignore', []), ig('.cursorignore', ['build/'])];
+
+  const card = view.optimizeIgnoreFilesCardHtml(fixture);
+  assert.ok(card.includes('.cursorignore'), 'inline card must name the pending file');
+  assert.ok(card.includes('build/'), 'inline card must show pending Cursor patterns');
+  assert.doesNotMatch(card, /up to date/, 'cursor pending must not claim files up to date');
+
+  const drawer = view.optimizeDrawerIgnoreFilesHtml(fixture);
+  assert.ok(drawer.includes('.cursorignore'), 'drawer must name the pending file');
+  assert.ok(drawer.includes('build/'), 'drawer must show pending Cursor patterns');
+  assert.doesNotMatch(drawer, /already up to date/, 'cursor pending must not claim files already up to date');
+
+  assert.equal(view.pendingIgFiles(fixture).length, 1, 'pending detection uses the whole result array');
+
+  const bothCurrent = view.optimizeIgnoreFilesCardHtml([ig('.claudeignore', []), ig('.cursorignore', [])]);
+  assert.match(bothCurrent, /up to date/, 'when both files are current the up-to-date message is fine');
+
+  // Escaping of pattern text is preserved in the generated markup.
+  const sneaky = view.optimizeIgnoreFilesCardHtml([ig('.claudeignore', []), ig('.cursorignore', ['<img src=x>'])]);
+  assert.ok(sneaky.includes('&lt;img') && !sneaky.includes('<img'), 'ignore patterns must stay escaped');
+});
+
+test('inline instruction trim reductions carry an estimate label', async () => {
+  const view = await import('../web/optimize-view.js');
+  const line = view.optimizeTrimLine([{ fileName: 'CLAUDE.md', tokensSaved: 1234 }]);
+  assert.match(line, /CLAUDE\.md: -1\.2k tok\/turn est\./, 'inline per-file trims must be labeled as estimates');
+});

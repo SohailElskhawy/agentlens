@@ -1,10 +1,6 @@
 // agentlens dashboard — Vanilla JS, zero build step, Linear/Raycast precision UI.
+import { esc, fmtTok, optimizeIgnoreFilesCardHtml, optimizeDrawerIgnoreFilesHtml, optimizeTrimLine, pendingIgFiles } from './optimize-view.js';
 const $ = (sel) => document.querySelector(sel);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const fmtTok = (n) => {
-  n = n ?? 0;
-  return n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n));
-};
 const fmtInt = (n) => (n ?? 0).toLocaleString();
 const fmtUsd = (n) => `$${(n ?? 0).toFixed(2)}`;
 const fmtTime = (ms) => (ms ? new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
@@ -921,13 +917,7 @@ async function projectPage(projectId) {
             <div class="grid-12" style="margin-bottom:0;gap:12px">
               <div class="col-4" style="background:var(--bg-elevated);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border)">
                 <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Ignore Files (.claudeignore / .cursorignore)</div>
-                ${(claudeIg?.addedPatterns?.length || 0) > 0 ? `
-                  <div style="font-size:12.5px;color:var(--text);margin-bottom:6px"><strong>${claudeIg.addedPatterns.length}</strong> missing pattern(s) ready to add:</div>
-                  <div style="display:flex;flex-wrap:wrap;gap:4px">
-                    ${claudeIg.addedPatterns.slice(0, 10).map((pat) => `<span class="badge cell-mono">${esc(pat)}</span>`).join('')}
-                    ${claudeIg.addedPatterns.length > 10 ? `<span class="badge">+${claudeIg.addedPatterns.length - 10} more</span>` : ''}
-                  </div>
-                ` : `<div style="font-size:12.5px;color:var(--success)">✓ Both .claudeignore & .cursorignore are up to date.</div>`}
+                ${optimizeIgnoreFilesCardHtml(optPreview.ignoreFiles)}
               </div>
               <div class="col-4" style="background:var(--bg-elevated);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border)">
                 <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">Oversized Files & Instruction Trims</div>
@@ -938,7 +928,7 @@ async function projectPage(projectId) {
                 ` : ''}
                 ${trimCount > 0 ? `
                   <div style="font-size:12px;color:var(--text)">
-                    <strong>${trimCount}</strong> instruction file(s) can be trimmed (${optPreview.instructionTrims.map((t) => `${esc(t.fileName)}: -${fmtTok(t.tokensSaved)} tok`).join(', ')}).
+                    <strong>${trimCount}</strong> instruction file(s) can be trimmed (${optimizeTrimLine(optPreview.instructionTrims)}).
                   </div>
                 ` : `<div style="font-size:12.5px;color:var(--success)">✓ No redundant cuts needed in CLAUDE.md / AGENTS.md.</div>`}
               </div>
@@ -1159,11 +1149,10 @@ async function projectPage(projectId) {
           showToast('Could not load workspace optimization preview', 'error');
           return;
         }
-        const claudeIg = data.ignoreFiles?.find((x) => x.fileName === '.claudeignore');
         const trims = data.instructionTrims || [];
         const oversized = data.oversizedFiles || [];
         const unused = data.unusedItems || [];
-        const hasWrites = (claudeIg?.addedPatterns?.length || 0) > 0 || trims.length > 0;
+        const hasWrites = pendingIgFiles(data.ignoreFiles).length > 0 || trims.length > 0;
 
         openSlideOver(`⚡ Optimize Workspace: ${p.name}`, `
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.28);border-radius:var(--radius-sm);margin-bottom:16px">
@@ -1180,14 +1169,7 @@ async function projectPage(projectId) {
 
           <h4>1. Ignore Files (.claudeignore &amp; .cursorignore)</h4>
           <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Provider-specific: <code class="cell-mono">.claudeignore</code> has no effect in Claude Code; <code class="cell-mono">.cursorignore</code> applies to Cursor only. Not a security or OS isolation mechanism.</p>
-          ${(claudeIg?.addedPatterns?.length || 0) > 0 ? `
-            <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px">
-              Adding <strong>${claudeIg.addedPatterns.length}</strong> missing pattern(s) covering build artifacts, lockfiles, and oversized dumps:
-            </p>
-            <pre style="margin-bottom:14px"><code># agentlens-managed (workspace hygiene)\n${esc(claudeIg.addedPatterns.join('\n'))}</code></pre>
-          ` : `
-            <p style="font-size:12.5px;color:var(--success);margin-bottom:14px">✓ Both <code class="cell-mono">.claudeignore</code> and <code class="cell-mono">.cursorignore</code> are already up to date.</p>
-          `}
+          ${optimizeDrawerIgnoreFilesHtml(data.ignoreFiles)}
 
           ${oversized.length > 0 ? `
             <h4>2. Oversized Workspace Files (&gt;40 KB) &mdash; context exposure, not savings</h4>
