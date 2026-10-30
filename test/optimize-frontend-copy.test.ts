@@ -61,3 +61,13 @@ test('inline instruction trim reductions carry an estimate label', async () => {
   const line = view.optimizeTrimLine([{ fileName: 'CLAUDE.md', tokensSaved: 1234 }]);
   assert.match(line, /CLAUDE\.md: -1\.2k tok\/turn est\./, 'inline per-file trims must be labeled as estimates');
 });
+
+test('optimize UI exposes only escaped server-provided CLI commands and visible preview errors', async () => {
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync('web/app.js', 'utf8');
+  assert.doesNotMatch(app, /runApplyOptimize|btn-(?:drawer-)?apply-optimize|fetch\(['"]\/api\/optimize/);
+  assert.match(app, /optimize preview (?:failed|unavailable)/i);
+  assert.match(app, /esc\(.*cliCommand\)/);
+  assert.match(app, /cliShell/);
+  assert.match(app, /btn-copy-optimize-cli/);
+});

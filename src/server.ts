@@ -23,6 +23,7 @@ import { detectAnomalies } from './anomaly.ts';
 import { explainAnomaly } from './ai/explain.ts';
 import * as q from './queries.ts';
 import { subscriptionComparison } from './roi.ts';
+import { optimizeCliCommand, optimizeWorkspace } from './optimize.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
 const TYPES: Record<string, string> = {
@@ -222,6 +223,16 @@ export function startServer(
       return send(res, 400, 'text/plain', 'bad request'); // e.g. `GET //` is an invalid URL; must not escape the listener
     }
     try {
+      if (url.pathname === '/api/optimize') {
+        if (req.method !== 'GET') return send(res, 404, 'application/json', JSON.stringify({ error: 'not found' }));
+        const projectId = num(url.searchParams, 'project');
+        if (projectId == null || projectId <= 0) return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid project' }));
+        const project = db.prepare('SELECT id, root FROM projects WHERE id = ?').get(projectId) as { id: number; root: string } | undefined;
+        if (!project) return send(res, 404, 'application/json', JSON.stringify({ error: 'project not found' }));
+        const result = optimizeWorkspace(db, { projectId: project.id, apply: false });
+        const cli = optimizeCliCommand(project.root, process.platform);
+        return send(res, 200, 'application/json', JSON.stringify({ ...result, cliCommand: cli?.command ?? null, cliShell: cli?.shell ?? null }));
+      }
       if (req.method === 'GET' && url.pathname === '/api/export.csv') {
         const type = (url.searchParams.get('type') || 'sessions') as 'sessions' | 'daily' | 'findings';
         const from = num(url.searchParams, 'from');

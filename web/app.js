@@ -1,5 +1,5 @@
 // agentlens dashboard — Vanilla JS, zero build step, Linear/Raycast precision UI.
-import { esc, fmtTok, optimizeIgnoreFilesCardHtml, optimizeDrawerIgnoreFilesHtml, optimizeTrimLine, pendingIgFiles } from './optimize-view.js';
+import { esc, fmtTok, optimizeIgnoreFilesCardHtml, optimizeDrawerIgnoreFilesHtml, optimizeTrimLine } from './optimize-view.js';
 const $ = (sel) => document.querySelector(sel);
 const fmtInt = (n) => (n ?? 0).toLocaleString();
 const fmtUsd = (n) => `$${(n ?? 0).toFixed(2)}`;
@@ -749,7 +749,7 @@ async function projectPage(projectId) {
     api('sessions', { project: projectId, limit: '25' }),
     fetch('/api/settings').then((r) => r.json()).catch(() => ({ settings: {} })),
     api('outcomes', { project: projectId }).catch(() => []),
-    api('optimize', { project: projectId }).catch(() => null),
+    api('optimize', { project: projectId }).catch(() => ({ error: true })),
   ]);
 
   const p = projects.find((x) => String(x.projectId) === String(projectId));
@@ -892,7 +892,7 @@ async function projectPage(projectId) {
       </form>
 
       <!-- Workspace Hygiene & Pre-Session Optimizer -->
-      ${optPreview ? (() => {
+      ${!optPreview.error ? (() => {
         const claudeIg = optPreview.ignoreFiles?.find((x) => x.fileName === '.claudeignore');
         const cursorIg = optPreview.ignoreFiles?.find((x) => x.fileName === '.cursorignore');
         const missingIgCount = (claudeIg?.addedPatterns?.length || 0) + (cursorIg?.addedPatterns?.length || 0);
@@ -910,8 +910,8 @@ async function projectPage(projectId) {
                 <span class="card-subtitle">Adds <code class="cell-mono">.claudeignore</code> / <code class="cell-mono">.cursorignore</code> patterns and trims redundant instruction lines with <code class="cell-mono">.bak</code> backups. Ignore files are provider-specific &mdash; <code class="cell-mono">.claudeignore</code> has no effect in Claude Code.</span>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button type="button" id="btn-copy-optimize-cli" class="btn btn-xs btn-outline" data-cmd="agentlens optimize --project &quot;${esc(p.root)}&quot; --apply">Copy CLI Command</button>
-                ${hasActionableWrites ? `<button type="button" id="btn-apply-optimize" class="btn btn-xs">Apply Hygiene Now</button>` : `<span class="pill pill-verified">✓ Clean</span>`}
+                ${optPreview.cliCommand ? `<button type="button" id="btn-copy-optimize-cli" class="btn btn-xs btn-outline" style="min-height:44px" data-cmd="${esc(optPreview.cliCommand)}">Copy CLI Command (${esc(optPreview.cliShell)})</button>` : '<span>CLI command unavailable for this path.</span>'}
+                ${!hasActionableWrites ? `<span class="pill pill-verified">✓ Clean</span>` : ''}
               </div>
             </div>
             <div class="grid-12" style="margin-bottom:0;gap:12px">
@@ -944,7 +944,7 @@ async function projectPage(projectId) {
             </div>
           </div>
         `;
-      })() : ''}
+      })() : '<div class="card" role="alert">Optimize preview unavailable. Check that the project directory and its files are accessible and safe, then try again.</div>'}
 
       <!-- Fix Now Panel -->
       <div class="card" style="margin-bottom:var(--space-4);border-color:var(--accent-border)">
@@ -1110,41 +1110,8 @@ async function projectPage(projectId) {
         });
       });
 
-      async function runApplyOptimize(btn) {
-        if (!btn) return;
-        const origText = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = 'Applying...';
-        try {
-          const res = await fetch('/api/optimize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectId: Number(projectId), projectRoot: p.root, apply: true }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
-            showToast(`Optimization failed: ${data.error || res.statusText}`, 'error');
-            btn.disabled = false;
-            btn.textContent = origText;
-            return;
-          }
-          const addedCount = data.ignoreFiles?.reduce((s, f) => s + (f.addedPatterns?.length || 0), 0) || 0;
-          const trimCount = data.instructionTrims?.filter((t) => t.applied).length || 0;
-          showToast(
-            `Applied workspace hygiene to ${p.name}: +${addedCount} ignore rule(s), ${trimCount} file(s) trimmed (est. ~${fmtTok(data.estimatedTokensSavedPerTurn)} tok/turn reduction)`,
-            'success'
-          );
-          closeSlideOver();
-          render();
-        } catch (err) {
-          showToast(`Optimization error: ${err.message}`, 'error');
-          btn.disabled = false;
-          btn.textContent = origText;
-        }
-      }
-
       $('#btn-toggle-optimize-panel')?.addEventListener('click', async () => {
-        const data = optPreview || await api('optimize', { project: projectId }).catch(() => null);
+        const data = optPreview.error ? await api('optimize', { project: projectId }).catch(() => null) : optPreview;
         if (!data) {
           showToast('Could not load workspace optimization preview', 'error');
           return;
@@ -1152,18 +1119,12 @@ async function projectPage(projectId) {
         const trims = data.instructionTrims || [];
         const oversized = data.oversizedFiles || [];
         const unused = data.unusedItems || [];
-        const hasWrites = pendingIgFiles(data.ignoreFiles).length > 0 || trims.length > 0;
 
         openSlideOver(`⚡ Optimize Workspace: ${p.name}`, `
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.28);border-radius:var(--radius-sm);margin-bottom:16px">
             <div>
               <div style="font-weight:700;color:var(--success);font-size:14px">Estimated Reduction: ~${fmtTok(data.estimatedTokensSavedPerTurn)} instruction tokens / turn (estimate, not measured)</div>
               <div style="font-size:12px;color:var(--text-muted)">Root: <code class="cell-mono">${esc(p.root)}</code></div>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button type="button" id="btn-drawer-apply-optimize" class="btn btn-sm">
-                ${hasWrites ? '⚡ Apply Hygiene Now' : '✓ Re-Apply / Verify'}
-              </button>
             </div>
           </div>
 
@@ -1196,17 +1157,16 @@ async function projectPage(projectId) {
             </ul>
           ` : `<p style="font-size:12.5px;color:var(--success)">✓ Zero unused MCPs detected.</p>`}
 
-          <h4>CLI Equivalent</h4>
-          <pre><code>agentlens optimize --project "${esc(p.root)}" --apply</code></pre>
+          <h4>CLI command (${esc(data.cliShell || 'unavailable')})</h4>
+          ${data.cliCommand ? `<pre><code>${esc(data.cliCommand)}</code></pre><button type="button" id="btn-drawer-copy-optimize-cli" class="btn btn-sm" style="min-height:44px" data-cmd="${esc(data.cliCommand)}">Copy CLI Command</button>` : '<p>CLI command unavailable for this path.</p>'}
         `);
 
-        $('#btn-drawer-apply-optimize')?.addEventListener('click', (e) => runApplyOptimize(e.currentTarget));
+        $('#btn-drawer-copy-optimize-cli')?.addEventListener('click', (e) => copyText(e.currentTarget.dataset.cmd, 'CLI optimize command copied to clipboard'));
       });
       $('#btn-copy-optimize-cli')?.addEventListener('click', (e) => {
         const cmd = e.currentTarget.dataset.cmd;
         if (cmd) copyText(cmd, 'CLI optimize command copied to clipboard');
       });
-      $('#btn-apply-optimize')?.addEventListener('click', (e) => runApplyOptimize(e.currentTarget));
 
       $('#btn-toggle-budget-form')?.addEventListener('click', () => {
         const form = $('#form-project-budget');
