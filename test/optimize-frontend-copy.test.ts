@@ -32,8 +32,8 @@ test('optimize surfaces avoid unsupported savings/shield claims in web/app.js', 
 // ignoreFiles result array and show the pending Cursor patterns instead of claiming
 // both files are up to date.
 test('fixture claude-current cursor-pending shows per-file pending status, not a shared up-to-date claim', async () => {
-  const view = await import('../web/optimize-view.js');
-  const ig = (fileName, addedPatterns) => ({ fileName, addedPatterns });
+  const view = await import(new URL('../web/optimize-view.js', import.meta.url).href);
+  const ig = (fileName: string, addedPatterns: string[]) => ({ fileName, addedPatterns });
   const fixture = [ig('.claudeignore', []), ig('.cursorignore', ['build/'])];
 
   const card = view.optimizeIgnoreFilesCardHtml(fixture);
@@ -57,7 +57,7 @@ test('fixture claude-current cursor-pending shows per-file pending status, not a
 });
 
 test('inline instruction trim reductions carry an estimate label', async () => {
-  const view = await import('../web/optimize-view.js');
+  const view = await import(new URL('../web/optimize-view.js', import.meta.url).href);
   const line = view.optimizeTrimLine([{ fileName: 'CLAUDE.md', tokensSaved: 1234 }]);
   assert.match(line, /CLAUDE\.md: -1\.2k tok\/turn est\./, 'inline per-file trims must be labeled as estimates');
 });
