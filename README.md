@@ -286,7 +286,7 @@ Two read-only JSON endpoints compare tools and models. Both accept the standard 
   An error is a paired tool result marked as an error. A retry is a repeat of an identical call
   (same session, tool, and argument hash) within the filtered window; its `wastedTokens` are the
   assistant tokens (input + output + cache read + cache write) between the previous attempt and
-  the retry. The result is `{failures: [{tool, projectId, project, calls, errors, retries, wastedTokens}], totals}`
+  the retry. This is a proxy for retry waste, not a measurement of actual wasted tokens. The result is `{failures: [{tool, projectId, project, calls, errors, retries, wastedTokens}], totals}`
   over the same metrics, sorted by errors then wasted tokens. Calls with different arguments are
   never counted as retries, and no tool output or arguments are returned.
 - `GET /api/analytics/model-efficiency` — one row per model: `name`, `sessions`, `tokens`
@@ -294,7 +294,7 @@ Two read-only JSON endpoints compare tools and models. Both accept the standard 
   events per session), `toolErrorRate` (errors / tool calls), and `cacheReadRatio` (cache read /
   total tokens), the two ratios rounded to 3 decimals. A session that used several models is
   counted once per model, but its tool stats are attributed to that session's primary model
-  (most tokens in the session; ties broken by name). Models without a recorded name are listed
+  (most tokens in the filtered session; ties broken by name). Models without a recorded name are listed
   as `unknown`. Sorted by tokens descending.
 
 `agentlens cheatsheet` generates a ~10-line starter architecture summary locally, with no AI and
@@ -313,9 +313,10 @@ agentlens cheatsheet --top 10 --json
 It ranks the project's `hot_files` findings by summed evidence reads and extracts up to 12
 exported symbols per file (functions, interfaces, types, consts/lets, classes) from
 TypeScript/JavaScript only. Files are read with a 64 KiB cap, restricted to regular files inside
-the project root; unreadable files and paths outside the root are skipped. `--top` defaults to 5
-(clamped 1–20). Without hot-file evidence it falls back to a size-ranked scan of `src/`; those
-fallback entries carry no read counts (`reads: 0`). It is a starting point for a CLAUDE.md
+the project root; files over the cap, unreadable files, and paths outside the root are skipped.
+`--top` defaults to 5 (clamped 1–20). When no usable hot-file entries remain, it scans the
+top level of `src/`, preferring `index.ts`, `cli.ts`, `db.ts`, and `server.ts` before sorting
+other files by size. Fallback entries carry no read counts (`reads: 0`). It is a starting point for a CLAUDE.md
 architecture section, not a complete project map.
 
 ### Live statusline output formats
@@ -330,10 +331,11 @@ current working directory's project:
 | `starship` | `⚡ 18% 5h \| 12.3k/d \| at this pace you hit the 5h limit at 15:30` | Quota percent, today's tokens, forecast; no project name and no 7-day quota. |
 | `raw` | `myproj<TAB>12.3k<TAB>18%<TAB>42%<TAB>forecast<TAB>warning` | Tab-separated: project, today's tokens, 5h, 7d, forecast, context warning. |
 
-Missing fields print as `--`; tokens are compact (`12.3k`, `1.2M`). The forecast is the active
-quota-exhaustion estimate (time of day when the limit will be hit, or a "limit currently
-exhausted" message); it reflects the last `summary.json` written by `serve` or `ingest`, so
-without those running the quota and token fields read `--`.
+Missing token and quota values print as `--`; tokens are compact (`12.3k`, `1.2M`). Missing
+forecast and warning fields are omitted from the default and starship formats and empty in raw
+output. The forecast is the active quota-exhaustion estimate (time of day when the limit will
+be hit, or a "limit currently exhausted" message). Values come from the last `summary.json`
+written by `serve` or `ingest` and may be stale when it is not refreshed; missing data reads `--`.
 
 ---
 
