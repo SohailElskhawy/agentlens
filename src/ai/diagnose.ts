@@ -122,11 +122,16 @@ export function worstSessions(db: DB, limit: number, projectId?: number): string
 
 const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
 
+// Fixed display mapping only; schema, prompts and hashes are unchanged. Cached values are parser-validated,
+// but the fallback keeps legacy missing kinds and anything unexpected clearly model-labeled.
+const KIND_LABELS: Record<string, string> = { observation: 'AI observation', hypothesis: 'AI hypothesis', unknown: 'AI unknown' };
+const kindLabel = (kind?: string): string => KIND_LABELS[kind ?? ''] ?? 'AI unclassified';
+
 export function renderDiagnosisMarkdown(d: Diagnosis): string {
   const out = [d.summary, ''];
   if (d.causes.length) {
-    out.push('### Likely causes', '');
-    for (const c of d.causes) out.push(`- **${oneLine(c.cause)}**: ${oneLine(c.evidence)} (AI estimate: ~${Math.round(c.est_tokens).toLocaleString('en-US')} tokens)`);
+    out.push('### Causes and hypotheses', '');
+    for (const c of d.causes) out.push(`- **${oneLine(c.cause)}** [${kindLabel(c.kind)}]: ${oneLine(c.evidence)} (AI estimate: ~${Math.round(c.est_tokens).toLocaleString('en-US')} tokens)`);
     out.push('');
   }
   if (d.fixes.length) {

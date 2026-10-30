@@ -1314,15 +1314,17 @@ async function postDiagnose(sessionId, confirm) {
   return body;
 }
 
+// Fixed display mapping only; labels are always model-assigned. Legacy causes without kind show "AI unclassified".
 function renderDiagnosis(d, cached) {
+  const kinds = { observation: 'AI observation', hypothesis: 'AI hypothesis', unknown: 'AI unknown' };
   const root = mk('div', 'ai-diagnosis');
   root.append(mk('p', 'ai-summary', d.summary));
   if (cached) root.append(mk('p', 'ai-note', 'Saved result from an earlier run. Nothing was sent.'));
   if (d.causes.length) {
-    root.append(mk('h4', 'ai-heading', 'Likely causes'));
+    root.append(mk('h4', 'ai-heading', 'Causes and hypotheses'));
     for (const c of d.causes) {
       const item = mk('div', 'ai-item');
-      item.append(mk('strong', null, c.cause), mk('p', null, c.evidence),
+      item.append(mk('strong', null, c.cause), mk('span', 'badge', kinds[c.kind] || 'AI unclassified'), mk('p', null, c.evidence),
         mk('span', 'badge', `~${fmtInt(Math.round(c.est_tokens))} tokens, unverified AI estimate`));
       root.append(item);
     }
