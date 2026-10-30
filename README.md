@@ -4,7 +4,6 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![Privacy First](https://img.shields.io/badge/privacy-local--first-orange.svg)](#privacy--security-guarantees)
-[![Tests Passing](https://img.shields.io/badge/tests-193%20passing-success.svg)](test/)
 
 **agentlens** is a lightweight, local-first, cross-platform usage and workflow optimizer for AI coding agents on Linux, macOS, and Windows:
 - **Claude Code** (Pro)
@@ -24,16 +23,17 @@ It monitors how you use AI coding agents to **save tokens, avoid hitting subscri
 ## ⚡ Key Capabilities
 
 * **Unified Usage Dashboard (Fluid & Responsive):** Fluid full-width 12-column responsive layout, dense KPI bar, side-by-side uPlot canvas charts, dark/light token design system, collapsible sidebar, and slide-over drawers.
-* **"Fix Now" Project Action Runner:** Instant project fix panel ranking open recommendations by tokens saved, with one-click copyable prompts and opt-in "Send to agent" CLI dispatch (`claude`, `codex`, `opencode`) capturing live `git diff --stat`.
+* **"Fix Now" Project Action Runner:** Instant project fix panel ranking open recommendations by estimated tokens saved, with one-click copyable prompts and opt-in "Send to agent" CLI dispatch (`claude`, `codex`, `opencode`) capturing live `git diff --stat`.
 * **Quota Forecasting & Live Statusline:** Burn rate extrapolation projecting 5-hour and 7-day rate-limit exhaustion times before reset (< 10ms latency in statusline, CLI status, and dashboard top bar).
+* **Omarchy Quattro Desktop Bar Widget (`agentlens.bar-widget`):** Native Quickshell/QML top-bar pill and slide-out telemetry panel with reactive `FileView` watching (`~/.local/state/agentlens/summary.json`), multi-agent 5h/7d progress bars, live token burn velocity (`🔥 X/h`), Today's Activity KPIs, and one-click "Fix Now" prompt copy.
 * **Live Desktop Alerts:** Proactive notifications during `serve` for active retry loops, quota exhaustion predicted within 30 minutes, or project budgets crossing 80%/100%.
 * **Per-Project Weekly Budgets:** Configurable weekly token and cost targets per project with visual progress bars and weekly report integration.
 * **Cross-Agent Quota Balancing:** Evaluates quota headroom across agents to recommend optimal agent switching.
-* **14 Workflow Waste Detectors:** Deterministic detectors covering retry loops, repetitive file reads, context runaway, idle cache misses, large tool dumps, model mismatch, git outcome efficiency, abandoned sessions, compaction churn, and reasoning overuse.
+* **15 Workflow Waste Detectors:** Deterministic detectors covering retry loops, repetitive file reads, context runaway, idle cache misses, large tool dumps, model mismatch, git outcome efficiency, abandoned sessions, compaction churn, and reasoning overuse.
 * **Interactive Session Turn Timeline:** Per-turn stacked token charts (input, output, cache-read) with clickable detector event markers and finding slide-over views.
 * **Instruction Trimmer:** Generates non-destructive unified diffs proposing cuts for duplicate lines, conflicting rules, oversized code blocks, and stale paths across `CLAUDE.md`, `AGENTS.md`, and `GEMINI.md`.
 * **Configuration Audit:** Scans global and project instructions, MCP servers, skills, and plugins. Calculates fixed session token overhead and detects unused (30d), duplicate, or conflicting configurations.
-* **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked actions enriched with vetted open-source tools from `catalog.yaml`.
+* **Smart Recommendations & Curated Catalog:** Synthesizes findings into ranked actions enriched with vetted open-source tools from `catalog.yaml`. Finding `est_tokens_week` figures are heuristic estimates (capped by trailing-7-day usage of the finding's scope), not measurements; realized savings are only what `agentlens track` measures after an accepted recommendation.
 * **Automated Weekly Usage Reports:** Generates comprehensive Monday reports in GitHub-flavored Markdown and standalone dark/light HTML (`<dataDir>/reports/`), with native desktop notifications across Linux (`notify-send`), macOS (`osascript`), and Windows (PowerShell toast).
 * **Improvement Tracking with Quality Guardrails:** Tracks accepted recommendations across 14-day before/after windows, verifying real token savings while ensuring error rates and interaction turns don't regress.
 * **Flexible Exports & Prometheus Metrics:** CLI exporter (`agentlens export --format csv|json`), `GET /api/export.csv`, Prometheus `GET /metrics` text endpoint, and in-dashboard CSV table downloads.
@@ -82,7 +82,7 @@ flowchart TD
     subgraph CoreEngine["agentlens Core Engine (Zero External Deps)"]
         Adapters["Streaming Log & SQLite Adapters"]
         DB[("agentlens.db\n(node:sqlite)")]
-        Detectors["14 Workflow Waste Detectors"]
+        Detectors["15 Workflow Waste Detectors"]
         Audit["Config Audit & Instruction Trimmer"]
         Catalog["Curated Catalog\n(catalog.yaml)"]
         Reports["Weekly Report Generator\n(Markdown & HTML)"]
@@ -91,7 +91,8 @@ flowchart TD
 
     subgraph Outputs["Interfaces & Outputs"]
         Statusline["Live Statusline\n(< 10ms)"]
-        CLI["agentlens CLI\n(status, audit, report, track, export, discover)"]
+        Omarchy["Omarchy Quattro Bar Widget\n(agentlens.bar-widget)"]
+        CLI["agentlens CLI\n(see CLI Reference below)"]
         WebUI["Local Web Dashboard\n(http://127.0.0.1:4711)"]
         Service["Background Service\n(systemd / launchd / schtasks)"]
         Metrics["Prometheus & CSV Exports\n(/metrics, /api/export.csv)"]
@@ -107,6 +108,7 @@ flowchart TD
     DB --> WebUI
     DB --> CLI
     DB --> Metrics
+    DB --> Omarchy
     Statusline --> CC
     Service --> Adapters
 ```
@@ -223,6 +225,24 @@ Add the printed snippet to `~/.claude/settings.json` (or `%USERPROFILE%\.claude\
 }
 ```
 
+### 6. Omarchy Quattro Desktop Plugin (`agentlens.bar-widget`)
+If you run **Omarchy Quattro** on Linux, install and enable the native top-bar widget and slide-out telemetry panel:
+
+```bash
+# Install to ~/.config/omarchy/plugins/agentlens.bar-widget, validate, and enable in the bar
+agentlens plugin install --enable
+
+# Check installation & shell status
+agentlens plugin status
+
+# Query live telemetry or force a refresh via Omarchy IPC
+omarchy-shell agentlens.bar-widget status
+omarchy-shell agentlens.bar-widget refresh
+
+# Disable and uninstall
+agentlens plugin uninstall
+```
+
 ---
 
 ## 💻 CLI Reference
@@ -230,27 +250,107 @@ Add the printed snippet to `~/.claude/settings.json` (or `%USERPROFILE%\.claude\
 | Command | Description |
 |---|---|
 | `agentlens serve` | Continuously ingest agent data and serve dashboard on `http://127.0.0.1:4711` |
-| `agentlens ingest` | Perform an incremental backfill of all 4 agents into SQLite and exit |
-| `agentlens export [--format csv\|json] [--type sessions\|daily\|findings] [--from <date>] [--to <date>] [--project <path>]` | Export session history, daily aggregates, or waste findings to CSV or JSON |
+| `agentlens ingest` | Perform an incremental backfill of all supported agents (Claude Code, Codex, OpenCode, Antigravity, Gemini CLI, Aider, Cursor) into SQLite and exit |
+| `agentlens export [--format csv\|json] [--type sessions\|daily\|findings\|all] [--from <date>] [--to <date>] [--project <path>] [--agent <agent>]` | Export session history, daily aggregates, or waste findings to CSV or JSON |
 | `agentlens status [--project <path>]` | Terminal summary of token usage, estimated costs, and active quotas |
 | `agentlens audit [--project <path>]` | Audit instruction overhead, unused MCPs/skills, duplicates, and conflicts |
 | `agentlens report [--week YYYY-Www] [--html] [--json]` | Generate and display weekly usage report |
 | `agentlens track [--project <path>]` | Display before/after improvement tracking for accepted recommendations |
 | `agentlens accept <id>` | Accept a recommendation and start 14-day improvement tracking |
 | `agentlens catalog [--rule <name>] [--json]` | Browse curated tool & MCP catalog mapped to waste patterns |
-| `agentlens discover [--query <terms>] [--dry-run] [--json]` | Opt-in discovery of agent tools and MCPs from GitHub |
-| `agentlens statusline` | Streamlined stdin processor for Claude Code statusline payload |
+| `agentlens discover [--query <terms>] [--dry-run] [--json] [--token <pat>]` | Opt-in discovery of agent tools and MCPs from GitHub |
+| `agentlens statusline [--format default\|starship\|raw]` | Streamlined stdin processor for Claude Code statusline payload; see [Live statusline output formats](#live-statusline-output-formats) |
+| `agentlens cheatsheet [path] [--project <path>] [--top <N>] [--json]` | Generate a local Markdown architecture cheat-sheet from a project's top hot files; see [Analytics & cheat-sheet](#analytics--cheat-sheet) |
+| `agentlens roi [--plan pro\|max5x\|max20x] [--days <N>] [--json]` | Compare locally observed Claude estimated API cost with an illustrative US monthly list-price reference |
+| `agentlens savings [--project <path>] [--weeks <N>] [--json] [--snapshot]` | Weekly project token-metric comparison against a captured baseline (default 8 weeks) |
+| `agentlens optimize [<path>] [--ai] [--preview] [--confirm <hash>] [--apply] [--dry-run] [--json]` | Workspace hygiene or opt-in AI instruction rewrite (`--apply` backs up each existing file it modifies with a `.bak`); see [docs/ai.md](docs/ai.md) |
 | `agentlens install-statusline` | Print configuration instructions for Claude Code statusline |
 | `agentlens install-service` | Install native background service (systemd user unit, launchd agent, or Windows scheduled task) |
+| `agentlens plugin [install\|status\|uninstall] [--enable] [--dir <path>]` | Install, inspect, or remove the native Omarchy Quattro desktop bar plugin (`agentlens.bar-widget`) |
+| `agentlens ai [status\|enable\|disable\|preview <diagnose\|session> <id>]` | Opt-in AI settings and exact preview (off by default; see [docs/ai.md](docs/ai.md)) |
+| `agentlens recommend [--ai] [--preview] [--confirm <hash>]` | Deterministic recommendations with optional, consented AI enrichment (see [docs/ai.md](docs/ai.md)) |
+| `agentlens explain anomaly <date> <project> [--agent <agent>] [--preview] [--confirm <hash>] [--json]` | Explain a detected token spike with opt-in AI and exact preview consent |
+| `agentlens diagnose <session-id> \| --worst <N> [--project <path>] [--preview] [--confirm <hash>] [--json]` | Opt-in AI diagnosis of structured session waste via your `claude` CLI; each new call needs its exact preview hash |
+
+The read-only `agentlens roi` command and `GET /api/analytics/roi?plan=pro&days=30` provide an **estimated API/list-price comparison** for Claude-agent logs. Plans are `pro`, `max5x`, or `max20x` (default `pro`); days are 1–365 (default 30). Team plans are unsupported. The window includes its start and excludes its end. API cost includes only tokens with known model prices, and the result reports token coverage and separate token and plan price dates. The ratio is unavailable when there are no priced tokens. The result also reports the Claude events and sessions actually observed in the requested window and the first/last timestamps observed across retained local logs; these timestamps describe the data present and do not imply the requested window is fully covered. The US monthly list prices ($20/$100/$200, as of 2026-10-30; [Claude pricing](https://claude.com/pricing)) exclude taxes; annual and regional pricing are unsupported. Multiplying by days/30 is illustrative, not an invoice calculation. Conditional API credit benefits are excluded. Local logs can include API-billed Claude usage and omit web chat and other machines, so this is not actual subscription utilization or measured value.
+
+The read-only `GET /api/outcomes` endpoint reports git outcome efficiency metrics per project; `tokensPerCommit` and `tokensPerChangedLine` rates (both overall and in `byAgent`) are nullable (`null` when the respective commit or changed-line denominator is zero).
+
+The dashboard previews workspace optimization without writing files. To apply changes, copy its shell-specific CLI command and run it in the named shell.
+
+Ordinary `optimize --apply` checks planned targets, destination directories, and backup availability before writing. Later filesystem changes or I/O errors can still leave partial results.
+
+### Analytics & cheat-sheet
+
+Two read-only JSON endpoints compare tools and models. Both accept the standard API filters:
+`from` / `to` (epoch ms; the window includes its start and excludes its end), `agent`, and
+`project` (numeric project ID).
+
+- `GET /api/analytics/tool-failures` — tool errors and wasted retry tokens per (tool, project).
+  An error is a paired tool result marked as an error. A retry is a repeat of an identical call
+  (same session, tool, and argument hash) within the filtered window; its `wastedTokens` are the
+  assistant tokens (input + output + cache read + cache write) between the previous attempt and
+  the retry. This is a proxy for retry waste, not a measurement of actual wasted tokens. The result is `{failures: [{tool, projectId, project, calls, errors, retries, wastedTokens}], totals}`
+  over the same metrics, sorted by errors then wasted tokens. Calls with different arguments are
+  never counted as retries, and no tool output or arguments are returned.
+- `GET /api/analytics/model-efficiency` — one row per model: `name`, `sessions`, `tokens`
+  (input + output + cache read + cache write), `tokensPerSession`, `avgTurns` (turns = assistant
+  events per session), `toolErrorRate` (errors / tool calls), and `cacheReadRatio` (cache read /
+  total tokens), the two ratios rounded to 3 decimals. A session that used several models is
+  counted once per model, but its tool stats are attributed to that session's primary model
+  (most tokens in the filtered session; ties broken by name). Models without a recorded name are listed
+  as `unknown`. Sorted by tokens descending.
+
+`agentlens cheatsheet` generates a ~10-line starter architecture summary locally, with no AI and
+no HTTP endpoint or dashboard page:
+
+```bash
+agentlens cheatsheet            # current project (or pass a path / --project <path>)
+agentlens cheatsheet --top 10 --json
+```
+
+```markdown
+## Architecture Cheat-Sheet (myproj)
+- `src/cli.ts` (23 reads): `fn main(...)`, `fn run(...)`
+```
+
+It ranks the project's `hot_files` findings by summed evidence reads and extracts up to 12
+exported symbols per file (functions, interfaces, types, consts/lets, classes) from
+TypeScript/JavaScript only. Files are read with a 64 KiB cap, restricted to regular files inside
+the project root; files over the cap, unreadable files, and paths outside the root are skipped.
+`--top` defaults to 5 (clamped 1–20). When no usable hot-file entries remain, it scans the
+top level of `src/`, preferring `index.ts`, `cli.ts`, `db.ts`, and `server.ts` before sorting
+other files by size. Fallback entries carry no read counts (`reads: 0`). It is a starting point for a CLAUDE.md
+architecture section, not a complete project map.
+
+### Live statusline output formats
+
+`agentlens statusline [--format default|starship|raw]` reads the Claude Code statusline JSON from
+stdin, spools its rate limits for quota tracking, and prints one line from `summary.json` for the
+current working directory's project:
+
+| Format | Example output | Notes |
+|---|---|---|
+| `default` | `myproj · 12.3k · 5h 18% · 7d 42% · at this pace you hit the 5h limit at 15:30` | Appends `[COMPACT RECOMMENDED]` when session context is large. |
+| `starship` | `⚡ 18% 5h \| 12.3k/d \| at this pace you hit the 5h limit at 15:30` | Quota percent, today's tokens, forecast; no project name and no 7-day quota. |
+| `raw` | `myproj<TAB>12.3k<TAB>18%<TAB>42%<TAB>forecast<TAB>warning` | Tab-separated: project, today's tokens, 5h, 7d, forecast, context warning. |
+
+Missing token and quota values print as `--`; tokens are compact (`12.3k`, `1.2M`). Missing
+forecast and warning fields are omitted from the default and starship formats and empty in raw
+output. The forecast is the active quota-exhaustion estimate (time of day when the limit will
+be hit, or a "limit currently exhausted" message). Values come from the last `summary.json`
+written by `serve` or `ingest` and may be stale when it is not refreshed; missing data reads `--`.
 
 ---
 
 ## 🔒 Privacy & Security Guarantees
 
 agentlens is engineered from the ground up to respect developer privacy and system security:
-- **Strictly Read-Only on Agent Files:** Agent log files and SQLite databases are opened with read-only flags (`mode=ro`). agentlens **never** modifies agent configurations, installs tools, or alters session histories.
+- **Read-Only on Agent Data:** Agent log files are read without modification, and agent-side SQLite databases are opened read-only (`mode=ro`); session histories are never altered.
+- **Writes Only Where You Ask:** Scans, dry-run previews, and dashboard views never write to your project or agent files. File writes happen only through explicit commands: ordinary `optimize --apply` appends an `agentlens-managed` block to `.claudeignore`/`.cursorignore` and trims project instruction files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`); the opt-in `--ai` instruction rewrite requires preview and hash confirmation with `--confirm` for each new AI call and can apply a cached result. Both optimize flows back up each existing file they modify to `.bak` first and do not overwrite an existing backup. `plugin install` copies the bar-widget plugin into the Omarchy plugins directory and can enable it in the bar; `plugin uninstall` removes the installed plugin. The opt-in Fix Now flow launches your own agent CLI in a registered project, and that agent edits the project under its own permissions.
 - **Zero Raw Prompt or Output Storage:** Prompt text and tool outputs are never persisted to disk. Only SHA-256 hashes and byte lengths are recorded for repetition detection.
-- **Strict Network Isolation:** Dashboard binds exclusively to loopback (`127.0.0.1`) with DNS rebinding host protection. Metrics (`/metrics`) and CSV exports (`/api/export.csv`) are strictly loopback-only. No analytics, telemetry, or external AI model calls are made.
+- **Strict Network Isolation:** Dashboard binds exclusively to loopback (`127.0.0.1`) with DNS rebinding host protection. Metrics (`/metrics`) and CSV exports (`/api/export.csv`) are strictly loopback-only. No analytics or telemetry. AI analysis is off by default and only runs when you opt in (see below and [docs/ai.md](docs/ai.md)).
+- **Opt-In AI Diagnosis (Off by Default):** `agentlens diagnose` can ask your own installed `claude` CLI to explain a session's token waste. It never runs automatically (not on ingest, not on `serve`) and requires `agentlens ai enable`. Only a redacted, structured summary is sent (rule names, tool names, token counts, finding estimates): never prompt text, tool output, source code, or file paths. Every new call requires you to review the exact prompt and command with `--preview` and confirm its hash with `--confirm`. That CLI sends the prompt to whatever provider and account it is configured for, so that call uses your provider's subscription and quota and its data leaves your machine. Results are cached locally in agentlens's own database (AI result cache, not raw prompt storage), calls are capped per day, and AI output never changes the deterministic findings or recommendations.
 - **Zero Agent Token Allowance:** agentlens never injects prompt instructions or SessionStart hooks into active coding sessions.
 - **Privacy-Safe Discovery:** The optional GitHub discovery engine operates strictly on generic alphanumeric keyword queries. Local paths, project names, or token metrics are never transmitted.
 - **Opt-In Agent Automation (`Fix Now`):** Executing automated fixes via local agent CLIs (`claude`, `codex`, `opencode`) is strictly opt-in and disabled by default until explicitly enabled in Settings (`Allow agentlens to launch agents`). All CLI commands require confirmation displaying the exact command array and verified project folder, and are executed via direct `execFile`/`spawn` argument arrays (never a shell string) restricted solely to repositories already tracked by agentlens.
@@ -318,7 +418,7 @@ agentlens performs read-only discovery of logs and session databases across Linu
 ## 🧪 Testing & Verification
 
 ```bash
-# Run test suite (193 unit & integration tests)
+# Run test suite
 npm test
 
 # Run TypeScript typecheck
@@ -346,7 +446,7 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 ## 🗺️ Roadmap & Integrations
 
 - **[ROADMAP.md](ROADMAP.md)** — Architectural proposals for in-flight guardrails via MCP, automated ignore generation, git branch cost attribution, and terminal UI (`agentlens tui`).
-- **[OMARCHY_PLUGIN.md](OMARCHY_PLUGIN.md)** — Complete specification for the native **Omarchy Quattro** desktop bar widget and slide-out details panel (`BarWidget.qml`, `Panel.qml`).
+- **[OMARCHY_PLUGIN.md](OMARCHY_PLUGIN.md)** & **[`plugins/omarchy/agentlens.bar-widget/`](plugins/omarchy/agentlens.bar-widget/README.md)** — Shipped native **Omarchy Quattro** desktop bar widget and slide-out telemetry panel (`BarWidget.qml`, `Panel.qml`, `Model.js`), managed via `agentlens plugin install --enable`.
 - **[VSCODE_EXTENSION.md](VSCODE_EXTENSION.md)** — Full specification for the **VS Code & Cursor** extension (`vscode-agentlens`), including ambient status bar quota monitoring, workspace Fix Now tree view, and in-editor instruction trimmer diff preview.
 
 ---
@@ -367,3 +467,5 @@ agentlens incorporates concepts and parsing techniques inspired by open-source p
 ## 📜 License
 
 [MIT License](LICENSE) © 2026 agentlens authors.
+
+Instruction drift checks are conservative: project CLAUDE.md and AGENTS.md files are checked for explicit `npm run` scripts and file-like relative paths. Examples, globs, URLs, global instructions, symlinks, and oversized files are skipped; missing or invalid package.json files do not produce script findings. Review each finding before changing instructions.

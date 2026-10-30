@@ -3,6 +3,7 @@ import { getSetting } from './db.ts';
 import { sendDesktopNotification } from './report-scheduler.ts';
 import { computeQuotaForecasts } from './quota-forecast.ts';
 import { detectRetryLoops } from './analyze/retry_loop.ts';
+import { excludeTempFindings } from './temp-project.ts';
 
 // In-memory debounce cache: key -> timestamp last notified
 const alertDebounce = new Map<string, number>();
@@ -36,7 +37,7 @@ export function checkLiveAlerts(db: DB, options: AlertOptions = {}): FiredAlert[
   const retryLoopEnabled = getSetting(db, 'alert_retry_loop', 'true') !== 'false';
   if (retryLoopEnabled) {
     try {
-      const loops = detectRetryLoops(db);
+      const loops = excludeTempFindings(db, detectRetryLoops(db));
       // Check for active sessions within the last 30 minutes
       const thirtyMinutesAgo = now - 30 * 60_000;
       for (const finding of loops) {

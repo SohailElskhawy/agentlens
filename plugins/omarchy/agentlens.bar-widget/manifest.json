@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "agentlens.bar-widget",
+  "name": "agentlens Quota & Token Monitor",
+  "version": "1.1.0",
+  "author": "agentlens",
+  "description": "Live AI coding agent quota, burn rate, active agent split (Antigravity, Claude, Codex), in-flight waste alerts, and interactive Fix & Optimize cockpit for Omarchy Quattro.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "agentlens",
+    "category": "Development",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "pillMode": "full"
+    },
+    "schema": [
+      {
+        "key": "pillMode",
+        "type": "enum",
+        "label": "Bar pill format",
+        "options": ["full", "compact", "cost"],
+        "defaultValue": "full",
+        "description": "Choose between full (quota + countdown + burn), compact (quota %), or cost (quota % + today's cost)."
+      }
+    ]
+  }
+}

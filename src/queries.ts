@@ -14,7 +14,7 @@ const SUMS = `sum(e.input) AS input, sum(e.output) AS output, sum(e.cache_read) 
 const FROM = 'FROM events e LEFT JOIN sessions s ON s.id = e.session_id';
 const plain = (rows: unknown[]) => rows.map((r) => ({ ...(r as Row) })); // node:sqlite rows have a null prototype
 
-function where(f: Filter & { sessionId?: string }) {
+export function where(f: Filter & { sessionId?: string }) {
   const c: string[] = [];
   const params: Record<string, string | number> = {};
   if (f.from != null) { c.push('e.ts >= $from'); params.from = f.from; }
@@ -125,6 +125,187 @@ export function sessionDetail(db: DB, id: string) {
       WHERE c.session_id = ? AND c.kind = 'tool_call' GROUP BY c.tool ORDER BY calls DESC`).all(id)),
     children: plain(db.prepare('SELECT id, agent FROM sessions WHERE parent_id = ? ORDER BY id').all(id)),
   };
+}
+
+export interface ToolFailure {
+  tool: string; projectId: number | null; project: string | null;
+  calls: number; errors: number; retries: number; wastedTokens: number;
+}
+
+/**
+ * Tool errors and wasted retry tokens per (tool, project). An error is a paired tool_result with
+ * is_error (the `:result` id suffix). A retry is a repeat of the identical (session, tool, args_hash)
+ * call; its wastedTokens are the assistant tokens spent between the previous attempt and the retry.
+ */
+export function toolFailures(db: DB, f: Filter = {}) {
+  const w = where(f);
+  const rows = db.prepare(`
+    WITH attempts AS (
+      SELECT e.id AS id, e.session_id AS sessionId, e.ts AS ts, e.tool AS tool, s.project_id AS projectId,
+        CASE WHEN e.args_hash IS NOT NULL THEN lag(e.ts) OVER (PARTITION BY e.session_id, e.tool, e.args_hash ORDER BY e.ts, e.id) END AS prevTs
+      ${FROM} WHERE e.kind = 'tool_call' AND e.tool IS NOT NULL${w.sql}
+    )
+    SELECT a.tool, a.projectId, count(*) AS calls,
+      sum(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END) AS errors,
+      count(a.prevTs) AS retries,
+      coalesce(sum((SELECT coalesce(sum(x.input + x.output + x.cache_read + x.cache_write), 0) FROM events x
+        WHERE x.session_id = a.sessionId AND x.kind = 'assistant' AND x.ts > a.prevTs AND x.ts <= a.ts)), 0) AS wastedTokens
+    FROM attempts a
+    LEFT JOIN events r ON r.id = a.id || ':result'
+    GROUP BY 1, 2
+    ORDER BY errors DESC, wastedTokens DESC, a.tool, a.projectId
+  `).all(w.params) as Array<{ tool: string; projectId: number | null; calls: number; errors: number; retries: number; wastedTokens: number }>;
+
+  const nameStmt = db.prepare('SELECT name FROM projects WHERE id = ?');
+  const failures: ToolFailure[] = rows.map((r) => ({
+    tool: r.tool, projectId: r.projectId ?? null,
+    project: r.projectId == null ? null : (nameStmt.get(r.projectId) as { name: string } | undefined)?.name ?? null,
+    calls: r.calls, errors: r.errors, retries: r.retries, wastedTokens: r.wastedTokens,
+  }));
+  const totals = failures.reduce(
+    (t, f) => ({ calls: t.calls + f.calls, errors: t.errors + f.errors, retries: t.retries + f.retries, wastedTokens: t.wastedTokens + f.wastedTokens }),
+    { calls: 0, errors: 0, retries: 0, wastedTokens: 0 },
+  );
+  return { failures, totals };
+}
+
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+
+export interface ModelEfficiency {
+  name: string;
+  sessions: number;
+  tokens: number;
+  tokensPerSession: number;
+  avgTurns: number;
+  toolErrorRate: number;
+  cacheReadRatio: number;
+}
+
+/**
+ * Efficiency comparison per model over actual workspace sessions. A session that uses several
+ * models is counted once per model; its tool stats are attributed to its primary model
+ * (the one with the most tokens in that session, ties broken by name for determinism).
+ */
+export function modelEfficiency(db: DB, f: Filter = {}): ModelEfficiency[] {
+  const w = where(f);
+  const turns = db.prepare(`SELECT e.model AS model, e.session_id AS sessionId,
+      sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens, sum(e.cache_read) AS cacheRead, count(*) AS turns
+    ${FROM} WHERE e.kind = 'assistant'${w.sql} GROUP BY e.model, e.session_id`).all(w.params) as Row[];
+  const tools = db.prepare(`SELECT e.session_id AS sessionId, count(*) AS calls,
+      coalesce(sum(r.is_error = 1), 0) AS errors
+    ${FROM} LEFT JOIN events r ON r.id = e.id || ':result'
+    WHERE e.kind = 'tool_call' AND e.tool IS NOT NULL${w.sql} GROUP BY e.session_id`).all(w.params) as Array<{ sessionId: string; calls: number; errors: number }>;
+
+  const primary = new Map<string, { model: string; tokens: number }>();
+  for (const t of turns) {
+    const model = t.model ?? 'unknown';
+    const p = primary.get(t.sessionId);
+    if (!p || t.tokens > p.tokens || (t.tokens === p.tokens && model < p.model)) primary.set(t.sessionId, { model, tokens: t.tokens });
+  }
+
+  const groups = new Map<string, { model: string; sessions: number; tokens: number; cacheRead: number; turns: number; calls: number; errors: number }>();
+  for (const t of turns) {
+    const model = t.model ?? 'unknown';
+    let g = groups.get(model);
+    if (!g) { g = { model, sessions: 0, tokens: 0, cacheRead: 0, turns: 0, calls: 0, errors: 0 }; groups.set(model, g); }
+    g.sessions++; g.tokens += t.tokens; g.cacheRead += t.cacheRead; g.turns += t.turns;
+  }
+  for (const t of tools) {
+    const g = groups.get(primary.get(t.sessionId)?.model ?? '') ?? null;
+    if (!g) continue;
+    g.calls += t.calls; g.errors += t.errors;
+  }
+
+  return [...groups.values()].map((g) => ({
+    name: g.model, sessions: g.sessions, tokens: g.tokens,
+    tokensPerSession: Math.round(g.tokens / g.sessions),
+    avgTurns: r3(g.turns / g.sessions),
+    toolErrorRate: g.calls ? r3(g.errors / g.calls) : 0,
+    cacheReadRatio: g.tokens ? r3(g.cacheRead / g.tokens) : 0,
+  })).sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name));
+}
+
+export interface SessionFamily {
+  root: string;
+  sessions: number;
+  childSessions: number;
+  totalSessions: number;
+  tokens: number;
+  cost: number;
+  pricedSessions: number;
+}
+
+/**
+ * Informational attribution: which share of tokens sits in which parent-child session family.
+ * A family root is a session with no usable parent (no parent_id, a parent_id with no matching
+ * row, or a cycle back to itself on the parent walk); descendants attach to their ancestor root.
+ * Cycles are cut when the walk revisits a session on the current path, so cyclic data neither
+ * crashes nor hangs; every session lands in exactly one family and is counted once.
+ * Cost covers priced models only via costOf; unpriced sessions keep their tokens but cost 0.
+ */
+export function sessionFamilies(db: DB, f: Filter = {}): SessionFamily[] {
+  const w = where(f);
+  // Family structure comes from the sessions table; tokens/cost come from filtered events. A session
+  // with no events matching the filter contributes no family of its own, but its ancestors' structure
+  // is still walked so its tokens land in the right root's family.
+  const parents = new Map<string, string | null>();
+  for (const r of db.prepare('SELECT id, parent_id AS parentId FROM sessions').all() as Row[]) parents.set(r.id, r.parentId ?? null);
+  const rootsSeed: string[] = []; // sessions seen by the filtered events; family list is built from these
+  for (const r of db.prepare(`SELECT DISTINCT e.session_id AS id ${FROM} WHERE 1 = 1${w.sql}`).all(w.params) as Row[]) { // events whose session row is missing still count, as their own roots
+    if (!parents.has(r.id)) parents.set(r.id, null);
+    rootsSeed.push(r.id);
+  }
+
+  const rootOf = new Map<string, string>();
+  const root = (id: string): string => {
+    const cached = rootOf.get(id);
+    if (cached !== undefined) return cached;
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    let cur = id;
+    let res = '';
+    for (;;) {
+      const memo = rootOf.get(cur);
+      if (memo !== undefined) { res = memo; break; }
+      if (onPath.has(cur)) { res = cur; break; } // cycle: cut here, the re-entry point anchors the family
+      onPath.add(cur);
+      path.push(cur);
+      const parent = parents.get(cur);
+      if (parent == null || !parents.has(parent)) { res = cur; break; } // no parent row: this session is a root
+      cur = parent;
+    }
+    for (const p of path) rootOf.set(p, res);
+    return res;
+  };
+
+  const fams = new Map<string, { sessions: number; tokens: number; cost: number; priced: Set<string> }>();
+  for (const id of rootsSeed) {
+    const r = root(id);
+    let g = fams.get(r);
+    if (!g) { g = { sessions: 0, tokens: 0, cost: 0, priced: new Set() }; fams.set(r, g); }
+    g.sessions++;
+  }
+
+  const stats = db.prepare(`
+    SELECT e.session_id AS sessionId, e.model AS model, sum(e.input) AS input, sum(e.output) AS output,
+      sum(e.cache_read) AS cacheRead, sum(e.cache_write) AS cacheWrite, sum(e.cache_write_1h) AS cacheWrite1h,
+      sum(e.input + e.output + e.cache_read + e.cache_write) AS tokens
+    ${FROM} WHERE e.kind = 'assistant'${w.sql} GROUP BY e.session_id, e.model`).all(w.params) as Row[];
+  for (const s of stats) {
+    const r = root(s.sessionId);
+    const g = fams.get(r)!;
+    g.tokens += s.tokens ?? 0;
+    const c = costOf(s.model, {
+      input: s.input ?? 0, output: s.output ?? 0, cacheRead: s.cacheRead ?? 0,
+      cacheWrite: s.cacheWrite ?? 0, cacheWrite1h: s.cacheWrite1h ?? 0,
+    });
+    if (c != null) { g.cost += c; g.priced.add(s.sessionId); }
+  }
+
+  return [...fams.entries()].map(([rootId, g]): SessionFamily => ({
+    root: rootId, sessions: g.sessions, childSessions: g.sessions - 1, totalSessions: g.sessions,
+    tokens: g.tokens, cost: g.cost, pricedSessions: g.priced.size,
+  })).sort((a, b) => b.tokens - a.tokens || a.root.localeCompare(b.root));
 }
 
 export function sessionTimeline(db: DB, id: string) {
@@ -249,16 +430,16 @@ export function outcomeEfficiency(db: DB, f: Filter, gitReader?: typeof readGitN
     const effCommits = attrCommits > 0 ? attrCommits : commits.length;
     const effLines = attrLines > 0 ? attrLines : commits.reduce((acc, c) => acc + c.added + c.deleted, 0);
 
-    const tokensPerCommit = Math.round(p.tokens / Math.max(1, effCommits));
-    const tokensPerChangedLine = Math.round(p.tokens / Math.max(1, effLines));
+    const tokensPerCommit = effCommits > 0 ? Math.round(p.tokens / effCommits) : null;
+    const tokensPerChangedLine = effLines > 0 ? Math.round(p.tokens / effLines) : null;
 
     const byAgent = Array.from(byAgentMap.entries()).map(([agent, data]) => ({
       agent,
       tokens: data.tokens,
       commits: data.commits,
       linesChanged: data.lines,
-      tokensPerCommit: Math.round(data.tokens / Math.max(1, data.commits)),
-      tokensPerChangedLine: Math.round(data.tokens / Math.max(1, data.lines)),
+      tokensPerCommit: data.commits > 0 ? Math.round(data.tokens / data.commits) : null,
+      tokensPerChangedLine: data.lines > 0 ? Math.round(data.tokens / data.lines) : null,
     }));
 
     const dayMap = new Map<string, { commits: number; lines: number }>();

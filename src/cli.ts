@@ -5,16 +5,26 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { openDb, getRecommendations, updateRecommendationStatus } from './db.ts';
+import { parseArgs } from 'node:util';
+import { openDb, getRecommendations, setSetting, updateRecommendationStatus } from './db.ts';
+import { aiStatus } from './ai/gate.ts';
+import { explainAnomaly, prepareExplanation } from './ai/explain.ts';
+import { enrichRecommendations } from './ai/recommendations.ts';
+import { rewriteInstructions } from './ai/instruction-rewrite.ts';
+import { diagnoseSession, prepareDiagnosis, renderDiagnosisMarkdown, worstSessions } from './ai/diagnose.ts';
+import type { DiagnosisPreview } from './ai/diagnose.ts';
 import { ADAPTERS, ingest } from './ingest.ts';
 import { costOf } from './pricing.ts';
 import { projectName, projectRoot } from './project.ts';
 import { startServer } from './server.ts';
-import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary } from './summary.ts';
+import { sessionFamilies } from './queries.ts';
+import { drainQuotaSpool, formatStatusline, spoolQuota, writeSummary, type StatuslineFormat } from './summary.ts';
+import { startTui } from './tui.ts';
 import { runAudit } from './audit/runner.ts';
 import { checkWeeklyReportSchedule } from './report-scheduler.ts';
 import { generateWeeklyReport } from './report.ts';
 import { evaluateRecommendations } from './track.ts';
+import { getSavings, snapshotSavings } from './savings.ts';
 import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates } from './discover.ts';
 import { getPlatformPaths } from './paths.ts';
@@ -22,6 +32,10 @@ import { installService } from './service.ts';
 import { computeQuotaForecasts } from './quota-forecast.ts';
 import { checkLiveAlerts } from './alerts.ts';
 import { exportData } from './export.ts';
+import { formatOptimizeReport, optimizeWorkspace } from './optimize.ts';
+import { getOmarchyPluginStatus, installOmarchyPlugin, uninstallOmarchyPlugin } from './omarchy-plugin.ts';
+import { generateCheatsheet } from './cheatsheet.ts';
+import { subscriptionComparison } from './roi.ts';
 
 const env = process.env;
 const HOME = env.AGENTLENS_SOURCE_HOME ?? homedir();
@@ -38,13 +52,24 @@ const HELP = `Usage: agentlens <command>
   serve               ingest continuously and serve the dashboard on http://127.0.0.1:${PORT}
   ingest              one-shot ingest of new agent log data, then exit
   status              show terminal summary for current project or --project <path>
+  tui                 read-only terminal view of the summary cache (non-TTY prints once)
+  ai <action>         AI status, enable, disable, or preview <diagnose|session> <id>
+  recommend           show recommendations [--ai] [--preview] [--confirm <hash>]
+  explain anomaly     explain a detected spike <date> <project> [--agent <agent>] [--preview | --confirm <hash>] [--json]
+  diagnose            AI diagnosis of a session <id> or --worst <N> (--project, --json, --preview, --confirm <hash>)
+  optimize [path]     workspace hygiene or instruction rewrite (--ai, --preview, --confirm <hash>, --apply, --json)
+  cheatsheet [path]   architecture cheat-sheet from hot_files (--project <path>, --top <N>, --json)
   export              export sessions, daily totals, or findings (--format csv|json, --type, --from, --to, --project)
   audit               audit agent instructions, MCPs, skills, and plugins
   report              generate and display weekly usage report (--week, --html, --json)
   track               show improvement tracking for accepted recommendations
+  roi                 estimated Claude API/list-price comparison (--plan pro|max5x|max20x, --days <N>, --json)
+  families            informational session-family token attribution (--project <path>, --days <N>, --json)
+  savings             compare weekly project metrics (--project <path>, --weeks <N> [default 8], --json, --snapshot)
   accept <id>         accept a recommendation and begin 14-day improvement tracking
   catalog             browse curated AI tools, MCPs, and skills (--json, --rule <rule>)
   discover            opt-in discovery of AI agent tools from GitHub (--query, --dry-run, --json)
+  plugin [action]     manage Omarchy Quattro bar-widget plugin (install|status|uninstall, --enable, --dir <path>, --json)
   statusline          process Claude Code statusline stdin, spool quota, and print status
   install-statusline  show configuration instructions for Claude Code statusline
   install-service     install background service (systemd, launchd, or scheduled task) so serve starts at login
@@ -110,6 +135,157 @@ async function serve() {
 }
 
 const commands: Record<string, () => unknown> = {
+  ai: () => {
+    const action = process.argv[3]?.startsWith('--') ? 'status' : process.argv[3] ?? 'status';
+    if (action === 'preview') {
+      const kind = process.argv[4];
+      const id = process.argv[5];
+      if (!['diagnose', 'session'].includes(kind) || !id) {
+        console.error('Usage: agentlens ai preview <diagnose|session> <id>');
+        process.exitCode = 1;
+        return;
+      }
+      if (!existsSync(DB_PATH)) {
+        console.error('No database found');
+        process.exitCode = 1;
+        return;
+      }
+      const db = new DatabaseSync(DB_PATH, { readOnly: true });
+      try {
+        const prepared = prepareDiagnosis(db, id);
+        if (prepared.status === 'error') { console.error(`AI preview: ${prepared.message.toLowerCase()}`); process.exitCode = 1; return; }
+        console.log(JSON.stringify(prepared.preview, null, 2));
+      } catch {
+        console.error('AI preview failed: check session, settings, and supported provider');
+        process.exitCode = 1;
+      } finally {
+        db.close();
+      }
+      return;
+    }
+    if (!['status', 'enable', 'disable'].includes(action)) {
+      console.error('Usage: agentlens ai <status|enable|disable> [--json]');
+      process.exitCode = 1;
+      return;
+    }
+    const db = openDb(DB_PATH);
+    try {
+      if (action !== 'status') setSetting(db, 'ai_enabled', action === 'enable' ? 'true' : 'false');
+      const status = aiStatus(db);
+      if (process.argv.includes('--json')) console.log(JSON.stringify(status, null, 2));
+      else console.log(`AI: ${status.enabled ? 'enabled' : 'disabled'}\nAgent: ${status.agent ?? 'invalid'}\nModel: ${status.model ?? 'default'}\nCalls today: ${status.callsToday}/${status.maxCallsPerDay ?? 'invalid'}${status.error ? `\nStatus: ${status.error}` : ''}`);
+    } finally {
+      db.close();
+    }
+  },
+  recommend: async () => {
+    let values;
+    try { ({ values } = parseArgs({ args: process.argv.slice(3), options: { ai: { type: 'boolean' }, preview: { type: 'boolean' }, confirm: { type: 'string' } } })); }
+    catch { console.error('Usage: agentlens recommend [--ai] [--preview] [--confirm <hash>]'); process.exitCode = 1; return; }
+    if ((!values.ai && (values.preview || values.confirm)) || (values.preview && values.confirm) || (values.confirm && !/^[a-f0-9]{64}$/.test(values.confirm))) { console.error('Invalid recommendation AI options'); process.exitCode = 1; return; }
+    if (!existsSync(DB_PATH)) { console.error('No database found'); process.exitCode = 1; return; }
+    const db = values.preview ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(DB_PATH);
+    try {
+      const recs = getRecommendations(db);
+      if (!values.ai) { console.log(JSON.stringify(recs, null, 2)); return; }
+      const result = await enrichRecommendations(db, recs, { preview: values.preview, confirm: values.confirm });
+      console.log(JSON.stringify(result, null, 2));
+      if (result.status !== 'ok' && !values.preview) process.exitCode = 1;
+    } finally { db.close(); }
+  },
+  explain: async () => {
+    const usage = 'Usage: agentlens explain anomaly <YYYY-MM-DD> <project name or ID> [--agent <agent>] [--preview | --confirm <hash>] [--json]';
+    let parsed;
+    try { parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
+      agent: { type: 'string' }, preview: { type: 'boolean' }, confirm: { type: 'string' }, json: { type: 'boolean' },
+    } }); } catch { console.error(usage); process.exitCode = 1; return; }
+    const { values, positionals } = parsed;
+    if (positionals.length !== 3 || positionals[0] !== 'anomaly' || !positionals[2] || (values.agent !== undefined && !values.agent) ||
+      (values.preview && values.confirm) || (values.confirm !== undefined && !/^[a-f0-9]{64}$/.test(values.confirm))) {
+      console.error(usage); process.exitCode = 1; return;
+    }
+    if (!existsSync(DB_PATH)) { console.error('No database found'); process.exitCode = 1; return; }
+    const db = values.preview ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(DB_PATH);
+    try {
+      const [, date, project] = positionals;
+      const result = values.preview ? prepareExplanation(db, date, project, { agent: values.agent }) :
+        await explainAnomaly(db, date, project, { agent: values.agent, confirm: values.confirm });
+      if (result.status === 'error' || result.status === 'confirmation_required') process.exitCode = 1;
+      if (values.json) console.log(JSON.stringify(result, null, 2));
+      else if (result.status === 'error') console.error(`${result.code}: ${result.message}`);
+      else if (result.status === 'ok') console.log(`${result.explanation}\n\nAI interpretation of structured metadata; causes are unverified.${result.cached ? ' (cached)' : ''}`);
+      else {
+        const p = result.preview;
+        console.log(`Provider: ${p.agent}${p.model ? ` (${p.model})` : ''}\nCommand: ${p.bin} ${p.args.slice(0, -1).join(' ')} -- <prompt>\nConfirmation hash: ${p.confirmationHash}\n--- exact prompt sent ---\n${p.prompt}\n--- end prompt ---`);
+        if (result.status === 'confirmation_required') console.error('Confirmation required; review the prompt and rerun with --confirm HASH');
+      }
+    } catch { console.error('explain failed: check the anomaly and settings'); process.exitCode = 1; }
+    finally { db.close(); }
+  },
+  diagnose: async () => {
+    const usage = 'Usage: agentlens diagnose <session-id> | --worst <N> [--project <path>] [--json] [--preview] [--confirm <hash>]...';
+    const bad = (message: string) => { console.error(`${message}\n${usage}`); process.exitCode = 1; };
+    let parsed;
+    try {
+      parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
+        worst: { type: 'string' }, project: { type: 'string' }, json: { type: 'boolean' }, preview: { type: 'boolean' },
+        confirm: { type: 'string', multiple: true },
+      } });
+    } catch { return bad('Invalid option'); }
+    const { values, positionals } = parsed;
+    const confirms = values.confirm ?? [];
+    if (positionals.length > 1) return bad('Expected exactly one session id');
+    if (values.worst !== undefined && positionals.length) return bad('Use either a session id or --worst, not both');
+    if (values.worst === undefined && !positionals.length) return bad('Missing session id or --worst');
+    if (values.worst !== undefined && !/^[1-9]\d?$/.test(values.worst)) return bad('--worst must be an integer from 1 to 99');
+    if (values.project !== undefined && (values.worst === undefined || !values.project.trim())) return bad('--project requires --worst and a path');
+    if (values.preview && confirms.length) return bad('--preview cannot be combined with --confirm');
+    if (confirms.some(c => !/^[a-f0-9]{64}$/.test(c))) return bad('--confirm expects a 64-character preview hash');
+    if (!existsSync(DB_PATH)) { console.error('No database found'); process.exitCode = 1; return; }
+    const db = values.preview ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(DB_PATH);
+    try {
+      let ids = positionals;
+      if (values.worst !== undefined) {
+        let projectId: number | undefined;
+        if (values.project) {
+          const project = db.prepare('SELECT id FROM projects WHERE root = ?').get(projectRoot(resolve(values.project))) as { id: number } | undefined;
+          if (!project) { console.error(`Unknown project: ${values.project}`); process.exitCode = 1; return; }
+          projectId = project.id;
+        }
+        ids = worstSessions(db, Number(values.worst), projectId);
+        if (!ids.length) { console.log(values.json ? '[]' : 'No sessions with findings to diagnose.'); return; }
+      }
+      const showPreview = (p: DiagnosisPreview) => console.log(`Session ${p.sessionId}\nProvider: ${p.agent}${p.model ? ` (${p.model})` : ''}\nCommand: ${p.bin} ${p.args.slice(0, -1).join(' ')} -- <prompt>\nConfirmation hash: ${p.confirmationHash}\n--- exact prompt sent ---\n${p.prompt}\n--- end prompt ---\n`);
+      const results: Record<string, unknown>[] = [];
+      for (const id of ids) {
+        const prepared = prepareDiagnosis(db, id);
+        if (values.preview) {
+          if (prepared.status === 'error') {
+            process.exitCode = 1;
+            if (values.json) results.push({ sessionId: id, ...prepared });
+            else console.error(`diagnose ${id}: ${prepared.code}: ${prepared.message}`);
+          } else if (values.json) results.push({ ...prepared.preview });
+          else showPreview(prepared.preview);
+          continue;
+        }
+        const confirm = prepared.status === 'ready' && confirms.includes(prepared.preview.confirmationHash) ? prepared.preview.confirmationHash : undefined;
+        const result = await diagnoseSession(db, id, { confirm });
+        if (result.status !== 'ok') process.exitCode = 1;
+        if (values.json) results.push({ sessionId: id, ...result });
+        else if (result.status === 'ok') console.log(`## Session ${id}${result.cached ? ' (cached)' : ''}\n\n${renderDiagnosisMarkdown(result.diagnosis)}\n`);
+        else if (result.status === 'confirmation_required') {
+          showPreview(result.preview);
+          console.error(`diagnose ${id}: confirmation required; review the prompt above, then rerun with --confirm ${result.preview.confirmationHash}`);
+        } else console.error(`diagnose ${id}: ${result.code}: ${result.message}`);
+      }
+      if (values.json) console.log(JSON.stringify(values.worst === undefined ? results[0] : results, null, 2));
+    } catch {
+      console.error('diagnose failed: check session and settings');
+      process.exitCode = 1;
+    } finally {
+      db.close();
+    }
+  },
   serve,
   async ingest() {
     const db = openDb(DB_PATH);
@@ -120,13 +296,51 @@ const commands: Record<string, () => unknown> = {
       `${s.read}/${s.files} files read, ${s.events} events, ${s.errors} bad lines, ${s.skipped} oversized lines skipped`,
     );
   },
+  tui: () => {
+    const cleanup = startTui({
+      summaryPath: SUMMARY_PATH,
+      stdout: process.stdout,
+      intervalMs: 60_000,
+      setInterval,
+      clearInterval,
+    });
+    process.once('SIGINT', () => {
+      cleanup();
+      process.exit(0);
+    });
+  },
   statusline: async () => {
+    let format: StatuslineFormat = 'default';
+    const args = process.argv.slice(3);
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === '--format') {
+        const next = args[++i];
+        if (next === 'default' || next === 'starship' || next === 'raw') {
+          format = next;
+        } else {
+          console.error('Usage: agentlens statusline [--format default|starship|raw]');
+          process.exitCode = 1;
+          return;
+        }
+      } else if (arg.startsWith('--format=')) {
+        const val = arg.slice('--format='.length);
+        if (val === 'default' || val === 'starship' || val === 'raw') {
+          format = val;
+        } else {
+          console.error('Usage: agentlens statusline [--format default|starship|raw]');
+          process.exitCode = 1;
+          return;
+        }
+      }
+    }
+
     let input = '';
     for await (const chunk of process.stdin) {
       input += chunk;
     }
     spoolQuota(SPOOL_PATH, input);
-    const out = formatStatusline(SUMMARY_PATH, process.cwd());
+    const out = formatStatusline(SUMMARY_PATH, process.cwd(), format);
     process.stdout.write(out + '\n');
   },
   status: () => {
@@ -165,7 +379,7 @@ const commands: Record<string, () => unknown> = {
                     coalesce(sum(e.cache_write_1h), 0) AS cacheWrite1h
              FROM events e
              JOIN sessions s ON s.id = e.session_id
-             WHERE s.project_id = ? AND e.ts >= ?
+             WHERE e.kind = 'assistant' AND s.project_id = ? AND e.ts >= ?
              GROUP BY e.model`;
       const rows = db.prepare(sql).all(projId, fromTs) as {
         model: string | null;
@@ -295,6 +509,60 @@ const commands: Record<string, () => unknown> = {
     }
     console.log(`==================================================\n`);
   },
+  optimize: async () => {
+    if (process.argv.slice(3).includes('--ai')) {
+      try {
+        const { values, positionals } = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
+          ai: { type: 'boolean' }, preview: { type: 'boolean' }, confirm: { type: 'string' }, apply: { type: 'boolean' }, json: { type: 'boolean' },
+        } });
+        if (positionals.length > 1 || (values.preview && (values.confirm || values.apply)) || (values.confirm && !/^[a-f0-9]{64}$/.test(values.confirm))) throw Error('Invalid AI optimize options');
+        const db = openDb(DB_PATH);
+        try {
+          const result = await rewriteInstructions(db, positionals[0] ?? process.cwd(), { preview: values.preview, confirm: values.confirm, apply: values.apply });
+          if (values.json) console.log(JSON.stringify(result, null, 2));
+          else if (result.status === 'confirmation_required') console.log(`Confirmation hash: ${result.preview.confirmationHash}\nCommand: ${result.preview.bin} ${result.preview.args.slice(0, -1).join(' ')} <prompt>\n--- exact prompt sent ---\n${result.preview.prompt}\n--- end prompt ---`);
+          else if (result.status === 'error') console.error(result.message);
+          else { console.log(result.diff); if (result.status === 'rejected') console.error(`Rejected: ${result.reason}`); else console.log(result.applied ? 'Applied; original saved as .bak.' : 'Preview only; use --apply to write.'); }
+          if (result.status === 'error' || result.status === 'rejected' || (result.status === 'confirmation_required' && !values.preview)) process.exitCode = 1;
+        } finally { db.close(); }
+      } catch (error) { console.error(error instanceof Error ? error.message : 'Invalid AI optimize options'); process.exitCode = 1; }
+      return;
+    }
+    if (process.argv.slice(3).some(arg => arg === '--preview' || arg === '--confirm')) { console.error('AI preview and confirmation require --ai'); process.exitCode = 1; return; }
+    let projectArg: string | undefined;
+    let apply = false;
+    let isJson = false;
+    for (let i = 3; i < process.argv.length; i++) {
+      const arg = process.argv[i];
+      if (arg === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      } else if (arg === '--apply') {
+        apply = true;
+      } else if (arg === '--dry-run') {
+        apply = false;
+      } else if (arg === '--json') {
+        isJson = true;
+      } else if (!arg.startsWith('-') && !projectArg) {
+        projectArg = arg;
+      }
+    }
+    const targetPath = projectArg ?? process.cwd();
+    const db = openDb(DB_PATH);
+    try {
+      runAudit(db, HOME);
+    } catch {}
+    const res = optimizeWorkspace(db, {
+      projectRoot: targetPath,
+      home: HOME,
+      apply,
+    });
+    if (isJson) {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      console.log(formatOptimizeReport(res));
+    }
+  },
   report: () => {
     let weekArg: string | undefined;
     let isHtml = false;
@@ -318,6 +586,92 @@ const commands: Record<string, () => unknown> = {
     } else {
       console.log(rep.markdown);
     }
+  },
+  roi: () => {
+    const { values } = parseArgs({ args: process.argv.slice(3), options: {
+      plan: { type: 'string' }, days: { type: 'string' }, json: { type: 'boolean' },
+    } });
+    const days = values.days === undefined ? undefined : /^\d+$/.test(values.days) ? Number(values.days) : NaN;
+    const db = existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      const r = subscriptionComparison(db, { plan: values.plan, days });
+      if (values.json) console.log(JSON.stringify(r, null, 2));
+      else {
+        console.log(`${r.title} (${r.plan}, ${r.days} days; ${new Date(r.from).toISOString()} to ${new Date(r.to).toISOString()}, end exclusive)`);
+        console.log(`Observed in window: ${r.observedEvents} event${r.observedEvents === 1 ? '' : 's'} across ${r.observedSessions} session${r.observedSessions === 1 ? '' : 's'}`);
+        console.log(`First observed: ${r.firstObservedAt == null ? 'n/a' : new Date(r.firstObservedAt).toISOString()}; last observed: ${r.lastObservedAt == null ? 'n/a' : new Date(r.lastObservedAt).toISOString()}`);
+        console.log(`Estimated API cost: $${r.estimatedApiCostUsd.toFixed(2)} (priced tokens only; token prices as of ${r.tokenPricesAsOf})`);
+        console.log(`Token coverage: ${r.tokenCoverage == null ? 'n/a' : `${(r.tokenCoverage * 100).toFixed(1)}%`} (${r.unpricedTokens} unpriced of ${r.tokens} tokens)`);
+        console.log(`US monthly list price: $${r.monthlyPlanPriceUsd}; illustrative ${r.days}/30 reference: $${r.periodPlanPriceUsd.toFixed(2)} (plan prices as of ${r.planPricesAsOf}; ${r.planPriceSource})`);
+        console.log(`Estimated API/list-price ratio: ${r.estimatedRatio == null ? 'n/a' : r.estimatedRatio.toFixed(2)}`);
+        console.log(r.disclosure);
+      }
+    } finally { db.close(); }
+  },
+  families: () => {
+    const { values } = parseArgs({ args: process.argv.slice(3), options: {
+      project: { type: 'string' }, days: { type: 'string' }, json: { type: 'boolean' },
+    } });
+    const days = values.days === undefined ? undefined : /^\d+$/.test(values.days) ? Number(values.days) : NaN;
+    if (days != null && (!Number.isSafeInteger(days) || days < 1)) throw new Error('days must be a positive integer');
+    const db = existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      let projectId: number | undefined;
+      if (values.project) {
+        const project = db.prepare('SELECT id FROM projects WHERE root = ?').get(projectRoot(resolve(values.project))) as { id: number } | undefined;
+        if (!project) throw new Error(`Unknown project: ${values.project}`);
+        projectId = project.id;
+      }
+      // Informational attribution only: where tokens sit across parent-child session nesting, no savings claim.
+      const families = sessionFamilies(db, { projectId, from: days == null ? undefined : Date.now() - days * 86_400_000 });
+      if (values.json) { console.log(JSON.stringify({ families }, null, 2)); return; }
+      if (!families.length) { console.log('No sessions found.'); return; }
+      console.log('Session families (informational attribution by parent/child nesting; not a savings estimate):');
+      for (const f of families) {
+        console.log(`  ${f.root}: ${f.sessions} session${f.sessions === 1 ? '' : 's'} (${f.childSessions} descendant${f.childSessions === 1 ? '' : 's'}), ${f.tokens} tokens, est. cost $${f.cost.toFixed(4)} (${f.pricedSessions} of ${f.totalSessions} sessions priced)`);
+      }
+    } finally { db.close(); }
+  },
+  savings: () => {
+    const { values } = parseArgs({ args: process.argv.slice(3), options: {
+      project: { type: 'string' }, weeks: { type: 'string', default: '8' },
+      json: { type: 'boolean' }, snapshot: { type: 'boolean' },
+    } });
+    const weeks = Number(values.weeks);
+    if (!Number.isSafeInteger(weeks) || weeks < 1) throw new Error('weeks must be a positive integer');
+    if (values.project !== undefined && !values.project.trim()) throw new Error('project must not be empty');
+    const db = values.snapshot ? openDb(DB_PATH)
+      : existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      let projectId: number | undefined;
+      if (values.project) {
+        const project = db.prepare('SELECT id FROM projects WHERE root = ?').get(projectRoot(resolve(values.project))) as { id: number } | undefined;
+        if (!project) throw new Error(`Unknown project: ${values.project}`);
+        projectId = project.id;
+      }
+      const report = (values.snapshot ? snapshotSavings : getSavings)(db, { projectId, weeks });
+      if (values.json) {
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      if (!report.projects.length) console.log('No savings data.');
+      const label = (week: { weekStart: number; complete: boolean } | null) => week
+        ? `${new Date(week.weekStart).toLocaleDateString('sv')}${week.complete ? '' : ' (partial)'}` : 'n/a';
+      for (const project of report.projects) {
+        console.log(`\n${project.name} (${project.root})`);
+        console.log(`  Baseline: ${label(project.baseline)}${project.baselineSource ? ` [${project.baselineSource}]` : ''}`);
+        console.log(`  Latest: ${label(project.latest)}`);
+        for (const [key, title] of [
+          ['tokensPerSession', 'Tokens/session'], ['tokensPerTurn', 'Tokens/turn'],
+          ['nonCacheInputShare', 'Non-cache input share'], ['cacheReadRatio', 'Cache-read ratio'], ['sessions', 'Sessions'],
+        ] as const) {
+          const before = project.baseline?.[key];
+          const after = project.latest?.[key];
+          const delta = project.changePct?.[key];
+          console.log(`  ${title}: ${before ?? 'n/a'} -> ${after ?? 'n/a'} (${delta == null ? 'n/a' : `${delta > 0 ? '+' : ''}${delta}%`})`);
+        }
+      }
+    } finally { db.close(); }
   },
   track: () => {
     let projectArg: string | undefined;
@@ -355,8 +709,11 @@ const commands: Record<string, () => unknown> = {
       console.log(`  Rule: ${r.findingRule} | Action: ${r.action}`);
       if (res) {
         const delta = res.deltaPct > 0 ? `+${res.deltaPct}%` : `${res.deltaPct}%`;
+        const fmt = (v: number | null | undefined) => v == null ? 'n/a' : v.toLocaleString('en-US');
         console.log(`  Target Metric: ${res.metricName}`);
         console.log(`  Baseline -> Current: ${res.baselineVal} -> ${res.currentVal} (${delta})`);
+        console.log(`  Tokens/session (incl. cache writes): ${fmt(res.tokensPerSessionBefore)} -> ${fmt(res.tokensPerSessionAfter)}`);
+        console.log(`  Tokens per 1k output: ${fmt(res.tokensPer1kOutputBefore)} -> ${fmt(res.tokensPer1kOutputAfter)}`);
         console.log(`  Samples: ${res.sampleBefore} sessions before, ${res.sampleAfter} sessions after`);
         console.log(`  Guardrails: ${res.guardrails?.passed ? 'PASSED' : 'REGRESSED'} | Verdict: ${res.verdict}`);
       } else {
@@ -531,6 +888,92 @@ const commands: Record<string, () => unknown> = {
     });
 
     process.stdout.write(output + (output.endsWith('\n') ? '' : '\n'));
+  },
+  plugin() {
+    let action: 'install' | 'status' | 'uninstall' = 'status';
+    let enable = false;
+    let jsonFlag = false;
+    let targetDir: string | undefined;
+
+    for (let i = 3; i < process.argv.length; i++) {
+      const arg = process.argv[i];
+      if (arg === 'install' || arg === 'status' || arg === 'uninstall') {
+        action = arg;
+      } else if (arg === '--enable') {
+        enable = true;
+      } else if (arg === '--json') {
+        jsonFlag = true;
+      } else if (arg === '--dir' && process.argv[i + 1]) {
+        targetDir = resolve(process.argv[i + 1]);
+        i++;
+      }
+    }
+
+    if (action === 'install') {
+      const res = installOmarchyPlugin({ targetDir, enable });
+      if (jsonFlag) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(`✓ Installed ${res.pluginId} to ${res.installedDir}`);
+        if (res.validationOutput) {
+          console.log(`  Validation: ${res.validationOutput}`);
+        }
+        console.log(`  Enabled in Omarchy bar: ${res.enabled ? 'yes' : 'no (run with --enable or `omarchy plugin enable agentlens.bar-widget`)'}`);
+      }
+    } else if (action === 'uninstall') {
+      const res = uninstallOmarchyPlugin({ targetDir });
+      if (jsonFlag) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(res.removed ? `✓ Uninstalled plugin from ${res.installedDir}` : `Plugin not installed at ${res.installedDir}`);
+      }
+    } else {
+      const res = getOmarchyPluginStatus({ targetDir });
+      if (jsonFlag) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(`Plugin: ${res.pluginId}`);
+        console.log(`Installed: ${res.installed ? `yes (${res.installedDir})` : 'no'}`);
+        console.log(`Manifest valid: ${res.manifestValid ? 'yes' : 'no'}`);
+        console.log(`Enabled in shell.json: ${res.enabledInShellConfig ? 'yes' : 'no'}`);
+      }
+    }
+  },
+  cheatsheet: () => {
+    let projectArg: string | undefined;
+    let topArg: number | undefined;
+    let isJson = false;
+
+    for (let i = 3; i < process.argv.length; i++) {
+      const arg = process.argv[i];
+      if (arg === '--project' && process.argv[i + 1]) {
+        projectArg = process.argv[i + 1];
+        i++;
+      } else if (arg.startsWith('--project=')) {
+        projectArg = arg.slice('--project='.length);
+      } else if (arg === '--top' && process.argv[i + 1]) {
+        topArg = Number(process.argv[i + 1]);
+        i++;
+      } else if (arg.startsWith('--top=')) {
+        topArg = Number(arg.slice('--top='.length));
+      } else if (arg === '--json') {
+        isJson = true;
+      } else if (!arg.startsWith('-') && !projectArg) {
+        projectArg = arg;
+      }
+    }
+
+    const db = existsSync(DB_PATH) ? new DatabaseSync(DB_PATH, { readOnly: true }) : openDb(':memory:');
+    try {
+      const res = generateCheatsheet(db, { projectRoot: projectArg, top: topArg });
+      if (isJson) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(res.markdown);
+      }
+    } finally {
+      db.close();
+    }
   },
   help: () => console.log(HELP),
 };

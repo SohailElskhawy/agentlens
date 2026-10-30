@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
-import { openDb, upsertProject, upsertSessions, upsertEvents } from '../src/db.ts';
+import { openDb, upsertProject, upsertSessions, upsertEvents, getFindings } from '../src/db.ts';
+import { runDetectors } from '../src/analyze/runner.ts';
 import { detectOutcomeEfficiency } from '../src/analyze/outcome_efficiency.ts';
 import { detectAbandonedSessions } from '../src/analyze/abandoned_session.ts';
 import { detectCompactionChurn } from '../src/analyze/compaction_churn.ts';
@@ -121,6 +122,56 @@ test('detectAbandonedSessions deduplicates gitReader calls across multiple sessi
   assert.equal(findings.length, 3);
   // Despite 3 candidate sessions, mockReader should be called only ONCE for the shared root
   assert.equal(calls, 1);
+});
+
+test('detectAbandonedSessions keeps lifetime identification but estimates only trailing-week tokens', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/work/span-repo', 'span-repo');
+  const now = 1_793_000_000_000;
+  const WEEK = 7 * 86_400_000;
+  upsertSessions(db, [{ id: 's_span', agent: 'claude', projectId: projId, cwd: '/work/span-repo' }]);
+  upsertEvents(db, [
+    // 100k lifetime tokens 30 days old
+    { id: 'old1', agent: 'claude', sessionId: 's_span', ts: now - 30 * WEEK, kind: 'assistant', model: 'claude-3-5-sonnet-20241022', input: 60_000, output: 40_000, cacheRead: 0, cacheWrite: 0 },
+    // 60k tokens inside the trailing week
+    { id: 'cur1', agent: 'claude', sessionId: 's_span', ts: now - 1000, kind: 'assistant', model: 'claude-3-5-sonnet-20241022', input: 20_000, output: 40_000, cacheRead: 0, cacheWrite: 0 },
+  ]);
+
+  const findings = detectAbandonedSessions(db, { gitReader: () => [], now });
+  assert.equal(findings.length, 1);
+  const f = findings[0];
+  assert.equal(f.id, 'abandoned_session:s_span');
+  assert.equal(f.evidence.tokens, 160_000, 'lifetime evidence kept');
+  assert.equal(f.confidence, 'high', 'lifetime-based confidence kept');
+  assert.equal(f.estTokensWeek, 60_000, 'weekly estimate counts only trailing-week tokens');
+
+  // Runner path agrees and persists the calibrated estimate
+  const run = runDetectors(db, { now, gitReader: () => [] });
+  assert.equal(run.find((x) => x.id === 'abandoned_session:s_span')?.estTokensWeek, 60_000);
+  assert.equal(getFindings(db).find((x) => x.id === 'abandoned_session:s_span')?.estTokensWeek, 60_000);
+});
+
+test('abandoned session with only old activity is kept at zero estimate; future tokens do not contribute', () => {
+  const db = openDb(':memory:');
+  const projId = upsertProject(db, '/work/old-repo', 'old-repo');
+  const now = 1_793_000_000_000;
+  const WEEK = 7 * 86_400_000;
+  upsertSessions(db, [
+    { id: 's_old', agent: 'claude', projectId: projId, cwd: '/work/old-repo' },
+    { id: 's_future', agent: 'claude', projectId: projId, cwd: '/work/old-repo' },
+  ]);
+  upsertEvents(db, [
+    { id: 'oldA', agent: 'claude', sessionId: 's_old', ts: now - 30 * WEEK, kind: 'assistant', model: 'claude-3-5-sonnet-20241022', input: 70_000, output: 0, cacheRead: 0, cacheWrite: 0 },
+    { id: 'futA', agent: 'claude', sessionId: 's_future', ts: now + WEEK, kind: 'assistant', model: 'claude-3-5-sonnet-20241022', input: 10_000, output: 0, cacheRead: 0, cacheWrite: 0 },
+    { id: 'futB', agent: 'claude', sessionId: 's_future', ts: now + WEEK + 1, kind: 'assistant', model: 'claude-3-5-sonnet-20241022', input: 60_000, output: 0, cacheRead: 0, cacheWrite: 0 },
+  ]);
+
+  const findings = detectAbandonedSessions(db, { gitReader: () => [], now });
+  const byId = new Map(findings.map((f) => [f.id, f]));
+  assert.equal(byId.get('abandoned_session:s_old')?.estTokensWeek, 0, 'old finding still exists with a zero weekly estimate');
+  assert.equal(byId.get('abandoned_session:s_old')?.evidence.tokens, 70_000);
+  assert.equal(byId.get('abandoned_session:s_future')?.estTokensWeek, 0, 'future tokens are outside the trailing week');
+  assert.equal(byId.get('abandoned_session:s_future')?.evidence.tokens, 70_000, 'lifetime evidence includes future tokens');
 });
 
 test('readGitNumstat returns empty array fast on non-existent or non-git directory', async () => {

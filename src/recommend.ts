@@ -1,3 +1,5 @@
+import { getFindings, upsertRecommendations, type DB } from './db.ts';
+import { excludeTempFindings, tempProjectIds } from './temp-project.ts';
 import { CONFIDENCE_WEIGHTS } from './analyze/constants.ts';
 import { findCatalogItemsForRule } from './catalog.ts';
 import type { ActionType, Finding, Recommendation } from './types.ts';
@@ -123,18 +125,29 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
         body = `${f.evidence?.kind ?? 'Config'} '${f.evidence?.name}' is defined in ${f.evidence?.sources?.length ?? 'multiple'} locations. Maintain a single canonical definition to prevent conflicts.`;
         break;
 
+      case 'instruction_drift':
+        action = 'improve';
+        title = 'Update stale instruction references';
+        body = `Review the missing scripts and paths in ${f.evidence?.projectName ?? 'project'} instructions: ${(f.evidence?.references ?? []).map((r: { kind: string; reference: string; source: string }) => `${r.source}: ${r.kind === 'script' ? 'npm run ' : ''}${r.reference}`).join(', ')}. Update the instructions or restore the targets.`;
+        actionSnippet = 'Review the referenced scripts and paths';
+        break;
+
       case 'config_conflict':
         action = 'improve';
         title = 'Resolve conflicting instruction commands';
         body = `Instructions in ${f.evidence?.projectName ?? 'project'} specify conflicting package managers (${f.evidence?.managers?.join(', ')}). Standardize on a single package manager.`;
         break;
 
-      case 'outcome_efficiency':
+      case 'outcome_efficiency': {
         action = 'improve';
         title = 'Improve outcome efficiency with focused task scoping';
-        body = `Project consumed ${f.evidence?.tokensPerCommit?.toLocaleString() ?? 'elevated'} tokens per commit (${f.evidence?.tokensPerChangedLine ?? 'many'} tokens/changed line). Break tasks into atomic milestones to raise commit frequency and reduce wasted turns.`;
+        const lineClause = f.evidence?.tokensPerChangedLine != null
+          ? ` (${Number(f.evidence.tokensPerChangedLine).toLocaleString()} tokens/changed line)`
+          : '';
+        body = `Project consumed ${f.evidence?.tokensPerCommit?.toLocaleString() ?? 'elevated'} tokens per commit${lineClause}. Break tasks into atomic milestones to raise commit frequency and reduce wasted turns.`;
         actionSnippet = 'git commit -m "feat: atomic milestone"';
         break;
+      }
 
       case 'abandoned_session':
         action = 'improve';
@@ -198,4 +211,16 @@ export function generateRecommendations(findings: Finding[]): Recommendation[] {
       a.id.localeCompare(b.id)
   );
   return recs;
+}
+
+export function refreshRecommendations(db: DB): void {
+  const ids = tempProjectIds(db);
+  const remove = db.prepare("DELETE FROM recommendations WHERE project_id = ? AND status = 'open' AND accepted_at IS NULL");
+  for (const id of ids) remove.run(id);
+  const all = getFindings(db);
+  const eligible = excludeTempFindings(db, all);
+  const eligibleIds = new Set(eligible.map((f) => f.id));
+  const removeFinding = db.prepare("DELETE FROM recommendations WHERE id = ? AND status = 'open' AND accepted_at IS NULL");
+  for (const f of all) if (!eligibleIds.has(f.id)) removeFinding.run(`rec:${f.rule}:${f.projectId ?? 'global'}:${f.id}`);
+  upsertRecommendations(db, generateRecommendations(eligible));
 }

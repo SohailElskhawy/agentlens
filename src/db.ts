@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS cursors (
   path TEXT PRIMARY KEY, agent TEXT NOT NULL, byte_offset INTEGER NOT NULL, state TEXT NOT NULL DEFAULT '{}',
   errors INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, root TEXT UNIQUE NOT NULL, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ignored_analyst_sessions (id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY, agent TEXT NOT NULL, project_id INTEGER REFERENCES projects(id), cwd TEXT, parent_id TEXT);
 CREATE TABLE IF NOT EXISTS events (
@@ -44,6 +45,13 @@ CREATE INDEX IF NOT EXISTS audit_project ON audit_items(project_id);
 CREATE INDEX IF NOT EXISTS audit_kind ON audit_items(kind);
 CREATE INDEX IF NOT EXISTS audit_status ON audit_items(status);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ai_calls (
+  id INTEGER PRIMARY KEY, kind TEXT NOT NULL, agent TEXT NOT NULL, created_at INTEGER NOT NULL,
+  input_hash TEXT NOT NULL, ok INTEGER, duration_ms INTEGER);
+CREATE INDEX IF NOT EXISTS ai_calls_created_at ON ai_calls(created_at);
+CREATE TABLE IF NOT EXISTS ai_notes (
+  kind TEXT NOT NULL, input_hash TEXT NOT NULL, agent TEXT NOT NULL, model TEXT NOT NULL,
+  created_at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (kind, input_hash, agent, model));
 `;
 
 export function openDb(path: string): DB {
@@ -129,7 +137,7 @@ export function upsertFindings(db: DB, findings: Finding[]): void {
       evidence = excluded.evidence,
       confidence = excluded.confidence,
       confidence_reason = excluded.confidence_reason,
-      est_tokens_week = max(findings.est_tokens_week, excluded.est_tokens_week),
+      est_tokens_week = excluded.est_tokens_week,
       last_seen = excluded.last_seen
   `);
   for (const f of findings) {

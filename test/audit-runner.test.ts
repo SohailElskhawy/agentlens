@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDb, upsertProject, upsertEvents, getAuditItems, getFindings, getRecommendations } from '../src/db.ts';
+import { openDb, upsertProject, upsertSessions, upsertEvents, upsertFindings, getAuditItems, getFindings, getRecommendations, updateRecommendationStatus } from '../src/db.ts';
 import { runAudit } from '../src/audit/runner.ts';
+import { CONFIDENCE_WEIGHTS } from '../src/analyze/constants.ts';
 import type { NormalizedEvent } from '../src/types.ts';
 
 test('runAudit calculates overhead, unused configs, duplicates, and conflicts', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'agentlens-audit-runner-'));
+  const tmp = mkdtempSync(join(process.cwd(), '.agentlens-audit-runner-'));
 
   try {
     const home = join(tmp, 'home');
@@ -19,6 +19,8 @@ test('runAudit calculates overhead, unused configs, duplicates, and conflicts', 
 
     const db = openDb(':memory:');
     const projId = upsertProject(db, work, 'conflicted-project');
+    // Session with trailing-week activity gives the project a calibration budget of 150 (100 + 50)
+    upsertSessions(db, [{ id: 's1', agent: 'claude', projectId: projId }]);
 
     // 1. Heavy instructions (> 4,000 tokens) to trigger instruction_bloat
     const heavyClaudeMd = '# Heavy Instructions\n' + 'A'.repeat(20_000); // 5,000 tokens
@@ -57,6 +59,20 @@ test('runAudit calculates overhead, unused configs, duplicates, and conflicts', 
     };
     upsertEvents(db, [event]);
 
+    // Stale detector finding with an inflated estimate: must be capped by calibration, never deleted
+    upsertFindings(db, [{
+      id: 'retry_loop:stale',
+      rule: 'retry_loop',
+      projectId: null,
+      sessionId: 's1',
+      evidence: { tool: 'Bash', count: 4, argsHash: 'stale' },
+      confidence: 'high',
+      confidenceReason: 'stale seed',
+      estTokensWeek: 999_999,
+      firstSeen: now - 86_400_000,
+      lastSeen: now - 86_400_000,
+    }]);
+
     // Run audit
     const result = runAudit(db, home);
     assert.ok(result.items.length >= 4);
@@ -81,11 +97,17 @@ test('runAudit calculates overhead, unused configs, duplicates, and conflicts', 
     assert.equal(dupSkills.length, 2);
     assert.ok(dupSkills.some((s) => s.status === 'duplicate'));
 
-    // Check findings emitted
+    // Check findings emitted. instruction_bloat (project-scoped, raw estimate ~5000) is calibrated
+    // down to the project's trailing-week tokens: session s1 = 100 input + 50 output = 150.
     const findings = getFindings(db);
     const bloatFinding = findings.find((f) => f.rule === 'instruction_bloat');
     assert.ok(bloatFinding, 'Should emit instruction_bloat finding');
-    assert.ok(bloatFinding?.estTokensWeek > 0);
+    assert.equal(bloatFinding?.estTokensWeek, 150, 'calibrated to the project trailing-week budget');
+
+    // Stale finding survives with a capped (not maximal) estimate
+    const staleFinding = findings.find((f) => f.id === 'retry_loop:stale');
+    assert.ok(staleFinding, 'stale finding remains after audit calibration');
+    assert.equal(staleFinding?.estTokensWeek, 150, 'capped to its session trailing-week tokens');
 
     const unusedFinding = findings.find((f) => f.rule === 'unused_config' && f.evidence?.name === 'stale_server');
     assert.ok(unusedFinding, 'Should emit unused_config for stale_server');
@@ -103,6 +125,23 @@ test('runAudit calculates overhead, unused configs, duplicates, and conflicts', 
     assert.ok(staleRec);
     assert.equal(staleRec?.action, 'remove');
     assert.equal(staleRec?.actionSnippet, 'claude mcp remove stale_server');
+    assert.equal(staleRec?.score, Math.round((unusedFinding?.estTokensWeek ?? 0) * CONFIDENCE_WEIGHTS[unusedFinding!.confidence]),
+      'audit path recomputes recommendation scores from calibrated estimates');
+
+    const retryRec = recs.find((r) => r.id.includes('retry_loop:stale'));
+    assert.ok(retryRec);
+    updateRecommendationStatus(db, retryRec.id, 'accepted');
+    db.prepare('UPDATE recommendations SET result = ? WHERE id = ?').run(JSON.stringify({ note: 'saved' }), retryRec.id);
+    db.prepare('UPDATE findings SET est_tokens_week = 999999 WHERE id = ?').run('retry_loop:stale');
+    const second = runAudit(db, home);
+    const refreshed = getRecommendations(db).find((r) => r.id === retryRec.id);
+    assert.ok(refreshed);
+    assert.equal(refreshed.status, 'accepted');
+    assert.ok(refreshed.acceptedAt);
+    assert.deepEqual(refreshed.result, { note: 'saved' });
+    assert.equal(refreshed.score, Math.round(150 * CONFIDENCE_WEIGHTS.high));
+    assert.equal(getFindings(db).find((f) => f.id === 'retry_loop:stale')?.confidence, 'high');
+    for (const f of second.findings) assert.equal(getFindings(db).find((stored) => stored.id === f.id)?.estTokensWeek, f.estTokensWeek);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

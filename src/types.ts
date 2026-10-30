@@ -1,4 +1,4 @@
-export type Agent = 'claude' | 'codex' | 'opencode' | 'antigravity' | 'gemini' | 'aider' | 'cursor';
+export type Agent = 'claude' | 'codex' | 'opencode' | 'antigravity' | 'gemini' | 'aider' | 'cursor' | 'cline';
 export type EventKind = 'user' | 'assistant' | 'tool_call' | 'tool_result';
 
 export interface NormalizedEvent {
@@ -78,6 +78,8 @@ export interface Recommendation {
   title: string;
   body: string;
   actionSnippet?: string;
+  aiBody?: string;
+  aiActionSnippet?: string;
   catalogRef?: string;
   status: RecommendationStatus;
   acceptedAt?: number;

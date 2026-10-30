@@ -29,3 +29,15 @@ export const cUser = (o: { uuid: string; content: unknown; session?: string; cwd
   type: 'user', uuid: o.uuid, sessionId: o.session ?? 's1', cwd: o.cwd ?? '/tmp/agentlens-proj',
   timestamp: o.ts ?? '2026-10-15T10:00:01.000Z', isSidechain: false, message: { role: 'user', content: o.content },
 });
+
+export const capabilityHelp = `Usage: claude [options]
+Options:
+  -p, --print                           Print response and exit
+  --output-format <format>              Output format
+  --no-session-persistence              Disable session persistence
+  --safe-mode                           Disable customizations
+  --restricted                          Restricted mode
+  --strict-mcp-config                   Ignore other MCP configurations
+  --disable-slash-commands              Disable skills and commands
+  --tools <tools...>                    Specify available tools
+`;

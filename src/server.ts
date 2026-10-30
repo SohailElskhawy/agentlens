@@ -1,4 +1,4 @@
-import { createServer, type Server, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { homedir } from 'node:os';
@@ -12,9 +12,18 @@ import { getCuratedCatalog } from './catalog.ts';
 import { discoverGitHubCandidates, loadDiscoveredCandidates } from './discover.ts';
 import { getPlatformPaths } from './paths.ts';
 import { generateFixPrompt } from './fix-prompts.ts';
+import { tailorFixPrompt } from './ai/fix-prompt.ts';
 import { runFix } from './fix-runner.ts';
 import { exportData, generatePrometheusMetrics } from './export.ts';
+import { aiStatus, validAiSetting } from './ai/gate.ts';
+import { diagnoseSession } from './ai/diagnose.ts';
+import { cachedRecommendations, enrichRecommendations } from './ai/recommendations.ts';
+import type { DiagnosisErrorCode, DiagnosisRunner } from './ai/diagnose.ts';
+import { detectAnomalies } from './anomaly.ts';
+import { explainAnomaly } from './ai/explain.ts';
 import * as q from './queries.ts';
+import { subscriptionComparison } from './roi.ts';
+import { optimizeCliCommand, optimizeWorkspace } from './optimize.ts';
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url));
 const TYPES: Record<string, string> = {
@@ -36,10 +45,77 @@ function send(res: ServerResponse, status: number, type: string, body: string | 
   res.end(body);
 }
 
-export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<Server> {
+const MAX_BODY_BYTES = 16384;
+
+// Single guarded error response for route body callbacks: sync throws and async
+// rejections both land here, and nothing is sent after the response ended or the
+// client died (double-send or writing to a dead socket would crash the server).
+export function failBody(res: ServerResponse, e: unknown) {
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    send(res, 500, 'application/json', JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+  } catch {}
+}
+
+// Shared bounded request-body reader for every POST route. Counts bytes before
+// decoding (the cap is UTF-8 bytes, not UTF-16 units), collects only chunks that
+// fit, decodes once at the end so split multi-byte chars survive, responds 413 at
+// most once and drains the request so the client still reads the response.
+// onEnd never runs for oversized, aborted or errored requests; buffers are
+// released and "error" events are handled so a disconnect cannot crash the server.
+function readBody(req: IncomingMessage, res: ServerResponse, onEnd: (body: string) => void) {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  let settled = false;
+  const settle = () => { settled = true; chunks.length = 0; };
+  req.on('data', (c: Buffer) => {
+    if (settled) return;
+    size += c.length;
+    if (size > MAX_BODY_BYTES) {
+      settle();
+      req.resume(); // drain the rest so the client can read our single 413
+      return send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
+    }
+    chunks.push(c);
+  });
+  req.on('end', () => {
+    if (settled) return;
+    const body = Buffer.concat(chunks).toString('utf8');
+    settle();
+    try {
+      const out = onEnd(body) as unknown;
+      if (out instanceof Promise) out.catch((e) => failBody(res, e)); // async routes reject instead of throw
+    } catch (e) {
+      failBody(res, e);
+    }
+  });
+  req.on('error', () => settle()); // client aborted/destroyed mid-body: let go, keep buffers claimed
+  req.on('aborted', () => settle());
+  req.on('close', () => settle());
+  res.on('error', () => settle()); // socket died before we could write; nothing to send
+}
+
+const AI_ERROR_STATUS: Record<DiagnosisErrorCode, number> = {
+  AI_DISABLED: 403, AI_INVALID_SETTINGS: 403, AI_DAILY_LIMIT: 429, UNKNOWN_SESSION: 404,
+  AI_PROVIDER_UNSUPPORTED: 422, AI_RUN_FAILED: 502, AI_INVALID_OUTPUT: 502,
+};
+
+// aiRunner is a test seam: tests inject a fake so no agent CLI is ever spawned.
+export function startServer(
+  db: DB,
+  port: number,
+  hostOrOpts: string | { aiRunner?: DiagnosisRunner } = '127.0.0.1',
+  maybeOpts: { aiRunner?: DiagnosisRunner } = {},
+): Promise<Server> {
+  const host = typeof hostOrOpts === 'string' ? hostOrOpts : '127.0.0.1';
+  const opts = typeof hostOrOpts === 'string' ? maybeOpts : hostOrOpts;
   const api: Record<string, (f: Filter, sp: URLSearchParams) => unknown> = {
     '/api/summary': (f) => q.summary(db, f),
     '/api/daily': (f) => q.daily(db, f),
+    '/api/anomalies': (f) => detectAnomalies(db, f),
+    '/api/analytics/tool-failures': (f) => q.toolFailures(db, f),
+    '/api/analytics/model-efficiency': (f) => q.modelEfficiency(db, f),
+    '/api/analytics/families': (f) => ({ families: q.sessionFamilies(db, f) }),
     '/api/projects': (f) => q.projects(db, f),
     '/api/models': (f) => q.models(db, f),
     '/api/sessions': (f, sp) => q.sessions(db, f, Math.min(Math.max(num(sp, 'limit') ?? 200, 1), 1000)),
@@ -57,7 +133,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
     '/api/recommendations': (f, sp) => {
       const status = sp.get('status') || undefined;
       const recs = getRecommendations(db, { projectId: f.projectId, status });
-      return { recommendations: recs };
+      return { recommendations: sp.get('ai') === '1' ? cachedRecommendations(db, recs) : recs };
     },
     '/api/audit': (f, sp) => {
       const kind = (sp.get('kind') || undefined) as AuditKind | undefined;
@@ -127,11 +203,20 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
     '/api/catalog': () => ({ catalog: getCuratedCatalog() }),
     '/api/candidates': () => ({ candidates: loadDiscoveredCandidates(process.env.AGENTLENS_SOURCE_HOME || homedir()) }),
     '/api/settings': () => ({ settings: getAllSettings(db) }),
+    '/api/ai/status': () => aiStatus(db),
   };
 
   const server = createServer((req, res) => {
     // Bound to loopback, but a malicious page could still reach it via DNS rebinding; the Host check stops that.
     if (!LOCAL_HOST.test(req.headers.host ?? '')) return send(res, 403, 'text/plain', 'forbidden host');
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method ?? '') && req.headers.origin !== undefined) {
+      let origin = '';
+      try { origin = new URL(`http://${req.headers.host}`).origin; } catch {}
+      if (!origin || req.headers.origin !== origin) {
+        req.resume();
+        return send(res, 403, 'text/plain', 'forbidden origin');
+      }
+    }
     let url: URL;
     try {
       url = new URL(req.url ?? '/', 'http://localhost');
@@ -139,6 +224,16 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       return send(res, 400, 'text/plain', 'bad request'); // e.g. `GET //` is an invalid URL; must not escape the listener
     }
     try {
+      if (url.pathname === '/api/optimize') {
+        if (req.method !== 'GET') return send(res, 404, 'application/json', JSON.stringify({ error: 'not found' }));
+        const projectId = num(url.searchParams, 'project');
+        if (projectId == null || projectId <= 0) return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid project' }));
+        const project = db.prepare('SELECT id, root FROM projects WHERE id = ?').get(projectId) as { id: number; root: string } | undefined;
+        if (!project) return send(res, 404, 'application/json', JSON.stringify({ error: 'project not found' }));
+        const result = optimizeWorkspace(db, { projectId: project.id, apply: false });
+        const cli = optimizeCliCommand(project.root, process.platform);
+        return send(res, 200, 'application/json', JSON.stringify({ ...result, cliCommand: cli?.command ?? null, cliShell: cli?.shell ?? null }));
+      }
       if (req.method === 'GET' && url.pathname === '/api/export.csv') {
         const type = (url.searchParams.get('type') || 'sessions') as 'sessions' | 'daily' | 'findings';
         const from = num(url.searchParams, 'from');
@@ -178,19 +273,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
           return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid id encoding' }));
         }
 
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           try {
             const json = JSON.parse(body);
             const VALID_STATUSES = new Set(['open', 'accepted', 'measuring', 'verified', 'no_effect', 'regressed', 'dismissed']);
@@ -227,19 +310,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       }
 
       if (req.method === 'POST' && url.pathname === '/api/reports/generate') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           let week: string | undefined;
           try {
             if (body.trim()) {
@@ -264,19 +335,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       }
 
       if (req.method === 'POST' && url.pathname === '/api/discover') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', async () => {
-          if (tooLarge) return;
+        readBody(req, res, async (body) => {
           let opts: any = {};
           try {
             if (body.trim()) opts = JSON.parse(body);
@@ -303,21 +362,13 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       }
 
       if (req.method === 'POST' && url.pathname === '/api/settings') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           try {
             const json = JSON.parse(body || '{}');
+            if (typeof json.key === 'string' && json.key.startsWith('ai_')
+              && (typeof json.value !== 'string' || !validAiSetting(json.key, json.value))) {
+              return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid AI setting' }));
+            }
             if (json.key && typeof json.value === 'string') {
               setSetting(db, json.key, json.value);
             } else if (typeof json.allowAgentLaunch === 'boolean') {
@@ -331,22 +382,74 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
         return;
       }
 
-      if (req.method === 'POST' && url.pathname === '/api/fix/prompt') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
+      if (req.method === 'POST' && url.pathname === '/api/ai/recommendations') {
+        readBody(req, res, async (body) => {
+          const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
+          let input: any;
+          try { input = JSON.parse(body || '{}'); } catch { return json(400, { error: 'invalid payload' }); }
+          if (!input || typeof input !== 'object' || Array.isArray(input) || (input.confirm !== undefined && (typeof input.confirm !== 'string' || !/^[a-f0-9]{64}$/.test(input.confirm))) || (input.preview !== undefined && typeof input.preview !== 'boolean') || (input.preview && input.confirm)) return json(400, { error: 'invalid payload' });
+          const result = await enrichRecommendations(db, getRecommendations(db), { confirm: input.confirm, preview: input.preview, runner: opts.aiRunner });
+          const status = result.status === 'error' ? AI_ERROR_STATUS[result.code] ?? 502 : 200;
+          json(status, result);
         });
-        req.on('end', () => {
-          if (tooLarge) return;
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/ai/explain') {
+        readBody(req, res, async (body) => {
+          const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
+          let input: any;
+          try { input = JSON.parse(body); } catch { return json(400, { error: 'invalid payload' }); }
+          if (!input || Array.isArray(input) || typeof input !== 'object' || typeof input.date !== 'string' || typeof input.project !== 'string' || !input.project ||
+            (input.agent !== undefined && (typeof input.agent !== 'string' || !input.agent)) || (input.confirm !== undefined && typeof input.confirm !== 'string')) return json(400, { error: 'invalid payload' });
+          const result = await explainAnomaly(db, input.date, input.project, { agent: input.agent, confirm: input.confirm, runner: opts.aiRunner });
+          if (result.status === 'error') return json(({ INVALID_DATE: 400, UNKNOWN_ANOMALY: 404, AMBIGUOUS_ANOMALY: 409 } as Record<string, number>)[result.code] ?? (AI_ERROR_STATUS as Record<string, number>)[result.code] ?? 502, { error: result.message, code: result.code });
+          if (result.status === 'ok') return json(200, result);
+          const { agent, model, prompt, confirmationHash } = result.preview;
+          return json(200, { status: result.status, preview: { agent, model, prompt, confirmationHash } });
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/ai/diagnose') {
+        readBody(req, res, async (body) => {
+          const json = (status: number, value: unknown) => send(res, status, 'application/json', JSON.stringify(value));
+          let input: any;
+          try { input = JSON.parse(body || '{}'); } catch { return json(400, { error: 'invalid payload' }); }
+          const { sessionId, confirm } = input ?? {};
+          if (typeof sessionId !== 'string' || !sessionId || (confirm !== undefined && typeof confirm !== 'string')) {
+            return json(400, { error: 'sessionId (string) and optional confirm (string) are required' });
+          }
+          const r = await diagnoseSession(db, sessionId, { confirm, runner: opts.aiRunner });
+          if (r.status === 'error') return json(AI_ERROR_STATUS[r.code] ?? 502, { error: r.message, code: r.code });
+          if (r.status === 'ok') return json(200, r);
+          const { agent, model, prompt, confirmationHash } = r.preview; // exactly what is sent; no command, temp paths or hashes beyond consent
+          json(200, { status: 'confirmation_required', preview: { agent, model, prompt, confirmationHash } });
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/fix/prompt') {
+        readBody(req, res, async (body) => {
           try {
             const json = JSON.parse(body || '{}');
+            if (!json || typeof json !== 'object' || Array.isArray(json)) {
+              return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+            }
+            if (url.searchParams.get('ai') === '1') {
+              if (
+                (json.confirm !== undefined && typeof json.confirm !== 'string') ||
+                (json.preview !== undefined && typeof json.preview !== 'boolean')
+              ) {
+                return send(res, 400, 'application/json', JSON.stringify({ error: 'invalid payload' }));
+              }
+              const result = await tailorFixPrompt(db, json, {
+                confirm: json.confirm,
+                preview: json.preview,
+                runner: opts.aiRunner,
+              });
+              return send(res, 200, 'application/json', JSON.stringify(result));
+            }
             const prompt = generateFixPrompt(json);
             send(res, 200, 'application/json', JSON.stringify({ ok: true, prompt }));
           } catch (e: any) {
@@ -357,19 +460,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       }
 
       if (req.method === 'POST' && url.pathname === '/api/fix/run') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', async () => {
-          if (tooLarge) return;
+        readBody(req, res, async (body) => {
           try {
             const json = JSON.parse(body || '{}');
             const { agent, prompt, projectId, recommendationId, headless } = json;
@@ -402,19 +493,7 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
       }
 
       if (req.method === 'POST' && url.pathname === '/api/project/budget') {
-        let body = '';
-        let tooLarge = false;
-        req.on('data', (c) => {
-          if (tooLarge) return;
-          body += c;
-          if (body.length > 16384) {
-            tooLarge = true;
-            req.resume();
-            send(res, 413, 'application/json', JSON.stringify({ error: 'payload too large' }));
-          }
-        });
-        req.on('end', () => {
-          if (tooLarge) return;
+        readBody(req, res, (body) => {
           try {
             const json = JSON.parse(body || '{}');
             const { projectId, budgetTokens, budgetCost } = json;
@@ -469,6 +548,17 @@ export function startServer(db: DB, port: number, host = '127.0.0.1'): Promise<S
         }
       }
 
+      if (url.pathname === '/api/analytics/roi' && req.method === 'GET') {
+        const plan = url.searchParams.get('plan') ?? undefined;
+        const rawDays = url.searchParams.get('days');
+        const days = rawDays === null ? undefined : /^\d+$/.test(rawDays) ? Number(rawDays) : NaN;
+        try {
+          return send(res, 200, 'application/json', JSON.stringify(subscriptionComparison(db, { plan, days })));
+        } catch (e) {
+          if (e instanceof Error && /^(plan must|days must|Team plans)/.test(e.message)) return send(res, 400, 'application/json', JSON.stringify({ error: e.message }));
+          throw e;
+        }
+      }
       const handler = api[url.pathname];
       if (handler) return send(res, 200, 'application/json', JSON.stringify(handler(filterOf(url.searchParams), url.searchParams)));
       const file = normalize(join(WEB, url.pathname === '/' ? 'index.html' : url.pathname));

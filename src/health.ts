@@ -84,14 +84,15 @@ export function checkHealth(db: DB, ccusageRunner = runCcusageDaily): HealthRepo
   const sevenDaysAgo = Date.now() - 7 * 86400_000;
 
   if (!ccusageAvailable) {
-    let hasAntigravity = sources.some((s) => s.agent === 'antigravity') || events.some((e) => e.agent === 'antigravity');
+    const hasAntigravityEvents = events.some((e) => e.agent === 'antigravity' && e.events > 0);
+    let hasAntigravity = sources.some((s) => s.agent === 'antigravity');
     if (!hasAntigravity) {
       try {
         const count = (db.prepare("SELECT count(*) as c FROM sessions WHERE agent = 'antigravity'").get() as { c: number })?.c;
         if (count > 0) hasAntigravity = true;
       } catch {}
     }
-    if (hasAntigravity) {
+    if (hasAntigravity && !hasAntigravityEvents) {
       warnings.push(
         "ccusage binary not found in PATH: Antigravity sessions will show zero tokens until ccusage is installed (run 'npm i -g ccusage')."
       );

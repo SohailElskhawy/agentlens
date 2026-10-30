@@ -6,9 +6,20 @@ import { openDb, setSetting, upsertProject, upsertRecommendations } from '../src
 import { startServer } from '../src/server.ts';
 import { generateFixPrompt } from '../src/fix-prompts.ts';
 import type { Recommendation } from '../src/types.ts';
+import type { DiagnosisRunner } from '../src/ai/diagnose.ts';
+
+let runnerCalls = 0;
+let runnerResponse: { ok: boolean; text: string } = {
+  ok: true,
+  text: JSON.stringify({ prompt: 'Tailored AI fix prompt: add npm test:unit script to avoid Bash retry loops.' }),
+};
+const fakeRunner: DiagnosisRunner = async () => {
+  runnerCalls++;
+  return runnerResponse;
+};
 
 const db = openDb(':memory:');
-const server = await startServer(db, 0);
+const server = await startServer(db, 0, '127.0.0.1', { aiRunner: fakeRunner });
 const port = (server.address() as AddressInfo).port;
 
 after(() => {
@@ -180,4 +191,150 @@ test('POST /api/fix/run auto-accepts recommendation when run', async () => {
 
   delete process.env.AGENTLENS_FIX_BIN_OVERRIDE;
   setSetting(db, 'allow_agent_launch', 'false');
+});
+
+test('POST /api/fix/prompt?ai=1 falls back to generateFixPrompt when AI is disabled, unconfirmed, fails, returns invalid output, or hits daily cap', async () => {
+  const input = {
+    rule: 'retry_loop',
+    agent: 'claude',
+    evidence: { tool: 'Bash', count: 3 },
+  };
+  const expectedFallback = generateFixPrompt(input);
+
+  // 1. AI disabled
+  setSetting(db, 'ai_enabled', 'false');
+  setSetting(db, 'ai_agent', 'claude');
+  setSetting(db, 'ai_max_calls_per_day', '20');
+  runnerCalls = 0;
+
+  const disabledRes = await post('/api/fix/prompt?ai=1', input);
+  assert.equal(disabledRes.status, 200);
+  assert.equal(disabledRes.body.ok, true);
+  assert.equal(disabledRes.body.source, 'fallback');
+  assert.equal(disabledRes.body.aiError, 'AI_DISABLED');
+  assert.equal(disabledRes.body.prompt, expectedFallback);
+  assert.equal(runnerCalls, 0);
+
+  // 2. Unconfirmed when AI enabled
+  setSetting(db, 'ai_enabled', 'true');
+  const unconfirmedRes = await post('/api/fix/prompt?ai=1', input);
+  assert.equal(unconfirmedRes.status, 200);
+  assert.equal(unconfirmedRes.body.ok, true);
+  assert.equal(unconfirmedRes.body.source, 'fallback');
+  assert.equal(unconfirmedRes.body.aiStatus, 'confirmation_required');
+  assert.equal(unconfirmedRes.body.prompt, expectedFallback);
+  assert.match(unconfirmedRes.body.preview?.confirmationHash ?? '', /^[a-f0-9]{64}$/);
+  assert.equal(runnerCalls, 0);
+
+  const confirmHash = unconfirmedRes.body.preview.confirmationHash;
+
+  // 3. Runner fails
+  runnerResponse = { ok: false, text: 'CLI error' };
+  const failedRes = await post('/api/fix/prompt?ai=1', { ...input, confirm: confirmHash });
+  assert.equal(failedRes.status, 200);
+  assert.equal(failedRes.body.ok, true);
+  assert.equal(failedRes.body.source, 'fallback');
+  assert.equal(failedRes.body.aiError, 'AI_RUN_FAILED');
+  assert.equal(failedRes.body.prompt, expectedFallback);
+  assert.equal(runnerCalls, 1);
+
+  // 4. Invalid output
+  runnerResponse = { ok: true, text: 'not valid json output' };
+  const invalidRes = await post('/api/fix/prompt?ai=1', { ...input, confirm: confirmHash });
+  assert.equal(invalidRes.status, 200);
+  assert.equal(invalidRes.body.ok, true);
+  assert.equal(invalidRes.body.source, 'fallback');
+  assert.equal(invalidRes.body.aiError, 'AI_INVALID_OUTPUT');
+  assert.equal(invalidRes.body.prompt, expectedFallback);
+  assert.equal(runnerCalls, 2);
+
+  // 5. Daily cap reached
+  setSetting(db, 'ai_max_calls_per_day', '0');
+  const capRes = await post('/api/fix/prompt?ai=1', { ...input, confirm: confirmHash });
+  assert.equal(capRes.status, 200);
+  assert.equal(capRes.body.ok, true);
+  assert.equal(capRes.body.source, 'fallback');
+  assert.equal(capRes.body.aiError, 'AI_DAILY_LIMIT');
+  assert.equal(capRes.body.prompt, expectedFallback);
+  assert.equal(runnerCalls, 2);
+
+  setSetting(db, 'ai_max_calls_per_day', '20');
+  setSetting(db, 'ai_enabled', 'false');
+});
+
+test('POST /api/fix/prompt?ai=1 preview excludes raw prompt text and unwhitelisted fields', async () => {
+  setSetting(db, 'ai_enabled', 'false');
+  setSetting(db, 'ai_agent', 'claude');
+  runnerCalls = 0;
+
+  const res = await post('/api/fix/prompt?ai=1', {
+    rule: 'retry_loop',
+    evidence: {
+      tool: 'Bash',
+      count: 4,
+      rawPrompt: 'SECRET_USER_PROMPT_TEXT',
+      transcript: 'PRIVATE_CODE_BLOCK',
+    },
+    prompt: 'DO_NOT_LEAK',
+    preview: true,
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.source, 'fallback');
+  assert.equal(res.body.aiStatus, 'confirmation_required');
+  assert.equal(typeof res.body.preview?.prompt, 'string');
+  assert.ok(res.body.preview.prompt.includes('Bash'));
+  assert.ok(res.body.preview.prompt.includes('4'));
+  assert.ok(!res.body.preview.prompt.includes('SECRET_USER_PROMPT_TEXT'));
+  assert.ok(!res.body.preview.prompt.includes('PRIVATE_CODE_BLOCK'));
+  assert.ok(!res.body.preview.prompt.includes('DO_NOT_LEAK'));
+  assert.equal(runnerCalls, 0);
+});
+
+test('POST /api/fix/prompt?ai=1 executes confirmed AI run and reuses cache on subsequent calls', async () => {
+  setSetting(db, 'ai_enabled', 'true');
+  setSetting(db, 'ai_agent', 'claude');
+  setSetting(db, 'ai_max_calls_per_day', '20');
+  runnerCalls = 0;
+  const tailored = 'Tailored AI fix prompt: add npm test:unit script to avoid Bash retry loops.';
+  runnerResponse = { ok: true, text: JSON.stringify({ prompt: tailored }) };
+
+  const input = {
+    rule: 'retry_loop',
+    agent: 'claude',
+    evidence: { tool: 'Bash', count: 5 },
+  };
+
+  // First call without confirm returns confirmation_required
+  const step1 = await post('/api/fix/prompt?ai=1', input);
+  assert.equal(step1.status, 200);
+  assert.equal(step1.body.ok, true);
+  assert.equal(step1.body.source, 'fallback');
+  assert.equal(step1.body.aiStatus, 'confirmation_required');
+  assert.equal(step1.body.prompt, generateFixPrompt(input));
+  assert.equal(runnerCalls, 0);
+
+  const confirmHash = step1.body.preview.confirmationHash;
+  assert.match(confirmHash, /^[a-f0-9]{64}$/);
+
+  // Second call with confirm invokes runner once and returns tailored prompt
+  const step2 = await post('/api/fix/prompt?ai=1', { ...input, confirm: confirmHash });
+  assert.equal(step2.status, 200);
+  assert.equal(step2.body.ok, true);
+  assert.equal(step2.body.source, 'ai');
+  assert.equal(step2.body.cached, false);
+  assert.equal(step2.body.prompt, tailored);
+  assert.equal(runnerCalls, 1);
+
+  // Third call without confirm returns cached tailored prompt without invoking runner again
+  const step3 = await post('/api/fix/prompt?ai=1', input);
+  assert.equal(step3.status, 200);
+  assert.equal(step3.body.ok, true);
+  assert.equal(step3.body.source, 'ai');
+  assert.equal(step3.body.cached, true);
+  assert.equal(step3.body.prompt, tailored);
+  assert.equal(runnerCalls, 1);
+
+  setSetting(db, 'ai_enabled', 'false');
 });

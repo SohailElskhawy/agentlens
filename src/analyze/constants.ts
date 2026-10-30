@@ -23,3 +23,19 @@ export const CONFIDENCE_WEIGHTS = {
   medium: 0.6,
   low: 0.3,
 } as const;
+
+// Weekly estimate calibration (implemented in src/analyze/calibration.ts):
+// Every finding's est_tokens_week is capped by the actual trailing-7-day tokens of its scope.
+// - Window: [now - CALIBRATION_WINDOW_MS, now], both endpoints inclusive (elapsed time, not calendar buckets).
+// - Token components: input + output + cache_read + cache_write summed once per event
+//   (cache_write_1h is a subset of cache_write and reasoning a subset of output; never added again).
+// - Scope precedence: the finding's session's weekly tokens (sessionId non-null), else its project's
+//   (projectId non-null), else the global total. A scope with no events in the window has budget zero;
+//   budgets never fall back to a broader scope.
+// - Cap formula: est_tokens_week = min(max(0, raw_estimate), scope_budget), applied per finding
+//   independently. Overlapping findings may still sum above actual usage and are not realized savings.
+// - abandoned_session keeps its lifetime identification, thresholds, evidence and confidence; its weekly
+//   estimate is instead its session's trailing-week tokens.
+// - Refresh happens on detector or audit runs, not continuously. Stale values only decrease until
+//   their producer runs again; previously exported reports are not rewritten.
+export const CALIBRATION_WINDOW_MS = 7 * 86_400_000;

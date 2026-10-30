@@ -1,13 +1,16 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { DB } from '../db.ts';
-import { getFindings, upsertAuditItems, upsertFindings, upsertRecommendations } from '../db.ts';
-import { generateRecommendations } from '../recommend.ts';
+import { tx, upsertAuditItems, upsertFindings } from '../db.ts';
+import { calibrateFindings, capStoredFindings, loadScopeBudgets } from '../analyze/calibration.ts';
+import { refreshRecommendations } from '../recommend.ts';
+import { isTempProject } from '../temp-project.ts';
 import type { AuditItem, Finding } from '../types.ts';
 import { analyzeOverhead } from './overhead.ts';
 import { analyzeUsage } from './usage.ts';
 import { detectDuplicates } from './duplicates.ts';
 import { detectConflicts } from './conflicts.ts';
+import { detectDrift } from './drift.ts';
 import { trimInstructions, type InstructionTrimmerResult } from './trimmer.ts';
 import { scanInstructions } from './scanners/instruction.ts';
 import { scanMcp } from './scanners/mcp.ts';
@@ -29,6 +32,8 @@ export function runAudit(
       name: string;
     }[];
   } catch {}
+
+  projects = projects.filter((p) => !isTempProject(p.root));
 
   // 1. Run all scanners
   const instructions = scanInstructions(userHome, projects);
@@ -53,6 +58,7 @@ export function runAudit(
     ...usageResult.findings,
     ...dupResult.findings,
     ...conflictResult.findings,
+    ...detectDrift(instructions, projects),
   ];
 
   // 4. Assemble AuditItems with unique IDs per source path
@@ -80,21 +86,30 @@ export function runAudit(
   });
 
   // 5. Persist to DB and prune obsolete items
+  const budgets = loadScopeBudgets(db, now);
+  calibrateFindings(findings, budgets);
   if (auditItems.length > 0) {
     upsertAuditItems(db, auditItems);
     db.prepare('DELETE FROM audit_items WHERE updated_at < ?').run(now);
   }
-  if (findings.length > 0) {
-    upsertFindings(db, findings);
+  tx(db, () => {
+    if (findings.length > 0) upsertFindings(db, findings);
     const auditRules = ['instruction_bloat', 'unused_config', 'duplicate_config', 'config_conflict'];
     db.prepare(`DELETE FROM findings WHERE rule IN ('${auditRules.join("','")}') AND last_seen < ?`).run(now);
-  }
+    const currentDrift = new Set(findings.filter(f => f.rule === 'instruction_drift').map(f => f.id));
+    const storedDrift = db.prepare("SELECT id, project_id AS projectId FROM findings WHERE rule = 'instruction_drift'").all() as { id: string; projectId: number | null }[];
+    for (const row of storedDrift) {
+      if (!currentDrift.has(row.id)) {
+        db.prepare('DELETE FROM findings WHERE id = ?').run(row.id);
+        db.prepare("DELETE FROM recommendations WHERE id = ? AND status = 'open' AND accepted_at IS NULL").run(`rec:instruction_drift:${row.projectId ?? 'global'}:${row.id}`);
+      }
+    }
+    capStoredFindings(db, budgets);
+  });
 
   // Update recommendations with newly discovered findings
   try {
-    const allFindings = getFindings(db);
-    const recs = generateRecommendations(allFindings);
-    upsertRecommendations(db, recs);
+    refreshRecommendations(db);
   } catch {}
 
   return { items: auditItems, findings, trimmings };
